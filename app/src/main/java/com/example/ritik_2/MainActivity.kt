@@ -20,6 +20,7 @@ import com.example.ritik_2.modules.MainViewModel
 import com.example.ritik_2.modules.UserProfile
 import com.example.ritik_2.ui.theme.ui.theme.ITConnectTheme
 import com.example.ritik_2.ui.theme.MainScreen
+import com.example.ritik_2.ui.theme.ui.theme.BrowserActivity
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -100,7 +101,7 @@ class MainActivity : ComponentActivity() {
         when (cardId) {
             1 -> startActivity(Intent(this, RegisterComplain::class.java))
             2 -> startActivity(Intent(this, ComplaintViewActivity::class.java))
-            //3 -> startActivity(Intent(this, ViewComplaintsScreen() { }::class.java))
+            3 -> startActivity(Intent(this, BrowserActivity::class.java))
             //4 -> startActivity(Intent(this, HelpSupportActivity::class.java))
             //5 -> startActivity(Intent(this, SMBActivity::class.java))
             6 -> startActivity(Intent(this, SMBActivity::class.java))

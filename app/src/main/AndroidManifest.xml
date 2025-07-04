@@ -61,6 +61,10 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
+        <activity android:name=".ui.theme.ui.theme.BrowserActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2"/>
+
         <activity
             android:name=".LoginActivity"
             android:exported="true"
