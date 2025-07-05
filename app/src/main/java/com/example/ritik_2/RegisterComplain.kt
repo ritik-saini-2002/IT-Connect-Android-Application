@@ -128,9 +128,7 @@ class RegisterComplain : ComponentActivity() {
     }
 
     private fun saveComplaint(complaintData: ComplaintData) {
-        val user = auth.currentUser
-
-        if (user == null) {
+        val user = auth.currentUser ?: run {
             Toast.makeText(this, "User not logged in!", Toast.LENGTH_SHORT).show()
             return
         }
@@ -142,10 +140,7 @@ class RegisterComplain : ComponentActivity() {
 
         lifecycleScope.launch {
             try {
-                // Create a unique ID for potential file attachment
                 val complaintId = UUID.randomUUID().toString()
-
-                // Upload attachment if exists
                 var attachmentUrl: String? = null
                 if (complaintData.hasAttachment && selectedFileUri != null) {
                     val storageRef = storage.reference
@@ -153,16 +148,12 @@ class RegisterComplain : ComponentActivity() {
                         .child(user.uid)
                         .child("attachments")
                         .child(complaintId)
-
                     attachmentUrl = try {
                         storageRef.putFile(selectedFileUri!!).await()
                         storageRef.downloadUrl.await().toString()
-                    } catch (e: Exception) {
-                        null
-                    }
+                    } catch (e: Exception) { null }
                 }
 
-                // Create complaint data map
                 val data = hashMapOf(
                     "title" to complaintData.title,
                     "description" to complaintData.description,
@@ -174,38 +165,33 @@ class RegisterComplain : ComponentActivity() {
                     "userEmail" to (user.email ?: "Anonymous"),
                     "contactInfo" to complaintData.contactInfo,
                     "hasAttachment" to complaintData.hasAttachment,
-                    "attachmentUrl" to attachmentUrl
+                    "attachmentUrl" to attachmentUrl,
+                    "isGlobal" to complaintData.isGlobal
                 )
 
-                // Save to Firestore
-                firestore.collection("users")
-                    .document(user.uid)
-                    .collection("complaints")
-                    .document(complaintId)
-                    .set(data)
-                    .await()
+                if (complaintData.isGlobal) {
+                    // Save only to global collection
+                    firestore.collection("all_complaints")
+                        .document(complaintId)
+                        .set(data)
+                        .await()
+                } else {
+                    // Save only to user's personal collection
+                    firestore.collection("users")
+                        .document(user.uid)
+                        .collection("complaints")
+                        .document(complaintId)
+                        .set(data)
+                        .await()
+                }
 
-                // Also save to a global collection for admin access
-                firestore.collection("all_complaints")
-                    .document(complaintId)
-                    .set(data)
-                    .await()
-
-                // Reset selected file
                 selectedFileUri = null
-
-                // Show success message
                 runOnUiThread {
                     Toast.makeText(this@RegisterComplain, "Complaint submitted successfully!", Toast.LENGTH_SHORT).show()
                 }
-
             } catch (e: Exception) {
                 runOnUiThread {
-                    Toast.makeText(
-                        this@RegisterComplain,
-                        "Error saving complaint: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    Toast.makeText(this@RegisterComplain, "Error saving complaint: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -311,11 +297,21 @@ class RegisterComplain : ComponentActivity() {
 }
 
 // Data classes
-data class ComplaintData(
+/*data class ComplaintData(
     val title: String,
     val description: String,
     val category: String,
     val urgency: String,
     val contactInfo: String = "",
     val hasAttachment: Boolean = false
+)*/
+
+data class ComplaintData(
+    val title: String,
+    val description: String,
+    val category: String,
+    val urgency: String,
+    val contactInfo: String = "",
+    val hasAttachment: Boolean = false,
+    val isGlobal: Boolean = false // New field
 )

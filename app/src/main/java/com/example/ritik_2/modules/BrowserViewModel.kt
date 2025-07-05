@@ -89,18 +89,17 @@ class BrowserViewModel(private val repository: BrowserRepository = BrowserReposi
     val savedPasswords = repository.savedPasswords
     val bookmarks = repository.bookmarks
 
-    fun navigateToUrl(url: String) {
-        val formattedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            if (url.contains(".") && !url.contains(" ")) {
-                "http://192.168.7.247/nagios/"
-            } else {
-                "https://www.google.com/search?q=${url.replace(" ", "+")}"
-            }
-        } else {
-            url
+    fun navigateToUrlMobile(input: String) {
+        val trimmed = input.trim()
+        val isLocalIp = Regex("""^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)""")
+        val url = when {
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            isLocalIp.containsMatchIn(trimmed) -> "http://$trimmed"
+            trimmed.contains(".") && !trimmed.contains(" ") -> "https://$trimmed"
+            else -> "https://www.google.com/search?q=${trimmed.replace(" ", "+")}"
         }
-        _currentUrl.value = formattedUrl
-        _isLoading.value = true
+        currentUrl.value = url
+        isLoading.value = true
     }
 
     fun onPageFinished(title: String?) {
@@ -161,6 +160,19 @@ class BrowserViewModel(private val repository: BrowserRepository = BrowserReposi
 
     fun getPasswordsForCurrentSite(): List<SavedPassword> {
         return repository.getPasswordsForWebsite(extractDomain(_currentUrl.value))
+    }
+
+    fun BrowserViewModel.navigateToUrlMobile(input: String) {
+        val trimmed = input.trim()
+        val isLocalIp = Regex("""^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)""")
+        val url = when {
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            isLocalIp.containsMatchIn(trimmed) -> "http://$trimmed"
+            trimmed.contains(".") && !trimmed.contains(" ") -> "https://$trimmed"
+            else -> "https://www.google.com/search?q=${trimmed.replace(" ", "+")}"
+        }
+        currentUrl.value = url
+        isLoading.value = true
     }
 
     private fun extractDomain(url: String): String {

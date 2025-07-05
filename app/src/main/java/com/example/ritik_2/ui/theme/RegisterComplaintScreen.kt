@@ -53,6 +53,7 @@ fun RegisterComplaintScreen(
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showSuccessAnimation by remember { mutableStateOf(false) }
     var expandedSection by remember { mutableStateOf(0) } // 0: none, 1: categories, 2: urgency, 3: more
+    var isGlobal by remember { mutableStateOf(false) }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -169,6 +170,54 @@ fun RegisterComplaintScreen(
                                 text = "We value your input and are committed to addressing your concerns promptly.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = lightTextColor
+                            )
+                        }
+                    }
+
+                    // ...inside your Column, after the Additional Information Section, add:
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Filled.Public,
+                                    contentDescription = null,
+                                    tint = primaryColor
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "Send to All Users (Global)",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = if (isGlobal) "This complaint will be visible to all users." else "Only you can view this complaint.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = lightTextColor
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = isGlobal,
+                                onCheckedChange = { isGlobal = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = primaryColor,
+                                    uncheckedThumbColor = lightTextColor
+                                )
                             )
                         }
                     }
@@ -736,13 +785,15 @@ fun RegisterComplaintScreen(
                         showConfirmDialog = false
 
                         // Create complaint data object
+                        // In the confirmButton's onClick, update ComplaintData creation:
                         val complaintData = ComplaintData(
                             title = title,
                             description = description,
                             category = selectedCategory,
                             urgency = selectedUrgency,
                             contactInfo = contactInfo,
-                            hasAttachment = attachmentAdded
+                            hasAttachment = attachmentAdded,
+                            isGlobal = isGlobal // Pass the new field
                         )
 
                         // Call the save function

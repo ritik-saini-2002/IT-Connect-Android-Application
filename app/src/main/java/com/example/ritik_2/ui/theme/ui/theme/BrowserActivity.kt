@@ -5,26 +5,23 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.*
-import androidx.compose.foundation.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -59,25 +56,17 @@ fun BrowserApp() {
             .fillMaxSize()
             .background(
                 brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF667eea),
-                        Color(0xFF764ba2)
-                    )
+                    colors = listOf(Color(0xFF667eea), Color(0xFF764ba2))
                 )
             )
     ) {
-        // Top App Bar with gradient
+        // Top App Bar
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = Color.White.copy(alpha = 0.95f)
-            )
+            shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.95f))
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                // Navigation Row
+            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -88,69 +77,37 @@ fun BrowserApp() {
                             onClick = { webView?.goBack() },
                             enabled = viewModel.canGoBack.value
                         ) {
-                            Icon(
-                                Icons.Default.ArrowBack,
-                                contentDescription = "Back",
-                                tint = if (viewModel.canGoBack.value) Color(0xFF667eea) else Color.Gray
-                            )
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = if (viewModel.canGoBack.value) Color(0xFF667eea) else Color.Gray)
                         }
                         IconButton(
                             onClick = { webView?.goForward() },
                             enabled = viewModel.canGoForward.value
                         ) {
-                            Icon(
-                                Icons.Default.ArrowForward,
-                                contentDescription = "Forward",
-                                tint = if (viewModel.canGoForward.value) Color(0xFF667eea) else Color.Gray
-                            )
+                            Icon(Icons.Default.ArrowForward, contentDescription = "Forward", tint = if (viewModel.canGoForward.value) Color(0xFF667eea) else Color.Gray)
                         }
-                        IconButton(
-                            onClick = { webView?.reload() }
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Reload",
-                                tint = Color(0xFF667eea)
-                            )
+                        IconButton(onClick = { webView?.reload() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = Color(0xFF667eea))
                         }
                     }
-
                     Row {
-                        IconButton(
-                            onClick = { viewModel.showBookmarkDialog() }
-                        ) {
-                            Icon(
-                                Icons.Default.Star,
-                                contentDescription = "Bookmark",
-                                tint = Color(0xFFFFD700)
-                            )
+                        IconButton(onClick = { viewModel.showBookmarkDialog() }) {
+                            Icon(Icons.Default.Star, contentDescription = "Bookmark", tint = Color(0xFFFFD700))
                         }
-                        IconButton(
-                            onClick = { viewModel.showPasswordManager() }
-                        ) {
-                            Icon(
-                                Icons.Default.Lock,
-                                contentDescription = "Password Manager",
-                                tint = Color(0xFF667eea)
-                            )
+                        IconButton(onClick = { viewModel.showPasswordManager() }) {
+                            Icon(Icons.Default.Lock, contentDescription = "Password Manager", tint = Color(0xFF667eea))
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // URL Bar
+                Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
                     value = urlText,
                     onValueChange = { urlText = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
                     placeholder = { Text("Enter URL or search...") },
                     leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = Color(0xFF667eea)
-                        )
+                        Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF667eea))
                     },
                     trailingIcon = {
                         if (viewModel.isLoading.value) {
@@ -160,18 +117,14 @@ fun BrowserApp() {
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            IconButton(
-                                onClick = { viewModel.navigateToUrl(urlText) }
-                            ) {
-                                Icon(
-                                    Icons.Default.Send,
-                                    contentDescription = "Go",
-                                    tint = Color(0xFF667eea)
-                                )
+                            IconButton(onClick = {
+                                viewModel.navigateToUrlMobile(urlText)
+                            }) {
+                                Icon(Icons.Default.Send, contentDescription = "Go", tint = Color(0xFF667eea))
                             }
                         }
                     },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(10.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFF667eea),
                         unfocusedBorderColor = Color.Gray.copy(alpha = 0.5f)
@@ -190,7 +143,6 @@ fun BrowserApp() {
                             super.onPageStarted(view, url, favicon)
                             viewModel.onPageStarted()
                         }
-
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             viewModel.onPageFinished(view?.title)
@@ -207,11 +159,11 @@ fun BrowserApp() {
             },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 8.dp)
+                .padding(top = 4.dp)
         )
     }
 
-    // Password Save Dialog
+    // Dialogs
     if (viewModel.showPasswordDialog.value) {
         PasswordSaveDialog(
             onDismiss = { viewModel.hidePasswordDialog() },
@@ -220,8 +172,6 @@ fun BrowserApp() {
             }
         )
     }
-
-    // Bookmark Dialog
     if (viewModel.showBookmarkDialog.value) {
         BookmarkDialog(
             currentUrl = viewModel.currentUrl.value,
@@ -232,8 +182,6 @@ fun BrowserApp() {
             }
         )
     }
-
-    // Password Manager Sheet
     if (viewModel.showPasswordManager.value) {
         PasswordManagerSheet(
             viewModel = viewModel,
@@ -241,6 +189,8 @@ fun BrowserApp() {
         )
     }
 }
+
+// --- UI Dialogs (unchanged except for scroll/spacing tweaks) ---
 
 @Composable
 fun PasswordSaveDialog(
@@ -255,60 +205,47 @@ fun PasswordSaveDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
+                .padding(8.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp)
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = "Save Password",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF667eea)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
+                Text("Save Password", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFF667eea))
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = website,
                     onValueChange = { website = it },
                     label = { Text("Website") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
+                Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
                     label = { Text("Username/Email") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
+                Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("Password") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = PasswordVisualTransformation(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
+                Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.Gray)
-                    }
+                    TextButton(onClick = onDismiss) { Text("Cancel", color = Color.Gray) }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
@@ -316,13 +253,9 @@ fun PasswordSaveDialog(
                                 onSave(website, username, password)
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF667eea)
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Save")
-                    }
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF667eea)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) { Text("Save") }
                 }
             }
         }
@@ -343,49 +276,38 @@ fun BookmarkDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
+                .padding(8.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp)
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = "Add Bookmark",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFFFD700)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
+                Text("Add Bookmark", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFFFFD700))
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Title") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
+                Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
                     label = { Text("URL") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
+                Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.Gray)
-                    }
+                    TextButton(onClick = onDismiss) { Text("Cancel", color = Color.Gray) }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
@@ -393,13 +315,9 @@ fun BookmarkDialog(
                                 onSave(title, url)
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFFD700)
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Save", color = Color.Black)
-                    }
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) { Text("Save", color = Color.Black) }
                 }
             }
         }
@@ -418,31 +336,24 @@ fun PasswordManagerSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.8f)
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
+                .padding(8.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(
-                modifier = Modifier.padding(24.dp)
+                modifier = Modifier
+                    .padding(12.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Password Manager",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF667eea)
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
-                    }
+                    Text("Password Manager", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFF667eea))
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -452,14 +363,10 @@ fun PasswordManagerSheet(
                     Switch(
                         checked = showPasswords,
                         onCheckedChange = { showPasswords = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color(0xFF667eea)
-                        )
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF667eea))
                     )
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
+                Spacer(modifier = Modifier.height(8.dp))
                 LazyColumn {
                     items(viewModel.savedPasswords) { password ->
                         PasswordItem(
@@ -469,16 +376,12 @@ fun PasswordManagerSheet(
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
+                Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = { viewModel.showPasswordDialog() },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF667eea)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF667eea)),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Add")
                     Spacer(modifier = Modifier.width(8.dp))
@@ -498,50 +401,23 @@ fun PasswordItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFF8F9FA)
-        ),
-        shape = RoundedCornerShape(12.dp)
+            .padding(vertical = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
+        shape = RoundedCornerShape(10.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
+        Column(modifier = Modifier.padding(10.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = password.website,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF667eea)
-                )
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = Color.Red,
-                        modifier = Modifier.size(18.dp)
-                    )
+                Text(password.website, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF667eea))
+                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red, modifier = Modifier.size(18.dp))
                 }
             }
-
-            Text(
-                text = "Username: ${password.username}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray
-            )
-
-            Text(
-                text = "Password: ${if (showPassword) password.password else "•".repeat(password.password.length)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray
-            )
+            Text("Username: ${password.username}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            Text("Password: ${if (showPassword) password.password else "•".repeat(password.password.length)}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         }
     }
 }
