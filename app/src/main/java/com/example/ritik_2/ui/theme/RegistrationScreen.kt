@@ -49,7 +49,7 @@ import kotlin.times
 
 @Composable
 fun RegistrationScreen(
-    onRegisterClick: (String, String, String, String, String, String, Int, Int, Int, Int, Uri?) -> Unit,
+    onRegisterClick: (String, String, String, String, String, String, Int, Int, Int, Int, Uri?, String?) -> Unit,
     onLoginClick: () -> Unit
 ) {
     // Form states
@@ -74,6 +74,10 @@ fun RegistrationScreen(
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val scrollState = rememberScrollState()
+
+    var selectedRole by remember { mutableStateOf("employee") }
+    val roleOptions = listOf("employee", "team_leader", "manager", "admin")
+
 
     // Animation states
     val screenTransition = remember {
@@ -128,6 +132,9 @@ fun RegistrationScreen(
 
                 // Main registration form
                 EnhancedRegistrationForm(
+                    selectedRole = selectedRole,
+                    onRoleChange = { selectedRole = it },
+                    roleOptions = roleOptions,
                     email = email,
                     onEmailChange = { email = it },
                     password = password,
@@ -168,8 +175,10 @@ fun RegistrationScreen(
                                 completedProjects.toIntOrNull() ?: 0,
                                 activeProjects.toIntOrNull() ?: 0,
                                 complaints.toIntOrNull() ?: 0,
-                                imageUri
+                                imageUri,
+                                selectedRole
                             )
+
                         } else {
                             showErrors = true
                         }
@@ -236,6 +245,9 @@ fun EnhancedRegistrationHeader() {
 
 @Composable
 fun EnhancedRegistrationForm(
+    selectedRole: String,
+    onRoleChange: (String) -> Unit,
+    roleOptions: List<String>,
     email: String,
     onEmailChange: (String) -> Unit,
     password: String,
@@ -322,6 +334,51 @@ fun EnhancedRegistrationForm(
 
                 // Personal Information Section
                 EnhancedSectionHeader("Personal Information", 200)
+
+                @Composable
+                fun DropdownMenuBox(
+                    options: List<String>,
+                    selectedOption: String,
+                    onOptionSelected: (String) -> Unit,
+                    label: String = "Select Role"
+                ) {
+                    var expanded by remember { mutableStateOf(false) }
+
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                        Text(
+                            text = label,
+                            color = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.1f))
+                                .clickable { expanded = true }
+                                .padding(16.dp)
+                        ) {
+                            Text(
+                                text = selectedOption.replaceFirstChar { it.uppercase() },
+                                color = Color.White
+                            )
+                        }
+
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            options.forEach { role ->
+                                DropdownMenuItem(
+                                    text = { Text(role.replaceFirstChar { it.uppercase() }) },
+                                    onClick = {
+                                        onOptionSelected(role)
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
 
                 EnhancedTextField(
                     value = name,

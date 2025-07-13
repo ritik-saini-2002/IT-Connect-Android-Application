@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import com.example.ritik_2.modules.MainViewModel
 import com.example.ritik_2.modules.UserProfile
+import com.example.ritik_2.ui.theme.AdminPanelScreen
 import com.example.ritik_2.ui.theme.ui.theme.ITConnectTheme
 import com.example.ritik_2.ui.theme.MainScreen
 import com.example.ritik_2.ui.theme.ui.theme.BrowserActivity
@@ -106,7 +107,7 @@ class MainActivity : ComponentActivity() {
             //5 -> startActivity(Intent(this, SMBActivity::class.java))
             6 -> startActivity(Intent(this, SMBActivity::class.java))
             //7 -> startActivity(Intent(this, ChatActivity::class.java))
-            //8 -> startActivity(Intent(this, TechNewsActivity::class.java))
+            8 -> startActivity(Intent(this, AdminPanelActivity::class.java))
         }
     }
 

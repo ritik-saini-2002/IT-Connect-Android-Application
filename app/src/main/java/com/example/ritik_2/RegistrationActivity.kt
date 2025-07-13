@@ -25,10 +25,12 @@ class RegistrationActivity : ComponentActivity() {
         setContent {
             Ritik_2Theme {
                 RegistrationScreen(
-                    onRegisterClick = { email, password, name, phoneNumber, designation, companyName, experience, completedProjects, activeProjects, complaints, imageUri ->
+                    onRegisterClick = { email, password, name, phoneNumber, designation, companyName,
+                                        experience, completedProjects, activeProjects, complaints, imageUri, role ->
+
                         performRegistration(
                             email, password, name, phoneNumber, designation, companyName,
-                            experience, completedProjects, activeProjects, complaints, imageUri
+                            experience, completedProjects, activeProjects, complaints, imageUri, role ?: "employee"
                         )
                     },
                     onLoginClick = { navigateToLoginActivity() }
@@ -48,7 +50,8 @@ class RegistrationActivity : ComponentActivity() {
         completedProjects: Int,
         activeProjects: Int,
         complaints: Int,
-        imageUri: Uri?
+        imageUri: Uri?,
+        role: String
     ) {
         firebaseAuth.createUserWithEmailAndPassword(email, password)
             .addOnCompleteListener(this) { task ->
@@ -58,12 +61,12 @@ class RegistrationActivity : ComponentActivity() {
                     if (imageUri != null) {
                         uploadImageToFirebaseStorage(
                             userId, imageUri, name, phoneNumber, designation, companyName,
-                            experience, completedProjects, activeProjects, complaints, email
+                            experience, completedProjects, activeProjects, complaints, email, role
                         )
                     } else {
                         saveUserDataToFirestore(
                             userId, "", name, phoneNumber, designation, companyName,
-                            experience, completedProjects, activeProjects, complaints, email
+                            experience, completedProjects, activeProjects, complaints, email, role
                         )
                     }
                 } else {
@@ -76,7 +79,7 @@ class RegistrationActivity : ComponentActivity() {
 
     private fun uploadImageToFirebaseStorage(
         userId: String,
-        imageUri: Uri?,
+        imageUri: Uri,
         name: String,
         phoneNumber: String,
         designation: String,
@@ -85,16 +88,9 @@ class RegistrationActivity : ComponentActivity() {
         completedProjects: Int,
         activeProjects: Int,
         complaints: Int,
-        email: String
+        email: String,
+        role: String
     ) {
-        if (imageUri == null) {
-            saveUserDataToFirestore(
-                userId, "", name, phoneNumber, designation, companyName,
-                experience, completedProjects, activeProjects, complaints, email
-            )
-            return
-        }
-
         val storageRef = storage.reference.child("users/$userId/profile.jpg")
 
         storageRef.putFile(imageUri)
@@ -103,7 +99,7 @@ class RegistrationActivity : ComponentActivity() {
                     updateUserProfile(uri)
                     saveUserDataToFirestore(
                         userId, uri.toString(), name, phoneNumber, designation, companyName,
-                        experience, completedProjects, activeProjects, complaints, email
+                        experience, completedProjects, activeProjects, complaints, email, role
                     )
                 }
             }
@@ -129,7 +125,8 @@ class RegistrationActivity : ComponentActivity() {
         completedProjects: Int,
         activeProjects: Int,
         complaints: Int,
-        email: String
+        email: String,
+        role: String
     ) {
         val userData = mapOf(
             "userId" to userId,
@@ -142,7 +139,8 @@ class RegistrationActivity : ComponentActivity() {
             "completedProjects" to completedProjects,
             "activeProjects" to activeProjects,
             "complaints" to complaints,
-            "email" to email
+            "email" to email,
+            "role" to role
         )
 
         firestore.collection("users").document(userId)

@@ -55,6 +55,17 @@ class ComplaintViewActivity : ComponentActivity() {
     private val _showRefreshAnimation = MutableStateFlow(false)
     val showRefreshAnimation: StateFlow<Boolean> = _showRefreshAnimation
 
+    // At the top of ComplaintViewActivity
+    private val _viewMode = MutableStateFlow(ViewMode.PERSONAL)
+    val viewMode: StateFlow<ViewMode> = _viewMode
+
+    enum class ViewMode { PERSONAL, GLOBAL }
+
+    fun updateViewMode(mode: ViewMode) {
+        _viewMode.value = mode
+        loadInitialComplaints()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -193,9 +204,13 @@ class ComplaintViewActivity : ComponentActivity() {
 
 // CORRECTED CODE:
 // Build the query step by step
-                var queryBase = firestore.collection("users")
-                    .document(userId)
-                    .collection("complaints")
+                // Inside loadComplaints
+                val queryBase = when (_viewMode.value) {
+                    ViewMode.PERSONAL -> firestore.collection("users")
+                        .document(userId)
+                        .collection("complaints")
+                    ViewMode.GLOBAL -> firestore.collection("all_complaints")
+                }
 
 // Apply sorting
                 val querySorted = when (_sortOption.value) {
