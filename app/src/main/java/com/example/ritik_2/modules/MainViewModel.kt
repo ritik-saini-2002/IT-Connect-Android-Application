@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 
 class MainViewModel : ViewModel() {
 
-    val userProfileState = MutableLiveData<UserProfile?>()
+    val userProfileState = MutableLiveData<UserProfiledata?>()
     val isLoadingState = MutableLiveData<Boolean>(true)
     val errorMessageState = MutableLiveData<String?>(null)
 
@@ -25,10 +25,11 @@ class MainViewModel : ViewModel() {
                 val profile = withContext(Dispatchers.IO) {
                     val document = firestore.collection("users").document(userId).get().await()
                     if (document.exists()) {
-                        UserProfile(
+                        UserProfiledata(
                             id = userId,
                             name = document.getString("name") ?: "Unknown User",
                             email = document.getString("email") ?: "",
+                            //role = document.getString("role"),
                             imageUrl = document.getString("imageUrl")?.let { Uri.parse(it) },
                             designation = document.getString("designation") ?: "IT Professional",
                             skills = document.get("skills") as? List<String> ?: listOf(),
@@ -41,10 +42,11 @@ class MainViewModel : ViewModel() {
                     }
                 }
 
-                userProfileState.value = profile ?: UserProfile(
+                userProfileState.value = profile ?: UserProfiledata(
                     id = userId,
                     name = "Unknown User",
                     email = "",
+                    //role = "",
                     imageUrl = null
                 )
             } catch (e: Exception) {
@@ -63,3 +65,17 @@ class MainViewModel : ViewModel() {
         errorMessageState.value = message
     }
 }
+
+
+data class UserProfiledata(
+    val id: String,
+    val name: String,
+    val email: String,
+    //val role: String,
+    val imageUrl: Uri? = null,
+    val designation: String = "IT Professional",
+    val skills: List<String> = emptyList(),
+    val experience: Int = 0,
+    val completedProjects: Int = 0,
+    val activeProjects: Int = 0
+)

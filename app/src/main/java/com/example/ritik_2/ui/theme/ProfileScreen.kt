@@ -86,7 +86,7 @@ fun ProfileScreen(
             shape = RoundedCornerShape(16.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             colors = CardDefaults.cardColors(
-                containerColor = if (rotation > 90f) Color.White else Color.White
+                containerColor = if (rotation > 180f) Color.White else Color.White
             )
         ) {
             Box(
@@ -119,7 +119,7 @@ fun ProfileScreen(
                         name = name,
                         designation = designation,
                         modifier = Modifier.graphicsLayer {
-                            rotationY = 360f
+                            rotationY = 180f
                         }
                     )
                 }

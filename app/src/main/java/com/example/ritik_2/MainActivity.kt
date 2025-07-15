@@ -17,7 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import com.example.ritik_2.modules.MainViewModel
-import com.example.ritik_2.modules.UserProfile
+import com.example.ritik_2.modules.UserProfiledata
 import com.example.ritik_2.ui.theme.AdminPanelScreen
 import com.example.ritik_2.ui.theme.ui.theme.ITConnectTheme
 import com.example.ritik_2.ui.theme.MainScreen
@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     // Use state holders from ViewModel
-                    var userProfile by remember { mutableStateOf<UserProfile?>(null) }
+                    var userProfile by remember { mutableStateOf<UserProfiledata?>(null) }
                     var isLoading by remember { mutableStateOf(true) }
 
                     // Update state when ViewModel data changes

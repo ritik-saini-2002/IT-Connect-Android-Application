@@ -9,18 +9,21 @@ import com.example.ritik_2.ui.LoginScreen
 import com.example.ritik_2.ui.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.firestore.FirebaseFirestore
 
 class LoginActivity : ComponentActivity() {
     private lateinit var firebaseAuth: FirebaseAuth
+    private lateinit var firestore: FirebaseFirestore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         firebaseAuth = FirebaseAuth.getInstance()
+        firestore = FirebaseFirestore.getInstance()
 
-        // If user is already logged in, go to MainActivity
+        // If user is already logged in, check their role and navigate accordingly
         val currentUser: FirebaseUser? = firebaseAuth.currentUser
         if (currentUser != null) {
-            navigateToMainActivity()
+            checkUserRoleAndNavigate(currentUser.uid)
         }
 
         setContent {
@@ -46,10 +49,47 @@ class LoginActivity : ComponentActivity() {
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     Toast.makeText(this, "Login Successful!", Toast.LENGTH_SHORT).show()
-                    navigateToMainActivity()
+                    val userId = firebaseAuth.currentUser?.uid
+                    if (userId != null) {
+                        checkUserRoleAndNavigate(userId)
+                    }
                 } else {
                     Toast.makeText(this, "Login failed: ${task.exception?.message}", Toast.LENGTH_LONG).show()
                 }
+            }
+    }
+
+    private fun checkUserRoleAndNavigate(userId: String) {
+        firestore.collection("users").document(userId).get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    val role = document.getString("role")
+                    when (role) {
+                        "Administrator" -> {
+                            // Navigate to Admin Panel
+                            startActivity(Intent(this, MainActivity::class.java))
+                            finish()
+                        }
+                        "Manager", "Employee" -> {
+                            // Navigate to Main Activity for regular users
+                            startActivity(Intent(this, MainActivity::class.java))
+                            finish()
+                        }
+                        else -> {
+                            // Handle unknown role or null role
+                            Toast.makeText(this, "Invalid user role. Please contact administrator.", Toast.LENGTH_LONG).show()
+                            firebaseAuth.signOut()
+                        }
+                    }
+                } else {
+                    // User document doesn't exist in Firestore
+                    Toast.makeText(this, "User data not found. Please contact administrator.", Toast.LENGTH_LONG).show()
+                    firebaseAuth.signOut()
+                }
+            }
+            .addOnFailureListener { exception ->
+                Toast.makeText(this, "Error fetching user data: ${exception.message}", Toast.LENGTH_LONG).show()
+                firebaseAuth.signOut()
             }
     }
 
@@ -63,11 +103,6 @@ class LoginActivity : ComponentActivity() {
                 Toast.makeText(this, "Error: ${it.message}", Toast.LENGTH_SHORT).show()
                 callback(false)
             }
-    }
-
-    private fun navigateToMainActivity() {
-        startActivity(Intent(this, MainActivity::class.java))
-        finish()
     }
 
     override fun onBackPressed() {

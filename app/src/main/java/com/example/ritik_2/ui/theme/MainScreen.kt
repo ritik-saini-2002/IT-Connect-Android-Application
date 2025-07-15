@@ -32,13 +32,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.ritik_2.modules.UserProfile
+import com.example.ritik_2.modules.UserProfiledata
 import com.example.ritik_2.ui.theme.ui.theme.ITConnectTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    userProfile: UserProfile? = null,
+    userProfile: UserProfiledata? = null,
     isLoading: Boolean = false,
     onLogout: () -> Unit,
     onCardClick: (Int) -> Unit,
@@ -101,6 +101,7 @@ fun MainScreen(
                     UserProfileCard(
                         userName = userName,
                         jobTitle = jobTitle,
+                        //role = role,
                         imageUri = userProfile?.imageUrl,
                         experienceYears = userProfile?.experience ?: 0,
                         completedProjects = userProfile?.completedProjects ?: 0,
@@ -424,7 +425,7 @@ fun ProfileDialog(onDismiss: () -> Unit, onSeeProfile: () -> Unit, onLogout: () 
 @Preview(showBackground = true)
 @Composable
 fun PreviewMainScreen() {
-    val sampleProfile = UserProfile(
+    val sampleProfile = UserProfiledata(
         id = "sample",
         name = "John Doe",
         email = "john.doe@example.com",
