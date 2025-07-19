@@ -80,10 +80,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.ritik_2.ComplaintWithId
 import com.example.ritik_2.R
 import com.example.ritik_2.SortOption
 import com.example.ritik_2.getFormattedDate
-import com.example.ritik_2.modules.ComplaintWithId
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)

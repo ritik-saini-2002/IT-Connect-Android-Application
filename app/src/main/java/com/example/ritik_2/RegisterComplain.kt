@@ -17,7 +17,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.ritik_2.modules.ComplaintWithId
 import com.example.ritik_2.ui.theme.RegisterComplaintScreen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -314,4 +313,16 @@ data class ComplaintData(
     val contactInfo: String = "",
     val hasAttachment: Boolean = false,
     val isGlobal: Boolean = false // New field
+)
+
+data class ComplaintWithId(
+    val id: String,
+    val title: String,
+    val description: String,
+    val category: String,
+    val urgency: String,
+    val status: String,
+    val timestamp: Long,
+    val contactInfo: String,
+    val hasAttachment: Boolean
 )

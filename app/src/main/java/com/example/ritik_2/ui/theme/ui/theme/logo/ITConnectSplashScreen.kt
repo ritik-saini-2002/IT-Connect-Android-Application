@@ -6,6 +6,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -36,9 +37,28 @@ fun ITConnectSplashScreen(
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
     val screenHeight = configuration.screenHeightDp.dp
+    val isDarkTheme = isSystemInDarkTheme()
 
     // Calculate responsive logo size (30% of screen width, max 300dp)
     val logoSize = minOf(screenWidth * 0.3f, 300.dp)
+
+    // Theme-aware colors
+    val backgroundColors = if (isDarkTheme) {
+        listOf(
+            Color(0xFF0F172A), // Dark navy
+            Color(0xFF1E293B), // Slate dark
+            Color(0xFF334155)  // Slate medium
+        )
+    } else {
+        listOf(
+            Color(0xFFF1F5F9), // Light slate
+            Color(0xFFE2E8F0), // Slate light
+            Color(0xFFCBD5E1)  // Slate medium light
+        )
+    }
+
+    val primaryTextColor = if (isDarkTheme) Color.White else Color(0xFF1E293B)
+    val secondaryTextColor = if (isDarkTheme) Color(0xFF94A3B8) else Color(0xFF64748B)
 
     // Animation sequences
     LaunchedEffect(Unit) {
@@ -60,11 +80,7 @@ fun ITConnectSplashScreen(
             .fillMaxSize()
             .background(
                 Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF1A1A2E),
-                        Color(0xFF16213E),
-                        Color(0xFF0F172A)
-                    ),
+                    colors = backgroundColors,
                     radius = screenWidth.value * 0.8f
                 )
             ),
@@ -77,7 +93,8 @@ fun ITConnectSplashScreen(
             // Animated Logo
             ITConnectLogo(
                 size = logoSize,
-                animationState = animationState
+                animationState = animationState,
+                isDarkTheme = isDarkTheme
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -97,7 +114,7 @@ fun ITConnectSplashScreen(
                         text = "IT Connect",
                         fontSize = (screenWidth.value * 0.06f).sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = primaryTextColor,
                         letterSpacing = 2.sp
                     )
 
@@ -106,7 +123,7 @@ fun ITConnectSplashScreen(
                     Text(
                         text = "Network Solutions",
                         fontSize = (screenWidth.value * 0.035f).sp,
-                        color = Color(0xFF94A3B8),
+                        color = secondaryTextColor,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -119,7 +136,7 @@ fun ITConnectSplashScreen(
                 visible = animationState.ordinal >= SplashAnimationState.TEXT_APPEAR.ordinal,
                 enter = fadeIn(animationSpec = tween(600, delayMillis = 400))
             ) {
-                PulsingDots()
+                PulsingDots(isDarkTheme = isDarkTheme)
             }
         }
     }
@@ -128,7 +145,8 @@ fun ITConnectSplashScreen(
 @Composable
 fun ITConnectLogo(
     size: Dp,
-    animationState: SplashAnimationState
+    animationState: SplashAnimationState,
+    isDarkTheme: Boolean
 ) {
     val density = LocalDensity.current
     val sizePx = with(density) { size.toPx() }
@@ -180,16 +198,25 @@ fun ITConnectLogo(
             val centralRadius = sizePx * 0.08f
             val nodeRadius = sizePx * 0.04f
 
-            // Draw outer gradient border
+            // Theme-aware outer gradient border
+            val outerBorderColors = if (isDarkTheme) {
+                listOf(
+                    Color(0xFF4A90E2),
+                    Color(0xFF50E3C2),
+                    Color(0xFF9B59B6),
+                    Color(0xFF4A90E2)
+                )
+            } else {
+                listOf(
+                    Color(0xFF3B82F6), // Blue-500
+                    Color(0xFF10B981), // Emerald-500
+                    Color(0xFF8B5CF6), // Violet-500
+                    Color(0xFF3B82F6)
+                )
+            }
+
             drawCircle(
-                brush = Brush.sweepGradient(
-                    colors = listOf(
-                        Color(0xFF4A90E2),
-                        Color(0xFF50E3C2),
-                        Color(0xFF9B59B6),
-                        Color(0xFF4A90E2)
-                    )
-                ),
+                brush = Brush.sweepGradient(colors = outerBorderColors),
                 radius = sizePx * 0.48f,
                 center = center,
                 style = Stroke(width = sizePx * 0.02f)
@@ -202,27 +229,36 @@ fun ITConnectLogo(
                     radius = radius,
                     centralRadius = centralRadius,
                     progress = connectionProgress,
-                    sizePx = sizePx
+                    sizePx = sizePx,
+                    isDarkTheme = isDarkTheme
                 )
             }
 
-            // Draw central circle
+            // Draw central circle with theme-aware colors
             if (centralScale > 0f) {
+                val centralColors = if (isDarkTheme) {
+                    listOf(
+                        Color(0xFF6366F1), // Indigo-500
+                        Color(0xFF4F46E5), // Indigo-600
+                        Color(0xFF3730A3)  // Indigo-800
+                    )
+                } else {
+                    listOf(
+                        Color(0xFF6366F1), // Indigo-500
+                        Color(0xFF4338CA), // Indigo-700
+                        Color(0xFF312E81)  // Indigo-900
+                    )
+                }
+
                 drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF6366F1),
-                            Color(0xFF4F46E5),
-                            Color(0xFF3730A3)
-                        )
-                    ),
+                    brush = Brush.radialGradient(colors = centralColors),
                     radius = centralRadius * centralScale,
                     center = center
                 )
 
                 // Central circle glow effect
                 drawCircle(
-                    color = Color(0xFF6366F1).copy(alpha = 0.3f),
+                    color = Color(0xFF6366F1).copy(alpha = if (isDarkTheme) 0.4f else 0.2f),
                     radius = centralRadius * centralScale * 1.5f,
                     center = center
                 )
@@ -234,7 +270,8 @@ fun ITConnectLogo(
                     center = center,
                     radius = radius,
                     nodeRadius = nodeRadius,
-                    scale = nodesScale
+                    scale = nodesScale,
+                    isDarkTheme = isDarkTheme
                 )
             }
         }
@@ -246,9 +283,22 @@ fun DrawScope.drawConnections(
     radius: Float,
     centralRadius: Float,
     progress: Float,
-    sizePx: Float
+    sizePx: Float,
+    isDarkTheme: Boolean
 ) {
     val angles = (0 until 8).map { it * 45f }
+
+    val connectionColors = if (isDarkTheme) {
+        listOf(
+            Color(0xFF6366F1),
+            Color(0xFF06B6D4).copy(alpha = 0.8f)
+        )
+    } else {
+        listOf(
+            Color(0xFF4338CA),
+            Color(0xFF0891B2).copy(alpha = 0.9f)
+        )
+    }
 
     angles.forEach { angle ->
         val radian = angle * PI / 180f
@@ -262,10 +312,7 @@ fun DrawScope.drawConnections(
 
         drawLine(
             brush = Brush.linearGradient(
-                colors = listOf(
-                    Color(0xFF6366F1),
-                    Color(0xFF06B6D4).copy(alpha = 0.8f)
-                ),
+                colors = connectionColors,
                 start = Offset(startX, startY),
                 end = Offset(currentEndX, currentEndY)
             ),
@@ -281,18 +328,34 @@ fun DrawScope.drawNodes(
     center: Offset,
     radius: Float,
     nodeRadius: Float,
-    scale: Float
+    scale: Float,
+    isDarkTheme: Boolean
 ) {
-    val nodeColors = listOf(
-        Color(0xFF9B59B6), // Purple
-        Color(0xFF1ABC9C), // Teal
-        Color(0xFFE74C3C), // Red
-        Color(0xFFF39C12), // Orange
-        Color(0xFF3498DB), // Blue
-        Color(0xFF27AE60), // Green
-        Color(0xFF2ECC71), // Light Green
-        Color(0xFF3F51B5)  // Indigo
-    )
+    val nodeColors = if (isDarkTheme) {
+        listOf(
+            Color(0xFF9B59B6), // Purple
+            Color(0xFF1ABC9C), // Teal
+            Color(0xFFE74C3C), // Red
+            Color(0xFFF39C12), // Orange
+            Color(0xFF3498DB), // Blue
+            Color(0xFF27AE60), // Green
+            Color(0xFF2ECC71), // Light Green
+            Color(0xFF3F51B5)  // Indigo
+        )
+    } else {
+        listOf(
+            Color(0xFF8B5CF6), // Violet-500
+            Color(0xFF14B8A6), // Teal-500
+            Color(0xFFEF4444), // Red-500
+            Color(0xFFF59E0B), // Amber-500
+            Color(0xFF3B82F6), // Blue-500
+            Color(0xFF10B981), // Emerald-500
+            Color(0xFF22C55E), // Green-500
+            Color(0xFF6366F1)  // Indigo-500
+        )
+    }
+
+    val glowAlpha = if (isDarkTheme) 0.4f else 0.2f
 
     nodeColors.forEachIndexed { index, color ->
         val angle = index * 45f
@@ -302,7 +365,7 @@ fun DrawScope.drawNodes(
 
         // Node glow effect
         drawCircle(
-            color = color.copy(alpha = 0.4f),
+            color = color.copy(alpha = glowAlpha),
             radius = nodeRadius * scale * 1.8f,
             center = Offset(x, y)
         )
@@ -323,8 +386,9 @@ fun DrawScope.drawNodes(
 }
 
 @Composable
-fun PulsingDots() {
+fun PulsingDots(isDarkTheme: Boolean) {
     val infiniteTransition = rememberInfiniteTransition()
+    val dotColor = if (isDarkTheme) Color(0xFF6366F1) else Color(0xFF4338CA)
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -345,7 +409,7 @@ fun PulsingDots() {
                     .size(8.dp)
                     .scale(scale)
                     .clip(CircleShape)
-                    .background(Color(0xFF6366F1))
+                    .background(dotColor)
             )
         }
     }
@@ -360,7 +424,7 @@ enum class SplashAnimationState {
     COMPLETE
 }
 
-// Usage in your MainActivity or wherever you need it
+// Usage in your SplashActivity
 @Composable
 fun SplashActivity() {
     ITConnectSplashScreen(

@@ -12,7 +12,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.colorResource
 import androidx.lifecycle.lifecycleScope
-import com.example.ritik_2.modules.ComplaintWithId
 import com.example.ritik_2.ui.theme.ComplaintViewScreen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
