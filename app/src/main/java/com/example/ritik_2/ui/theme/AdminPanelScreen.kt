@@ -111,7 +111,7 @@ fun AdminPanelScreen(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.primaryContainer
                         ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                     ) {
                         Column(
                             modifier = Modifier.padding(20.dp),

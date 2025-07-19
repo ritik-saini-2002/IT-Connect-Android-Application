@@ -102,12 +102,12 @@ class MainActivity : ComponentActivity() {
         when (cardId) {
             1 -> startActivity(Intent(this, RegisterComplain::class.java))
             2 -> startActivity(Intent(this, ComplaintViewActivity::class.java))
-            3 -> startActivity(Intent(this, BrowserActivity::class.java))
-            //4 -> startActivity(Intent(this, HelpSupportActivity::class.java))
-            //5 -> startActivity(Intent(this, SMBActivity::class.java))
-            6 -> startActivity(Intent(this, SMBActivity::class.java))
+            3 -> startActivity(Intent(this, AdminPanelActivity::class.java))
+            4 -> startActivity(Intent(this, SMBActivity::class.java))
+            5 -> startActivity(Intent(this, BrowserActivity::class.java))
+            //6 -> startActivity(Intent(this, SMBActivity::class.java))
             //7 -> startActivity(Intent(this, ChatActivity::class.java))
-            8 -> startActivity(Intent(this, AdminPanelActivity::class.java))
+            //8 -> startActivity(Intent(this, AdminPanelActivity::class.java))
         }
     }
 
