@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
             1 -> startActivity(Intent(this, RegisterComplain::class.java))
             2 -> startActivity(Intent(this, ComplaintViewActivity::class.java))
             3 -> startActivity(Intent(this, AdminPanelActivity::class.java))
-            4 -> startActivity(Intent(this, SMBActivity::class.java))
+            4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
             5 -> startActivity(Intent(this, BrowserActivity::class.java))
             //6 -> startActivity(Intent(this, SMBActivity::class.java))
             //7 -> startActivity(Intent(this, ChatActivity::class.java))

@@ -79,7 +79,7 @@
             </intent-filter>
         </activity>
         
-        <activity android:name=".SMBActivity"
+        <activity android:name=".ServerConnectActivity"
             android:theme="@style/Theme.Ritik_2"
             android:exported="false"/>
 
