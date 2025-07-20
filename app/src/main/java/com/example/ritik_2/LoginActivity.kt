@@ -5,7 +5,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.example.ritik_2.ui.LoginScreen
+import com.example.ritik_2.ui.theme.LoginScreen
 import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
@@ -20,10 +20,10 @@ class LoginActivity : ComponentActivity() {
         firebaseAuth = FirebaseAuth.getInstance()
         firestore = FirebaseFirestore.getInstance()
 
-        // If user is already logged in, check their role and navigate accordingly
+        // If user is already logged in, check their profile completion status
         val currentUser: FirebaseUser? = firebaseAuth.currentUser
         if (currentUser != null) {
-            checkUserRoleAndNavigate(currentUser.uid)
+            checkUserProfileAndNavigate(currentUser.uid)
         }
 
         setContent {
@@ -51,7 +51,7 @@ class LoginActivity : ComponentActivity() {
                     Toast.makeText(this, "Login Successful!", Toast.LENGTH_SHORT).show()
                     val userId = firebaseAuth.currentUser?.uid
                     if (userId != null) {
-                        checkUserRoleAndNavigate(userId)
+                        checkUserProfileAndNavigate(userId)
                     }
                 } else {
                     Toast.makeText(this, "Login failed: ${task.exception?.message}", Toast.LENGTH_LONG).show()
@@ -59,24 +59,31 @@ class LoginActivity : ComponentActivity() {
             }
     }
 
-    private fun checkUserRoleAndNavigate(userId: String) {
+    private fun checkUserProfileAndNavigate(userId: String) {
         firestore.collection("users").document(userId).get()
             .addOnSuccessListener { document ->
                 if (document.exists()) {
                     val role = document.getString("role")
-                    when (role) {
-                        "Administrator" -> {
-                            // Navigate to Admin Panel
-                            startActivity(Intent(this, MainActivity::class.java))
+                    val isProfileComplete = checkProfileCompleteness(document.data)
+
+                    when {
+                        role.isNullOrEmpty() -> {
+                            Toast.makeText(this, "Invalid user role. Please contact administrator.", Toast.LENGTH_LONG).show()
+                            firebaseAuth.signOut()
+                        }
+                        !isProfileComplete -> {
+                            // Navigate to profile completion screen
+                            val intent = Intent(this, ProfileCompletionActivity::class.java)
+                            intent.putExtra("userId", userId)
+                            startActivity(intent)
                             finish()
                         }
-                        "Manager", "Employee" -> {
-                            // Navigate to Main Activity for regular users
+                        role in listOf("Administrator", "Manager", "Employee", "administrator", "manager", "employee") -> {
+                            // Profile is complete, navigate to main activity
                             startActivity(Intent(this, MainActivity::class.java))
                             finish()
                         }
                         else -> {
-                            // Handle unknown role or null role
                             Toast.makeText(this, "Invalid user role. Please contact administrator.", Toast.LENGTH_LONG).show()
                             firebaseAuth.signOut()
                         }
@@ -91,6 +98,25 @@ class LoginActivity : ComponentActivity() {
                 Toast.makeText(this, "Error fetching user data: ${exception.message}", Toast.LENGTH_LONG).show()
                 firebaseAuth.signOut()
             }
+    }
+
+    private fun checkProfileCompleteness(userData: Map<String, Any>?): Boolean {
+        if (userData == null) return false
+
+        val requiredFields = listOf(
+            "name", "phoneNumber", "designation", "companyName",
+            "experience", "completedProjects", "role", "email"
+        )
+
+        return requiredFields.all { field ->
+            val value = userData[field]
+            when (field) {
+                "experience", "completedProjects" -> {
+                    value != null && (value as? Number)?.toInt() != null
+                }
+                else -> !value.toString().isNullOrBlank()
+            }
+        }
     }
 
     private fun sendPasswordResetEmail(email: String, callback: (Boolean) -> Unit) {

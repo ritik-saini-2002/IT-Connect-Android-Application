@@ -30,7 +30,7 @@ class RegistrationActivity : ComponentActivity() {
 
                         performRegistration(
                             email, password, name, phoneNumber, designation, companyName,
-                            experience, completedProjects, activeProjects, complaints, imageUri, role ?: "employee"
+                            experience, completedProjects, activeProjects, complaints, imageUri, role ?: "administrator"
                         )
                     },
                     onLoginClick = { navigateToLoginActivity() }

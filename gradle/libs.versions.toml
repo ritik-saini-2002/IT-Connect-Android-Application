@@ -55,6 +55,7 @@ animationCoreAndroid = "1.7.0"
 foundationAndroid = "1.7.0"
 firebaseMessaging = "24.1.1"
 composeMaterial3 = "1.5.0-beta02"
+firebaseFunctionsKtx = "21.2.1"
 
 [libraries]
 accompanist-coil = { module = "com.google.accompanist:accompanist-coil", version.ref = "accompanistCoil" }
@@ -126,6 +127,7 @@ androidx-animation-core-android = { group = "androidx.compose.animation", name =
 androidx-foundation-android = { group = "androidx.compose.foundation", name = "foundation-android", version.ref = "foundationAndroid" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging", version.ref = "firebaseMessaging" }
 androidx-compose-material3 = { group = "androidx.wear.compose", name = "compose-material3", version.ref = "composeMaterial3" }
+firebase-functions-ktx = { group = "com.google.firebase", name = "firebase-functions-ktx", version.ref = "firebaseFunctionsKtx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

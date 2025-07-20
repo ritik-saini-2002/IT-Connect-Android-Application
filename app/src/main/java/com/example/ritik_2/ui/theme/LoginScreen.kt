@@ -1,4 +1,4 @@
-package com.example.ritik_2.ui
+package com.example.ritik_2.ui.theme
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.Image

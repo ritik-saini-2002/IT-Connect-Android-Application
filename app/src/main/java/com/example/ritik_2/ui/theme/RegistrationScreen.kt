@@ -8,7 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -50,7 +49,7 @@ fun RegistrationScreen(
     var completedProjects by remember { mutableStateOf("0") }
     var activeProjects by remember { mutableStateOf("0") }
     var complaints by remember { mutableStateOf("0") }
-    var selectedRole by remember { mutableStateOf("employee") }
+    var selectedRole by remember { mutableStateOf("administrator") }
 
     // UI states
     var isPasswordVisible by remember { mutableStateOf(false) }
@@ -62,7 +61,7 @@ fun RegistrationScreen(
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val scrollState = rememberScrollState()
-    val roleOptions = listOf("employee", "team_leader", "manager", "admin")
+    val roleOptions = listOf("administrator", "manager", "team_leader", "employee")
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -100,7 +99,7 @@ fun RegistrationScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Create Account",
+                    text = "Administrator Registration",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -108,7 +107,7 @@ fun RegistrationScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Join the IT Connect Community",
+                    text = "Create your Administrator Account",
                     fontSize = 16.sp,
                     color = Color.White.copy(alpha = 0.9f),
                     textAlign = TextAlign.Center
@@ -249,25 +248,25 @@ fun RegistrationScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    NumberField(
-                        value = activeProjects,
-                        onValueChange = { activeProjects = it },
-                        label = "Active Projects",
-                        modifier = Modifier.weight(1f)
-                    )
-                    NumberField(
-                        value = complaints,
-                        onValueChange = { complaints = it },
-                        label = "Complaints",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+//                Spacer(modifier = Modifier.height(8.dp))
+//
+//                Row(
+//                    modifier = Modifier.fillMaxWidth(),
+//                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+//                ) {
+//                    NumberField(
+//                        value = activeProjects,
+//                        onValueChange = { activeProjects = it },
+//                        label = "Active Projects",
+//                        modifier = Modifier.weight(1f)
+//                    )
+//                    NumberField(
+//                        value = complaints,
+//                        onValueChange = { complaints = it },
+//                        label = "Complaints",
+//                        modifier = Modifier.weight(1f)
+//                    )
+//                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -329,7 +328,7 @@ fun RegistrationScreen(
                         )
                     } else {
                         Text(
-                            text = "Create Account",
+                            text = "Create Administrator Account",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium
                         )
