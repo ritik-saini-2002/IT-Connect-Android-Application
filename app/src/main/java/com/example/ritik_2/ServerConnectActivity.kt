@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ritik_2.modules.ServerConnectModule
-import com.example.ritik_2.ui.theme.Ritik_2Theme
+import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
 import com.example.ritik_2.ui.theme.ui.theme.ServerConnectScreen
 
 class ServerConnectActivity : ComponentActivity() {

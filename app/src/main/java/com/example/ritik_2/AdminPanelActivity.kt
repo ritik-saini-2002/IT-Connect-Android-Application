@@ -6,7 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import com.example.ritik_2.ui.theme.AdminPanelScreen
-import com.example.ritik_2.ui.theme.Ritik_2Theme
+import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 

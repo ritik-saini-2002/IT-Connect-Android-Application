@@ -15,7 +15,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
-import com.example.ritik_2.ui.theme.Typography
 
 // Custom colors for IT Connect app
 private val primaryLight = Color(0xFF2962FF) // Vibrant blue

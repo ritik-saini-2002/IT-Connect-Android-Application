@@ -6,7 +6,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.example.ritik_2.ui.LoginScreen
-import com.example.ritik_2.ui.theme.Ritik_2Theme
+import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore

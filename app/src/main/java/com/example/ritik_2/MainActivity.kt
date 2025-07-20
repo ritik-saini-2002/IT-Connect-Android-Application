@@ -18,10 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import com.example.ritik_2.modules.MainViewModel
 import com.example.ritik_2.modules.UserProfiledata
-import com.example.ritik_2.ui.theme.AdminPanelScreen
 import com.example.ritik_2.ui.theme.ui.theme.ITConnectTheme
 import com.example.ritik_2.ui.theme.MainScreen
-import com.example.ritik_2.ui.theme.ui.theme.BrowserActivity
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -104,7 +102,7 @@ class MainActivity : ComponentActivity() {
             2 -> startActivity(Intent(this, ComplaintViewActivity::class.java))
             3 -> startActivity(Intent(this, AdminPanelActivity::class.java))
             4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
-            5 -> startActivity(Intent(this, BrowserActivity::class.java))
+            //5 -> startActivity(Intent(this, WebViewScreen::class.java))
             //6 -> startActivity(Intent(this, SMBActivity::class.java))
             //7 -> startActivity(Intent(this, ChatActivity::class.java))
             //8 -> startActivity(Intent(this, AdminPanelActivity::class.java))
