@@ -49,7 +49,7 @@ fun RegistrationScreen(
     var completedProjects by remember { mutableStateOf("0") }
     var activeProjects by remember { mutableStateOf("0") }
     var complaints by remember { mutableStateOf("0") }
-    var selectedRole by remember { mutableStateOf("administrator") }
+    var selectedRole by remember { mutableStateOf("Administrator") }
 
     // UI states
     var isPasswordVisible by remember { mutableStateOf(false) }
@@ -61,7 +61,7 @@ fun RegistrationScreen(
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val scrollState = rememberScrollState()
-    val roleOptions = listOf("administrator", "manager", "team_leader", "employee")
+    val roleOptions = listOf("Administrator", "Manager", "Team_Leader", "Employee")
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
