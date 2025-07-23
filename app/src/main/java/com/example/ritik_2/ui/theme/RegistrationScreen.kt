@@ -37,7 +37,7 @@ fun RegistrationScreen(
     onRegisterClick: (String, String, String, String, String, String, Int, Int, Int, Int, Uri?, String?) -> Unit,
     onLoginClick: () -> Unit
 ) {
-    // Form states
+    // Form states - keeping defaults for fresh registration
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -49,7 +49,9 @@ fun RegistrationScreen(
     var completedProjects by remember { mutableStateOf("0") }
     var activeProjects by remember { mutableStateOf("0") }
     var complaints by remember { mutableStateOf("0") }
-    var selectedRole by remember { mutableStateOf("Administrator") }
+
+    // Role is fixed to Administrator for fresh registrations
+    val selectedRole = "Administrator"
 
     // UI states
     var isPasswordVisible by remember { mutableStateOf(false) }
@@ -57,11 +59,9 @@ fun RegistrationScreen(
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var showErrors by remember { mutableStateOf(false) }
-    var expandedRole by remember { mutableStateOf(false) }
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val scrollState = rememberScrollState()
-    val roleOptions = listOf("Administrator", "Manager", "Team_Leader", "Employee")
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -69,28 +69,33 @@ fun RegistrationScreen(
         imageUri = uri
     }
 
-    // Validation
+    // Enhanced validation for fresh account creation
     val isFormValid = email.isNotBlank() &&
+            android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() &&
             password.length >= 6 &&
             password == confirmPassword &&
             name.isNotBlank() &&
+            name.length >= 2 &&
             phoneNumber.isNotBlank() &&
+            phoneNumber.length >= 10 &&
             designation.isNotBlank() &&
-            companyName.isNotBlank()
+            companyName.isNotBlank() &&
+            companyName.length >= 2
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
             .verticalScroll(scrollState)
-            .padding(top = 50.dp)
             .padding(16.dp)
     ) {
-        // Header
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // Enhanced Header with fresh account messaging
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -98,26 +103,55 @@ fun RegistrationScreen(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Icon(
+                    imageVector = Icons.Filled.AdminPanelSettings,
+                    contentDescription = "Admin Registration",
+                    tint = Color.White,
+                    modifier = Modifier.size(40.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text(
-                    text = "Administrator Registration",
-                    fontSize = 24.sp,
+                    text = "Create Admin Account",
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     textAlign = TextAlign.Center
                 )
+
                 Spacer(modifier = Modifier.height(8.dp))
+
                 Text(
-                    text = "Create your Administrator Account",
-                    fontSize = 16.sp,
+                    text = "Register as the first Administrator for your organization",
+                    fontSize = 15.sp,
                     color = Color.White.copy(alpha = 0.9f),
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color.White.copy(alpha = 0.1f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "⭐ Full system access with administrative privileges",
+                        fontSize = 13.sp,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Main Form Card
+        // Main Registration Form
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -134,174 +168,191 @@ fun RegistrationScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Personal Information
-                SectionTitle("Personal Information")
+                // Personal Information Section
+                SectionHeader(
+                    title = "Personal Information",
+                    icon = Icons.Filled.Person,
+                    description = "Basic details for your administrator account"
+                )
 
-                TraditionalTextField(
+                EnhancedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = "Full Name",
+                    label = "Full Name *",
                     icon = Icons.Filled.Person,
-                    isError = showErrors && name.isBlank(),
-                    errorMessage = "Name is required"
+                    placeholder = "Enter your full name",
+                    isError = showErrors && (name.isBlank() || name.length < 2),
+                    errorMessage = if (name.isBlank()) "Name is required" else "Name must be at least 2 characters",
+                    keyboardType = KeyboardType.Text
                 )
 
-                TraditionalTextField(
+                EnhancedTextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = "Email Address",
+                    label = "Email Address *",
                     icon = Icons.Filled.Email,
-                    keyboardType = KeyboardType.Email,
-                    isError = showErrors && email.isBlank(),
-                    errorMessage = "Valid email is required"
+                    placeholder = "admin@company.com",
+                    isError = showErrors && (email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()),
+                    errorMessage = "Please enter a valid email address",
+                    keyboardType = KeyboardType.Email
                 )
 
-                TraditionalTextField(
+                EnhancedTextField(
                     value = phoneNumber,
-                    onValueChange = { phoneNumber = it },
-                    label = "Phone Number",
+                    onValueChange = { if (it.all { char -> char.isDigit() || char == '+' || char == '-' || char == ' ' }) phoneNumber = it },
+                    label = "Phone Number *",
                     icon = Icons.Filled.Phone,
-                    keyboardType = KeyboardType.Phone,
-                    isError = showErrors && phoneNumber.isBlank(),
-                    errorMessage = "Phone number is required"
+                    placeholder = "+1234567890",
+                    isError = showErrors && (phoneNumber.isBlank() || phoneNumber.length < 10),
+                    errorMessage = "Please enter a valid phone number (min 10 digits)",
+                    keyboardType = KeyboardType.Phone
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-                // Role Selection
-                SectionTitle("Role & Professional Information")
+                // Professional Information Section
+                SectionHeader(
+                    title = "Professional Information",
+                    icon = Icons.Filled.Work,
+                    description = "Your role and company details"
+                )
 
-                // Role Dropdown
-                ExposedDropdownMenuBox(
-                    expanded = expandedRole,
-                    onExpandedChange = { expandedRole = !expandedRole }
+                // Role Display (Fixed as Administrator)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
-                    OutlinedTextField(
-                        value = selectedRole.replaceFirstChar { it.uppercase() },
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Select Role") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedRole)
-                        },
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor()
-                            .padding(vertical = 4.dp),
-                        colors = OutlinedTextFieldDefaults.colors()
-                    )
-
-                    ExposedDropdownMenu(
-                        expanded = expandedRole,
-                        onDismissRequest = { expandedRole = false }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        roleOptions.forEach { role ->
-                            DropdownMenuItem(
-                                text = { Text(role.replaceFirstChar { it.uppercase() }) },
-                                onClick = {
-                                    selectedRole = role
-                                    expandedRole = false
-                                }
+                        Icon(
+                            imageVector = Icons.Filled.AdminPanelSettings,
+                            contentDescription = "Administrator Role",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Role: Administrator",
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Full system access and management privileges",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
 
-                TraditionalTextField(
+                EnhancedTextField(
                     value = designation,
                     onValueChange = { designation = it },
-                    label = "Job Title/Designation",
-                    icon = Icons.Filled.Work,
+                    label = "Job Title/Designation *",
+                    icon = Icons.Filled.Badge,
+                    placeholder = "CEO, CTO, IT Manager, etc.",
                     isError = showErrors && designation.isBlank(),
-                    errorMessage = "Designation is required"
+                    errorMessage = "Designation is required",
+                    keyboardType = KeyboardType.Text
                 )
 
-                TraditionalTextField(
+                EnhancedTextField(
                     value = companyName,
                     onValueChange = { companyName = it },
-                    label = "Company/Organization",
+                    label = "Company/Organization *",
                     icon = Icons.Filled.Business,
-                    isError = showErrors && companyName.isBlank(),
-                    errorMessage = "Company name is required"
+                    placeholder = "Your company name",
+                    isError = showErrors && (companyName.isBlank() || companyName.length < 2),
+                    errorMessage = if (companyName.isBlank()) "Company name is required" else "Company name must be at least 2 characters",
+                    keyboardType = KeyboardType.Text
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-                // Professional Stats
-                SectionTitle("Professional Statistics")
+                // Professional Stats Section (Optional)
+                SectionHeader(
+                    title = "Professional Experience",
+                    icon = Icons.Filled.TrendingUp,
+                    description = "Optional: Your professional background"
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     NumberField(
                         value = experience,
                         onValueChange = { experience = it },
                         label = "Experience (Years)",
+                        icon = Icons.Filled.WorkHistory,
                         modifier = Modifier.weight(1f)
                     )
                     NumberField(
                         value = completedProjects,
                         onValueChange = { completedProjects = it },
                         label = "Completed Projects",
+                        icon = Icons.Filled.CheckCircle,
                         modifier = Modifier.weight(1f)
                     )
                 }
 
-//                Spacer(modifier = Modifier.height(8.dp))
-//
-//                Row(
-//                    modifier = Modifier.fillMaxWidth(),
-//                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-//                ) {
-//                    NumberField(
-//                        value = activeProjects,
-//                        onValueChange = { activeProjects = it },
-//                        label = "Active Projects",
-//                        modifier = Modifier.weight(1f)
-//                    )
-//                    NumberField(
-//                        value = complaints,
-//                        onValueChange = { complaints = it },
-//                        label = "Complaints",
-//                        modifier = Modifier.weight(1f)
-//                    )
-//                }
-
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // Security Section
-                SectionTitle("Security")
+                SectionHeader(
+                    title = "Security Settings",
+                    icon = Icons.Filled.Security,
+                    description = "Create a secure password for your account"
+                )
 
-                TraditionalPasswordField(
+                EnhancedPasswordField(
                     value = password,
                     onValueChange = { password = it },
-                    label = "Password",
+                    label = "Password *",
+                    placeholder = "Minimum 6 characters",
                     isPasswordVisible = isPasswordVisible,
                     onPasswordVisibilityChange = { isPasswordVisible = it },
                     isError = showErrors && password.length < 6,
                     errorMessage = "Password must be at least 6 characters"
                 )
 
-                TraditionalPasswordField(
+                EnhancedPasswordField(
                     value = confirmPassword,
                     onValueChange = { confirmPassword = it },
-                    label = "Confirm Password",
+                    label = "Confirm Password *",
+                    placeholder = "Re-enter your password",
                     isPasswordVisible = isConfirmPasswordVisible,
                     onPasswordVisibilityChange = { isConfirmPasswordVisible = it },
-                    isError = showErrors && password != confirmPassword,
-                    errorMessage = "Passwords don't match"
+                    isError = showErrors && (password != confirmPassword || confirmPassword.isEmpty()),
+                    errorMessage = if (confirmPassword.isEmpty()) "Please confirm your password" else "Passwords don't match"
                 )
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // Register Button
+                // Enhanced Registration Button
                 Button(
                     onClick = {
                         if (isFormValid) {
                             isLoading = true
+                            keyboardController?.hide()
                             onRegisterClick(
-                                email, password, name, phoneNumber, designation, companyName,
+                                email.trim(),
+                                password,
+                                name.trim(),
+                                phoneNumber.trim(),
+                                designation.trim(),
+                                companyName.trim(),
                                 experience.toIntOrNull() ?: 0,
                                 completedProjects.toIntOrNull() ?: 0,
                                 activeProjects.toIntOrNull() ?: 0,
@@ -315,27 +366,86 @@ fun RegistrationScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
+                        .height(56.dp),
                     enabled = !isLoading,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                 ) {
                     if (isLoading) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Creating Account...",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            )
+                        }
                     } else {
-                        Text(
-                            text = "Create Administrator Account",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.AdminPanelSettings,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Create Administrator Account",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Form validation hints
+                if (showErrors && !isFormValid) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Error,
+                                contentDescription = "Error",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Please fill in all required fields correctly",
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
                 // Login Link
                 TextButton(
@@ -343,8 +453,9 @@ fun RegistrationScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Already have an account? Login",
-                        color = MaterialTheme.colorScheme.primary
+                        text = "Already have an account? Sign In",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 15.sp
                     )
                 }
             }
@@ -364,7 +475,7 @@ fun ProfileImageSection(
     ) {
         Box(
             modifier = Modifier
-                .size(100.dp)
+                .size(120.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable { onImagePick() },
@@ -375,10 +486,26 @@ fun ProfileImageSection(
                     model = imageUri,
                     contentDescription = "Profile Picture",
                     modifier = Modifier
-                        .size(100.dp)
+                        .size(120.dp)
                         .clip(CircleShape),
                     contentScale = ContentScale.Crop
                 )
+
+                // Edit overlay
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.3f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Edit,
+                        contentDescription = "Edit Photo",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             } else {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -387,13 +514,19 @@ fun ProfileImageSection(
                         imageVector = Icons.Filled.CameraAlt,
                         contentDescription = "Add Photo",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(36.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Add Photo",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "(Optional)",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
                     )
                 }
             }
@@ -402,22 +535,56 @@ fun ProfileImageSection(
 }
 
 @Composable
-fun SectionTitle(title: String) {
-    Text(
-        text = title,
-        fontSize = 18.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(vertical = 8.dp)
-    )
+fun SectionHeader(
+    title: String,
+    icon: ImageVector,
+    description: String
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = title,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = description,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
 }
 
 @Composable
-fun TraditionalTextField(
+fun EnhancedTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
     icon: ImageVector,
+    placeholder: String = "",
     keyboardType: KeyboardType = KeyboardType.Text,
     isError: Boolean = false,
     errorMessage: String = ""
@@ -427,6 +594,7 @@ fun TraditionalTextField(
             value = value,
             onValueChange = onValueChange,
             label = { Text(label) },
+            placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
             leadingIcon = {
                 Icon(
                     icon,
@@ -436,31 +604,48 @@ fun TraditionalTextField(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
+                .padding(vertical = 6.dp),
             keyboardOptions = KeyboardOptions(
                 keyboardType = keyboardType,
                 imeAction = ImeAction.Next
             ),
             isError = isError,
-            colors = OutlinedTextFieldDefaults.colors()
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                errorBorderColor = MaterialTheme.colorScheme.error
+            ),
+            singleLine = true
         )
 
-        if (isError) {
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp)
-            )
+        if (isError && errorMessage.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Error,
+                    contentDescription = "Error",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }
 
 @Composable
-fun TraditionalPasswordField(
+fun EnhancedPasswordField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
+    placeholder: String = "",
     isPasswordVisible: Boolean,
     onPasswordVisibilityChange: (Boolean) -> Unit,
     isError: Boolean = false,
@@ -471,6 +656,7 @@ fun TraditionalPasswordField(
             value = value,
             onValueChange = onValueChange,
             label = { Text(label) },
+            placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
             leadingIcon = {
                 Icon(
                     Icons.Filled.Lock,
@@ -490,22 +676,38 @@ fun TraditionalPasswordField(
             visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
+                .padding(vertical = 6.dp),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Next
             ),
             isError = isError,
-            colors = OutlinedTextFieldDefaults.colors()
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                errorBorderColor = MaterialTheme.colorScheme.error
+            ),
+            singleLine = true
         )
 
-        if (isError) {
-            Text(
-                text = errorMessage,
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp)
-            )
+        if (isError && errorMessage.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Error,
+                    contentDescription = "Error",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = errorMessage,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }
@@ -515,22 +717,34 @@ fun NumberField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
+    icon: ImageVector,
     modifier: Modifier = Modifier
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = { newValue ->
-            if (newValue.all { it.isDigit() } && newValue.length <= 4) {
+            if (newValue.all { it.isDigit() } && newValue.length <= 3) {
                 onValueChange(newValue)
             }
         },
-        label = { Text(label, fontSize = 12.sp) },
+        label = { Text(label, fontSize = 13.sp) },
+        leadingIcon = {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+        },
         modifier = modifier.padding(vertical = 4.dp),
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Number,
             imeAction = ImeAction.Next
         ),
-        colors = OutlinedTextFieldDefaults.colors(),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+        ),
         singleLine = true
     )
 }

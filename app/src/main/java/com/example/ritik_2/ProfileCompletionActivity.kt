@@ -1,269 +1,368 @@
 package com.example.ritik_2
 
+import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.runtime.mutableStateOf
-import com.example.ritik_2.ui.theme.ProfileCompletionScreen
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.ktx.userProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.storage.FirebaseStorage
-import com.google.firebase.Timestamp
 
 class ProfileCompletionActivity : ComponentActivity() {
-    private lateinit var firebaseAuth: FirebaseAuth
-    private val storage = FirebaseStorage.getInstance()
+
+    companion object {
+        const val TAG = "ProfileCompletion"
+        const val EXTRA_USER_ID = "extra_user_id"
+
+        fun createIntent(context: Context, userId: String): Intent {
+            return Intent(context, ProfileCompletionActivity::class.java).apply {
+                putExtra(EXTRA_USER_ID, userId)
+            }
+        }
+    }
+
     private val firestore = FirebaseFirestore.getInstance()
-    private lateinit var userId: String
-    private var userCompanyName = mutableStateOf("")
-    private var userRole = mutableStateOf("")
-    private var sanitizedCompanyName = mutableStateOf("")
-    private var isUpdating = mutableStateOf(false)
+    private val firebaseAuth = FirebaseAuth.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        firebaseAuth = FirebaseAuth.getInstance()
-        userId = intent.getStringExtra("userId") ?: firebaseAuth.currentUser?.uid ?: ""
 
-        if (userId.isEmpty()) {
-            Toast.makeText(this, "Invalid user session", Toast.LENGTH_SHORT).show()
-            navigateToLogin()
-            return
-        }
-
-        // Load user's company and role information
-        loadUserHierarchyInfo()
+        val userId = intent.getStringExtra(EXTRA_USER_ID)
+        Log.d(TAG, "🎉 ProfileCompletionActivity started for user: $userId")
 
         setContent {
             Ritik_2Theme {
                 ProfileCompletionScreen(
                     userId = userId,
-                    //isUpdating = isUpdating.value,
-                    onProfileUpdateClick = { updatedData, newPassword, imageUri ->
-                        updateUserProfile(updatedData, newPassword, imageUri)
+                    onCompleted = {
+                        markRegistrationComplete(userId)
+                        navigateToMainActivity()
                     },
-                    onLogoutClick = { logout() }
+                    onSkip = {
+                        markRegistrationComplete(userId)
+                        navigateToMainActivity()
+                    }
                 )
             }
         }
     }
 
-    private fun loadUserHierarchyInfo() {
-        // First check user_access_control to get hierarchy info
-        firestore.collection("user_access_control").document(userId).get()
-            .addOnSuccessListener { document ->
-                if (document.exists()) {
-                    userCompanyName.value = document.getString("companyName") ?: ""
-                    userRole.value = document.getString("role") ?: ""
-                    sanitizedCompanyName.value = document.getString("sanitizedCompanyName") ?: ""
+    private fun markRegistrationComplete(userId: String?) {
+        if (userId != null) {
+            Log.d(TAG, "✅ Marking registration as complete for user: $userId")
 
-                    Log.d("ProfileCompletion", "User hierarchy loaded: ${userCompanyName.value}/${userRole.value}")
-                } else {
-                    Toast.makeText(this, "User access control data not found", Toast.LENGTH_SHORT).show()
-                    navigateToLogin()
+            // Update fresh registration status to fully completed
+            firestore.collection("fresh_registrations").document(userId)
+                .update(mapOf(
+                    "status" to "fully_completed",
+                    "fullyCompletedAt" to com.google.firebase.Timestamp.now()
+                ))
+                .addOnSuccessListener {
+                    Log.d(TAG, "✅ Registration marked as fully completed")
                 }
-            }
-            .addOnFailureListener { exception ->
-                Toast.makeText(this, "Error loading user data: ${exception.message}", Toast.LENGTH_SHORT).show()
-                Log.e("ProfileCompletion", "Failed to load user hierarchy", exception)
-                navigateToLogin()
-            }
-    }
-
-    private fun updateUserProfile(
-        updatedData: Map<String, Any>,
-        newPassword: String?,
-        imageUri: Uri?
-    ) {
-        if (isUpdating.value) {
-            Toast.makeText(this, "Update in progress, please wait...", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        if (userCompanyName.value.isEmpty() || userRole.value.isEmpty() || sanitizedCompanyName.value.isEmpty()) {
-            Toast.makeText(this, "User hierarchy information not loaded yet", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        isUpdating.value = true
-
-        // Update password if provided
-        if (!newPassword.isNullOrEmpty()) {
-            updatePassword(newPassword) { passwordSuccess ->
-                if (passwordSuccess) {
-                    // Continue with profile update
-                    if (imageUri != null) {
-                        uploadImageAndUpdateProfile(imageUri, updatedData)
-                    } else {
-                        updateFirestoreData(updatedData)
-                    }
-                } else {
-                    isUpdating.value = false
+                .addOnFailureListener { exception ->
+                    Log.w(TAG, "⚠️ Failed to mark registration as completed: ${exception.message}")
                 }
-            }
-        } else {
-            // No password update, proceed with profile update
-            if (imageUri != null) {
-                uploadImageAndUpdateProfile(imageUri, updatedData)
-            } else {
-                updateFirestoreData(updatedData)
-            }
         }
     }
 
-    private fun updatePassword(newPassword: String, callback: (Boolean) -> Unit) {
-        firebaseAuth.currentUser?.updatePassword(newPassword)
-            ?.addOnSuccessListener {
-                Toast.makeText(this, "Password updated successfully", Toast.LENGTH_SHORT).show()
-                callback(true)
-            }
-            ?.addOnFailureListener { exception ->
-                Toast.makeText(this, "Failed to update password: ${exception.message}", Toast.LENGTH_SHORT).show()
-                Log.e("ProfileCompletion", "Password update failed", exception)
-                callback(false)
-            }
+    private fun navigateToMainActivity() {
+        Log.d(TAG, "🚀 Navigating to main activity")
+        try {
+            // Replace with your main activity class
+            val intent = Intent(this, MainActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            startActivity(intent)
+            finish()
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error navigating to main activity", e)
+            // Fallback to login
+            val intent = Intent(this, LoginActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            startActivity(intent)
+            finish()
+        }
     }
+}
 
-    private fun uploadImageAndUpdateProfile(imageUri: Uri, updatedData: Map<String, Any>) {
-        val storageRef = storage.reference.child("users/${sanitizedCompanyName.value}/${userRole.value}/$userId/profile.jpg")
+@Composable
+fun ProfileCompletionScreen(
+    userId: String?,
+    onCompleted: () -> Unit,
+    onSkip: () -> Unit
+) {
+    var userName by remember { mutableStateOf("Administrator") }
+    var companyName by remember { mutableStateOf("Your Organization") }
 
-        storageRef.putFile(imageUri)
-            .addOnSuccessListener {
-                storageRef.downloadUrl.addOnSuccessListener { downloadUri ->
-                    // Update Firebase Auth profile
-                    firebaseAuth.currentUser?.updateProfile(userProfileChangeRequest {
-                        photoUri = downloadUri
-                    })?.addOnCompleteListener { authUpdateTask ->
-                        if (authUpdateTask.isSuccessful) {
-                            Log.d("ProfileCompletion", "Firebase Auth profile updated")
+    // Try to get user info from Firebase
+    LaunchedEffect(userId) {
+        if (userId != null) {
+            try {
+                val firestore = FirebaseFirestore.getInstance()
+                firestore.collection("user_access_control").document(userId)
+                    .get()
+                    .addOnSuccessListener { document ->
+                        if (document.exists()) {
+                            userName = document.getString("name") ?: "Administrator"
+                            companyName = document.getString("companyName") ?: "Your Organization"
                         }
                     }
+            } catch (e: Exception) {
+                Log.w("ProfileCompletion", "Failed to get user info: ${e.message}")
+            }
+        }
+    }
 
-                    // Add image URL to data and update Firestore
-                    val dataWithImage = updatedData.toMutableMap()
-                    dataWithImage["profile.imageUrl"] = downloadUri.toString()
-                    dataWithImage["lastUpdated"] = Timestamp.now()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Success Animation/Icon
+        Card(
+            modifier = Modifier.size(120.dp),
+            shape = RoundedCornerShape(60.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CheckCircle,
+                    contentDescription = "Success",
+                    tint = Color.White,
+                    modifier = Modifier.size(60.dp)
+                )
+            }
+        }
 
-                    updateFirestoreData(dataWithImage)
-                }
-                    .addOnFailureListener { exception ->
-                        Toast.makeText(this, "Failed to get download URL: ${exception.message}", Toast.LENGTH_SHORT).show()
-                        Log.e("ProfileCompletion", "Download URL failed", exception)
-                        isUpdating.value = false
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Main Success Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "🎉 Welcome, $userName!",
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Registration Completed Successfully",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Company info
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Business,
+                            contentDescription = "Company",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = companyName,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Administrator Account",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-            }
-            .addOnFailureListener { exception ->
-                Toast.makeText(this, "Image upload failed: ${exception.message}", Toast.LENGTH_SHORT).show()
-                Log.e("ProfileCompletion", "Image upload failed", exception)
-                isUpdating.value = false
-            }
-    }
+                }
 
-    private fun updateFirestoreData(updatedData: Map<String, Any>) {
-        val batch = firestore.batch()
+                Spacer(modifier = Modifier.height(24.dp))
 
-        // Prepare data with timestamp
-        val finalData = updatedData.toMutableMap()
-        finalData["lastUpdated"] = Timestamp.now()
+                // Features list
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Your Administrator Privileges:",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
 
-        // 1. Update main user document in hierarchical structure
-        val userDocRef = firestore
-            .collection("users")
-            .document(sanitizedCompanyName.value)
-            .collection(userRole.value)
-            .document(userId)
+                    FeatureItem(
+                        icon = Icons.Filled.PersonAdd,
+                        text = "Create and manage user accounts"
+                    )
 
-        batch.update(userDocRef, finalData)
+                    FeatureItem(
+                        icon = Icons.Filled.Analytics,
+                        text = "Access all system analytics and reports"
+                    )
 
-        // 2. Update user_access_control (sync basic info)
-        val accessControlRef = firestore.collection("user_access_control").document(userId)
-        val accessControlUpdates = mutableMapOf<String, Any>()
+                    FeatureItem(
+                        icon = Icons.Filled.Settings,
+                        text = "Configure system settings and permissions"
+                    )
 
-        // Sync relevant fields to access control
-        finalData["name"]?.let { accessControlUpdates["name"] = it }
-        finalData["email"]?.let { accessControlUpdates["email"] = it }
-        finalData["designation"]?.let { accessControlUpdates["designation"] = it }
-        finalData["profile.phoneNumber"]?.let { accessControlUpdates["phoneNumber"] = it }
-        accessControlUpdates["lastAccess"] = Timestamp.now()
+                    FeatureItem(
+                        icon = Icons.Filled.Security,
+                        text = "Full security and access control management"
+                    )
+                }
 
-        if (accessControlUpdates.isNotEmpty()) {
-            batch.update(accessControlRef, accessControlUpdates)
-        }
+                Spacer(modifier = Modifier.height(32.dp))
 
-        // 3. Update user_search_index (for search functionality)
-        val searchIndexRef = firestore.collection("user_search_index").document(userId)
-        val searchIndexUpdates = mutableMapOf<String, Any>()
+                // Action buttons
+                Button(
+                    onClick = onCompleted,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Dashboard,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Go to Admin Dashboard",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White
+                        )
+                    }
+                }
 
-        finalData["name"]?.let { name ->
-            searchIndexUpdates["name"] = name.toString().lowercase()
-            searchIndexUpdates["searchTerms"] = listOf(
-                name.toString().lowercase(),
-                finalData["email"]?.toString()?.lowercase() ?: "",
-                userCompanyName.value.lowercase(),
-                userRole.value.lowercase(),
-                finalData["designation"]?.toString()?.lowercase() ?: ""
-            ).filter { it.isNotEmpty() }
-        }
-        finalData["email"]?.let { searchIndexUpdates["email"] = it.toString().lowercase() }
-        finalData["designation"]?.let { searchIndexUpdates["designation"] = it }
+                Spacer(modifier = Modifier.height(12.dp))
 
-        if (searchIndexUpdates.isNotEmpty()) {
-            batch.update(searchIndexRef, searchIndexUpdates)
-        }
-
-        // Execute batch update
-        batch.commit()
-            .addOnSuccessListener {
-                Toast.makeText(this, "Profile updated successfully!", Toast.LENGTH_LONG).show()
-                Log.d("ProfileCompletion", "Profile updated at path: users/${sanitizedCompanyName.value}/${userRole.value}/$userId")
-
-                // Navigate to MainActivity
-                startActivity(Intent(this, MainActivity::class.java))
-                finish()
-            }
-            .addOnFailureListener { exception ->
-                Toast.makeText(this, "Error updating profile: ${exception.message}", Toast.LENGTH_SHORT).show()
-                Log.e("ProfileCompletion", "Profile update failed", exception)
-            }
-            .addOnCompleteListener {
-                isUpdating.value = false
-            }
-    }
-
-    private fun logout() {
-        firebaseAuth.signOut()
-        navigateToLogin()
-    }
-
-    private fun navigateToLogin() {
-        val intent = Intent(this, LoginActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        startActivity(intent)
-        finish()
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        // Show confirmation dialog or prevent going back
-        Toast.makeText(this, "Please complete your profile or logout", Toast.LENGTH_SHORT).show()
-        // Uncomment below if you want to allow back navigation
-        // super.onBackPressed()
-    }
-
-    companion object {
-        const val TAG = "ProfileCompletion"
-
-        // Helper function to create intent with userId
-        fun createIntent(context: android.content.Context, userId: String): Intent {
-            return Intent(context, ProfileCompletionActivity::class.java).apply {
-                putExtra("userId", userId)
+                TextButton(
+                    onClick = onSkip,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Complete Profile Setup Later",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 15.sp
+                    )
+                }
             }
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Additional info
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Info,
+                    contentDescription = "Info",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "You can update your profile and company settings anytime from the dashboard.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun FeatureItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
