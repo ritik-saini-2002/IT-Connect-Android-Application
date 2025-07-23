@@ -422,7 +422,7 @@ fun ProfileDialog(onDismiss: () -> Unit, onSeeProfile: () -> Unit, onLogout: () 
     )
 }
 
-@Preview(showBackground = true)
+/*@Preview(showBackground = true)
 @Composable
 fun PreviewMainScreen() {
     val sampleProfile = UserProfiledata(
@@ -444,4 +444,4 @@ fun PreviewMainScreen() {
             onProfileClick = {}
         )
     }
-}
+}*/

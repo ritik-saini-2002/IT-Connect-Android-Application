@@ -33,14 +33,17 @@ fun ProfileScreen(
     email: String,
     phoneNumber: String,
     designation: String,
-    companyName: String = "",
-    experience: Int = 0,
-    completedProjects: Int = 0,
-    activeProjects: Int = 0,
+    companyName: String,
+    role: String,
     complaints: Int = 0,
+    experience: Int,
+    completedProjects: Int,
+    activeProjects: Int,
+    isLoading: Boolean,
     onLogoutClick: () -> Unit,
     onEditClick: (String, String) -> Unit,
-    onChangeProfilePic: () -> Unit
+    onChangeProfilePic: () -> Unit,
+    onBackClick: () -> Unit
 ) {
     var isFlipped by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
