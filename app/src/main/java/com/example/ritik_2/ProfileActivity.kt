@@ -15,7 +15,6 @@ import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.userProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 
 class ProfileActivity : ComponentActivity() {
@@ -61,6 +60,9 @@ class ProfileActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 🔥 Check if user is already logged in
+        redirectIfLoggedIn()
+
         Log.d(TAG, "🚀 ProfileActivity started")
 
         if (userId == null) {
@@ -94,12 +96,25 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
+    // 🚀 Redirect if already logged in
+    private fun redirectIfLoggedIn() {
+        val currentUser = firebaseAuth.currentUser
+        if (currentUser != null) {
+            Log.d(TAG, "✅ User already logged in: ${currentUser.uid}")
+            val intent = Intent(this, MainActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            startActivity(intent)
+            finish()
+        } else {
+            Log.d(TAG, "❌ No user logged in")
+        }
+    }
+
     private fun loadUserProfile() {
         Log.d(TAG, "📊 Loading user profile for: $userId")
         isLoading = true
 
         userId?.let { uid ->
-            // First, get user access control to find the correct document path
             firestore.collection("user_access_control").document(uid).get()
                 .addOnSuccessListener { accessDocument ->
                     if (accessDocument.exists()) {
@@ -120,7 +135,6 @@ class ProfileActivity : ComponentActivity() {
                             return@addOnSuccessListener
                         }
 
-                        // Now get the actual user document
                         firestore.document(userDocumentPath!!).get()
                             .addOnSuccessListener { userDocument ->
                                 if (userDocument.exists()) {
@@ -159,14 +173,12 @@ class ProfileActivity : ComponentActivity() {
         }
 
         try {
-            // Basic user info
             name = userData["name"]?.toString() ?: "Unknown"
             email = userData["email"]?.toString() ?: ""
             designation = userData["designation"]?.toString() ?: ""
             companyName = userData["companyName"]?.toString() ?: ""
             sanitizedCompanyName = userData["sanitizedCompanyName"]?.toString()
 
-            // Profile nested object
             val profile = userData["profile"] as? Map<String, Any>
             if (profile != null) {
                 phoneNumber = profile["phoneNumber"]?.toString() ?: ""
@@ -181,7 +193,6 @@ class ProfileActivity : ComponentActivity() {
                 } else null
             }
 
-            // Work stats nested object
             val workStats = userData["workStats"] as? Map<String, Any>
             if (workStats != null) {
                 experience = (workStats["experience"] as? Number)?.toInt() ?: 0
@@ -211,35 +222,23 @@ class ProfileActivity : ComponentActivity() {
                 "email" -> mapOf("email" to newValue)
                 "designation" -> mapOf("designation" to newValue)
                 "phoneNumber" -> mapOf("profile.phoneNumber" to newValue)
-                "experience" -> {
-                    val intValue = newValue.toIntOrNull() ?: 0
-                    mapOf("workStats.experience" to intValue)
-                }
-                "completedProjects" -> {
-                    val intValue = newValue.toIntOrNull() ?: 0
-                    mapOf("workStats.completedProjects" to intValue)
-                }
-                "activeProjects" -> {
-                    val intValue = newValue.toIntOrNull() ?: 0
-                    mapOf("workStats.activeProjects" to intValue)
-                }
+                "experience" -> mapOf("workStats.experience" to (newValue.toIntOrNull() ?: 0))
+                "completedProjects" -> mapOf("workStats.completedProjects" to (newValue.toIntOrNull() ?: 0))
+                "activeProjects" -> mapOf("workStats.activeProjects" to (newValue.toIntOrNull() ?: 0))
                 else -> {
                     showToast("Unknown field: $field")
                     return
                 }
             }
 
-            // Update main user document
             firestore.document(userDocumentPath!!).update(updateData)
                 .addOnSuccessListener {
                     Log.d(TAG, "✅ Updated $field successfully")
 
-                    // Update local state
                     when (field) {
                         "name" -> name = newValue
                         "email" -> {
                             email = newValue
-                            // Also update in user_access_control and search index
                             updateEmailInAllDocuments(uid, newValue)
                         }
                         "designation" -> designation = newValue
@@ -261,17 +260,11 @@ class ProfileActivity : ComponentActivity() {
     private fun updateEmailInAllDocuments(userId: String, newEmail: String) {
         Log.d(TAG, "📧 Updating email in all documents")
 
-        // Update in user_access_control
         firestore.collection("user_access_control").document(userId)
             .update("email", newEmail)
-            .addOnSuccessListener {
-                Log.d(TAG, "✅ Email updated in access control")
-            }
-            .addOnFailureListener { e ->
-                Log.w(TAG, "⚠️ Failed to update email in access control", e)
-            }
+            .addOnSuccessListener { Log.d(TAG, "✅ Email updated in access control") }
+            .addOnFailureListener { e -> Log.w(TAG, "⚠️ Failed to update email in access control", e) }
 
-        // Update in user_search_index
         firestore.collection("user_search_index").document(userId)
             .update(
                 mapOf(
@@ -285,12 +278,8 @@ class ProfileActivity : ComponentActivity() {
                     ).filter { it.isNotEmpty() }
                 )
             )
-            .addOnSuccessListener {
-                Log.d(TAG, "✅ Email updated in search index")
-            }
-            .addOnFailureListener { e ->
-                Log.w(TAG, "⚠️ Failed to update email in search index", e)
-            }
+            .addOnSuccessListener { Log.d(TAG, "✅ Email updated in search index") }
+            .addOnFailureListener { e -> Log.w(TAG, "⚠️ Failed to update email in search index", e) }
     }
 
     private fun uploadProfilePicture(imageUri: Uri) {
@@ -303,7 +292,6 @@ class ProfileActivity : ComponentActivity() {
 
         showToast("Uploading image...")
 
-        // Use the same storage path structure as RegistrationActivity
         val storageRef = storage.reference.child("users/$sanitizedCompanyName/$role/$userId/profile.jpg")
 
         storageRef.putFile(imageUri)
@@ -327,12 +315,10 @@ class ProfileActivity : ComponentActivity() {
     private fun updateUserProfilePicture(photoUrl: Uri) {
         Log.d(TAG, "🖼️ Updating profile picture URL")
 
-        // Update Firebase Auth profile
         firebaseAuth.currentUser?.updateProfile(userProfileChangeRequest { photoUri = photoUrl })
             ?.addOnSuccessListener {
                 Log.d(TAG, "✅ Firebase Auth profile updated")
 
-                // Update Firestore user document
                 if (!userDocumentPath.isNullOrEmpty()) {
                     firestore.document(userDocumentPath!!).update("profile.imageUrl", photoUrl.toString())
                         .addOnSuccessListener {
