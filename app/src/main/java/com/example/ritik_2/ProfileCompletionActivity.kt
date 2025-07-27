@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -20,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
@@ -47,51 +49,87 @@ class ProfileCompletionActivity : ComponentActivity() {
 
         setContent {
             Ritik_2Theme {
-                ProfileCompletionScreen(
-                    userId = userId,
-                    onCompleted = {
-                        markRegistrationComplete(userId)
-                        navigateToMainActivity()
-                    },
-                    onSkip = {
-                        markRegistrationComplete(userId)
-                        navigateToMainActivity()
+                var userData by remember { mutableStateOf<Map<String, Any>?>(null) }
+                var loading by remember { mutableStateOf(true) }
+
+                LaunchedEffect(userId) {
+                    if (userId != null) {
+                        firestore.collection("user_access_control").document(userId)
+                            .get()
+                            .addOnSuccessListener { accessDoc ->
+                                val docPath = accessDoc.getString("documentPath")
+                                if (!docPath.isNullOrEmpty()) {
+                                    firestore.document(docPath)
+                                        .get()
+                                        .addOnSuccessListener { userDoc ->
+                                            userData = userDoc.data
+                                            loading = false
+                                        }
+                                        .addOnFailureListener { e ->
+                                            Log.e(TAG, "❌ Failed to load user data", e)
+                                            Toast.makeText(this@ProfileCompletionActivity, "Error loading data", Toast.LENGTH_SHORT).show()
+                                            loading = false
+                                        }
+                                }
+                            }
                     }
-                )
+                }
+
+                if (loading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    ProfileCompletionScreen(
+                        userId = userId,
+                        userData = userData,
+                        onSave = { updatedFields ->
+                            saveProfileData(userId, updatedFields)
+                        },
+                        onSkip = {
+                            navigateToMainActivity()
+                        }
+                    )
+                }
             }
         }
     }
 
-    private fun markRegistrationComplete(userId: String?) {
-        if (userId != null) {
-            Log.d(TAG, "✅ Marking registration as complete for user: $userId")
-
-            // Update fresh registration status to fully completed
-            firestore.collection("fresh_registrations").document(userId)
-                .update(mapOf(
-                    "status" to "fully_completed",
-                    "fullyCompletedAt" to com.google.firebase.Timestamp.now()
-                ))
-                .addOnSuccessListener {
-                    Log.d(TAG, "✅ Registration marked as fully completed")
+    private fun saveProfileData(userId: String?, updatedFields: Map<String, Any>) {
+        if (userId == null) return
+        firestore.collection("user_access_control").document(userId)
+            .get()
+            .addOnSuccessListener { doc ->
+                val path = doc.getString("documentPath")
+                if (!path.isNullOrEmpty()) {
+                    firestore.document(path)
+                        .update(updatedFields + ("isProfileComplete" to true))
+                        .addOnSuccessListener {
+                            firestore.collection("user_access_control").document(userId)
+                                .update("isProfileComplete", true)
+                            Toast.makeText(this, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
+                            navigateToMainActivity()
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e(TAG, "❌ Error updating profile", e)
+                            Toast.makeText(this, "Failed to update profile: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
                 }
-                .addOnFailureListener { exception ->
-                    Log.w(TAG, "⚠️ Failed to mark registration as completed: ${exception.message}")
-                }
-        }
+            }
     }
 
     private fun navigateToMainActivity() {
         Log.d(TAG, "🚀 Navigating to main activity")
         try {
-            // Replace with your main activity class
             val intent = Intent(this, MainActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             startActivity(intent)
             finish()
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error navigating to main activity", e)
-            // Fallback to login
             val intent = Intent(this, LoginActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             startActivity(intent)
@@ -103,266 +141,102 @@ class ProfileCompletionActivity : ComponentActivity() {
 @Composable
 fun ProfileCompletionScreen(
     userId: String?,
-    onCompleted: () -> Unit,
+    userData: Map<String, Any>?,
+    onSave: (Map<String, Any>) -> Unit,
     onSkip: () -> Unit
 ) {
-    var userName by remember { mutableStateOf("Administrator") }
-    var companyName by remember { mutableStateOf("Your Organization") }
+    var phoneNumber by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+    var dateOfBirth by remember { mutableStateOf("") }
 
-    // Try to get user info from Firebase
-    LaunchedEffect(userId) {
-        if (userId != null) {
-            try {
-                val firestore = FirebaseFirestore.getInstance()
-                firestore.collection("user_access_control").document(userId)
-                    .get()
-                    .addOnSuccessListener { document ->
-                        if (document.exists()) {
-                            userName = document.getString("name") ?: "Administrator"
-                            companyName = document.getString("companyName") ?: "Your Organization"
-                        }
-                    }
-            } catch (e: Exception) {
-                Log.w("ProfileCompletion", "Failed to get user info: ${e.message}")
-            }
-        }
-    }
+    val name = userData?.get("name")?.toString() ?: "User"
+    val email = userData?.get("email")?.toString() ?: "example@email.com"
+    val companyName = userData?.get("companyName")?.toString() ?: "Your Organization"
+
+    val profile = userData?.get("profile") as? Map<String, Any>
+    phoneNumber = profile?.get("phoneNumber")?.toString() ?: ""
+    address = profile?.get("address")?.toString() ?: ""
+    dateOfBirth = profile?.get("dateOfBirth")?.toString() ?: ""
+
+    var updatedPhone by remember { mutableStateOf(phoneNumber) }
+    var updatedAddress by remember { mutableStateOf(address) }
+    var updatedDob by remember { mutableStateOf(dateOfBirth) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Success Animation/Icon
-        Card(
-            modifier = Modifier.size(120.dp),
-            shape = RoundedCornerShape(60.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = "Success",
-                    tint = Color.White,
-                    modifier = Modifier.size(60.dp)
-                )
-            }
-        }
+        Text(
+            text = "Complete Your Profile",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        // Read-only fields (Admin provided)
+        ReadOnlyField(label = "Name", value = name)
+        ReadOnlyField(label = "Email", value = email)
+        ReadOnlyField(label = "Company", value = companyName)
 
-        // Main Success Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "🎉 Welcome, $userName!",
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center
-                )
+        Spacer(modifier = Modifier.height(16.dp))
 
-                Spacer(modifier = Modifier.height(16.dp))
+        // Editable fields
+        OutlinedTextField(
+            value = updatedPhone,
+            onValueChange = { updatedPhone = it },
+            label = { Text("Phone Number") },
+            modifier = Modifier.fillMaxWidth()
+        )
 
-                Text(
-                    text = "Registration Completed Successfully",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
-                )
+        OutlinedTextField(
+            value = updatedAddress,
+            onValueChange = { updatedAddress = it },
+            label = { Text("Address") },
+            modifier = Modifier.fillMaxWidth()
+        )
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Company info
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Business,
-                            contentDescription = "Company",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = companyName,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 16.sp
-                            )
-                            Text(
-                                text = "Administrator Account",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Features list
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Your Administrator Privileges:",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    FeatureItem(
-                        icon = Icons.Filled.PersonAdd,
-                        text = "Create and manage user accounts"
-                    )
-
-                    FeatureItem(
-                        icon = Icons.Filled.Analytics,
-                        text = "Access all system analytics and reports"
-                    )
-
-                    FeatureItem(
-                        icon = Icons.Filled.Settings,
-                        text = "Configure system settings and permissions"
-                    )
-
-                    FeatureItem(
-                        icon = Icons.Filled.Security,
-                        text = "Full security and access control management"
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Action buttons
-                Button(
-                    onClick = onCompleted,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    ),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Dashboard,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Go to Admin Dashboard",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                TextButton(
-                    onClick = onSkip,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Complete Profile Setup Later",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 15.sp
-                    )
-                }
-            }
-        }
+        OutlinedTextField(
+            value = updatedDob,
+            onValueChange = { updatedDob = it },
+            label = { Text("Date of Birth") },
+            modifier = Modifier.fillMaxWidth()
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Additional info
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-            )
+        Button(
+            onClick = {
+                val updates = mapOf(
+                    "profile.phoneNumber" to updatedPhone,
+                    "profile.address" to updatedAddress,
+                    "profile.dateOfBirth" to updatedDob,
+                    "lastUpdated" to Timestamp.now()
+                )
+                onSave(updates)
+            },
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Info,
-                    contentDescription = "Info",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "You can update your profile and company settings anytime from the dashboard.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 18.sp
-                )
-            }
+            Text("Save & Continue")
+        }
+
+        TextButton(
+            onClick = onSkip,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Skip for Now")
         }
     }
 }
 
 @Composable
-fun FeatureItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    text: String
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = text,
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
+fun ReadOnlyField(label: String, value: String) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        label = { Text(label) },
+        enabled = false,
+        modifier = Modifier.fillMaxWidth()
+    )
 }

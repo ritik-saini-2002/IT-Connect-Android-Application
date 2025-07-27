@@ -31,13 +31,15 @@ class LoginActivity : ComponentActivity() {
 
         Log.d(TAG, "🚀 LoginActivity started")
 
-        // If user is already logged in, check their profile completion status
+        // If user is already logged in, check profile
         val currentUser: FirebaseUser? = firebaseAuth.currentUser
         if (currentUser != null) {
             Log.d(TAG, "👤 User already logged in: ${currentUser.email}")
-            checkUserProfileAndNavigate(currentUser.uid)
+            checkUserProfile(currentUser.uid)
+            return
         }
 
+        // Show login screen only if user is not logged in
         setContent {
             Ritik_2Theme {
                 LoginScreen(
@@ -67,9 +69,8 @@ class LoginActivity : ComponentActivity() {
                     Toast.makeText(this, "Login Successful!", Toast.LENGTH_SHORT).show()
                     val userId = firebaseAuth.currentUser?.uid
                     if (userId != null) {
-                        // Update last login timestamp
                         updateLastLogin(userId)
-                        checkUserProfileAndNavigate(userId)
+                        checkUserProfile(userId)
                     }
                 } else {
                     Log.e(TAG, "❌ Login failed: ${task.exception?.message}")
@@ -78,170 +79,61 @@ class LoginActivity : ComponentActivity() {
             }
     }
 
-    private fun checkUserProfileAndNavigate(userId: String) {
+    /**
+     * Checks if the user's profile is complete. If incomplete, navigate to ProfileCompletionActivity.
+     */
+    private fun checkUserProfile(userId: String) {
         Log.d(TAG, "🔍 Checking user profile for: $userId")
 
-        // First, get user access control to find the correct document path
-        firestore.collection("user_access_control").document(userId).get()
-            .addOnSuccessListener { accessDocument ->
-                if (accessDocument.exists()) {
-                    val documentPath = accessDocument.getString("documentPath")
-                    val role = accessDocument.getString("role")
-                    val isActive = accessDocument.getBoolean("isActive") ?: false
+        val userDocRef = firestore.collection("users").document(userId)
+        userDocRef.get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    val status = document.getString("status") ?: "pending"
+                    val phone = document.getString("phoneNumber") ?: ""
+                    val company = document.getString("companyName") ?: ""
 
-                    Log.d(TAG, "📄 Access control found - Role: $role, Path: $documentPath, Active: $isActive")
-
-                    if (!isActive) {
-                        Toast.makeText(this, "Your account is deactivated. Please contact administrator.", Toast.LENGTH_LONG).show()
-                        firebaseAuth.signOut()
-                        return@addOnSuccessListener
+                    // If profile is incomplete, navigate to ProfileCompletionActivity
+                    if (status == "pending" || phone.isEmpty() || company.isEmpty()) {
+                        Log.d(TAG, "📝 Profile incomplete, redirecting to ProfileCompletionActivity")
+                        val intent = ProfileCompletionActivity.createIntent(this, userId)
+                        startActivity(intent)
+                        finish()
+                    } else {
+                        Log.d(TAG, "🏠 Profile complete, navigating to MainActivity")
+                        navigateToMainActivity()
                     }
-
-                    if (documentPath.isNullOrEmpty() || role.isNullOrEmpty()) {
-                        Toast.makeText(this, "Invalid user configuration. Please contact administrator.", Toast.LENGTH_LONG).show()
-                        firebaseAuth.signOut()
-                        return@addOnSuccessListener
-                    }
-
-                    // Now get the actual user document
-                    firestore.document(documentPath).get()
-                        .addOnSuccessListener { userDocument ->
-                            if (userDocument.exists()) {
-                                processUserDocument(userId, userDocument.data, role)
-                            } else {
-                                Log.e(TAG, "❌ User document not found at path: $documentPath")
-                                Toast.makeText(this, "User profile not found. Please contact administrator.", Toast.LENGTH_LONG).show()
-                                firebaseAuth.signOut()
-                            }
-                        }
-                        .addOnFailureListener { exception ->
-                            Log.e(TAG, "❌ Error fetching user document", exception)
-                            Toast.makeText(this, "Error fetching user profile: ${exception.message}", Toast.LENGTH_LONG).show()
-                            firebaseAuth.signOut()
-                        }
                 } else {
-                    Log.e(TAG, "❌ User access control not found for: $userId")
-                    Toast.makeText(this, "User access not found. Please contact administrator.", Toast.LENGTH_LONG).show()
-                    firebaseAuth.signOut()
+                    Log.d(TAG, "⚠️ User document not found, redirecting to ProfileCompletionActivity")
+                    val intent = ProfileCompletionActivity.createIntent(this, userId)
+                    startActivity(intent)
+                    finish()
                 }
             }
             .addOnFailureListener { exception ->
-                Log.e(TAG, "❌ Error fetching access control", exception)
-                Toast.makeText(this, "Error checking user access: ${exception.message}", Toast.LENGTH_LONG).show()
-                firebaseAuth.signOut()
+                Log.e(TAG, "❌ Error checking profile", exception)
+                Toast.makeText(this, "Error checking profile: ${exception.message}", Toast.LENGTH_SHORT).show()
             }
-    }
-
-    private fun processUserDocument(userId: String, userData: Map<String, Any>?, role: String) {
-        Log.d(TAG, "📊 Processing user document for role: $role")
-
-        if (userData == null) {
-            Toast.makeText(this, "Invalid user data. Please contact administrator.", Toast.LENGTH_LONG).show()
-            firebaseAuth.signOut()
-            return
-        }
-
-        if (role !in VALID_ROLES) {
-            Toast.makeText(this, "Invalid user role: $role. Please contact administrator.", Toast.LENGTH_LONG).show()
-            firebaseAuth.signOut()
-            return
-        }
-
-        val isProfileComplete = checkProfileCompleteness(userData)
-        Log.d(TAG, "✅ Profile completeness check: $isProfileComplete")
-
-        when {
-            !isProfileComplete -> {
-                Log.d(TAG, "📝 Profile incomplete, navigating to completion")
-                Toast.makeText(this, "Please complete your profile", Toast.LENGTH_SHORT).show()
-                navigateToProfileCompletion(userId)
-            }
-            else -> {
-                Log.d(TAG, "🏠 Profile complete, navigating to main activity")
-                Toast.makeText(this, "Welcome back!", Toast.LENGTH_SHORT).show()
-                navigateToMainActivity()
-            }
-        }
-    }
-
-    private fun checkProfileCompleteness(userData: Map<String, Any>): Boolean {
-        Log.d(TAG, "🔍 Checking profile completeness")
-
-        try {
-            // Check main required fields
-            val name = userData["name"]?.toString()
-            val email = userData["email"]?.toString()
-            val companyName = userData["companyName"]?.toString()
-            val designation = userData["designation"]?.toString()
-            val role = userData["role"]?.toString()
-
-            // Check profile nested object
-            val profile = userData["profile"] as? Map<String, Any>
-            val phoneNumber = profile?.get("phoneNumber")?.toString()
-
-            // Check workStats nested object
-            val workStats = userData["workStats"] as? Map<String, Any>
-            val experience = workStats?.get("experience")
-            val completedProjects = workStats?.get("completedProjects")
-
-            val requiredFieldsValid = listOf(
-                name, email, companyName, designation, role, phoneNumber
-            ).all { !it.isNullOrBlank() }
-
-            val numbersValid = experience != null && completedProjects != null &&
-                    (experience as? Number)?.toInt() != null &&
-                    (completedProjects as? Number)?.toInt() != null
-
-            val isComplete = requiredFieldsValid && numbersValid
-            Log.d(TAG, "Profile completeness: $isComplete")
-
-            return isComplete
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error checking profile completeness", e)
-            return false
-        }
     }
 
     private fun updateLastLogin(userId: String) {
         val timestamp = Timestamp.now()
 
-        // Update in user_access_control
         firestore.collection("user_access_control").document(userId)
             .update("lastAccess", timestamp)
-            .addOnSuccessListener {
-                Log.d(TAG, "✅ Last access updated in access control")
-            }
-            .addOnFailureListener { e ->
-                Log.w(TAG, "⚠️ Failed to update last access in access control", e)
-            }
+            .addOnSuccessListener { Log.d(TAG, "✅ Last access updated in access control") }
+            .addOnFailureListener { e -> Log.w(TAG, "⚠️ Failed to update last access in access control", e) }
 
-        // Update in main user document (we'll get the path from access control)
         firestore.collection("user_access_control").document(userId).get()
             .addOnSuccessListener { doc ->
                 val documentPath = doc.getString("documentPath")
                 if (!documentPath.isNullOrEmpty()) {
                     firestore.document(documentPath)
                         .update("lastLogin", timestamp)
-                        .addOnSuccessListener {
-                            Log.d(TAG, "✅ Last login updated in user document")
-                        }
-                        .addOnFailureListener { e ->
-                            Log.w(TAG, "⚠️ Failed to update last login in user document", e)
-                        }
+                        .addOnSuccessListener { Log.d(TAG, "✅ Last login updated in user document") }
+                        .addOnFailureListener { e -> Log.w(TAG, "⚠️ Failed to update last login in user document", e) }
                 }
             }
-    }
-
-    private fun navigateToProfileCompletion(userId: String) {
-        try {
-            val intent = ProfileCompletionActivity.createIntent(this, userId)
-            startActivity(intent)
-            finish()
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error navigating to profile completion", e)
-            Toast.makeText(this, "Error navigating to profile completion", Toast.LENGTH_SHORT).show()
-        }
     }
 
     private fun navigateToMainActivity() {
@@ -272,6 +164,6 @@ class LoginActivity : ComponentActivity() {
 
     override fun onBackPressed() {
         Log.d(TAG, "🔙 Back pressed - exiting app")
-        finishAffinity() // Exits the app instead of reopening RegistrationActivity
+        finishAffinity()
     }
 }

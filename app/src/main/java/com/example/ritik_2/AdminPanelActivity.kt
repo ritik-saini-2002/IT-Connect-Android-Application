@@ -7,14 +7,15 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import com.example.ritik_2.ui.theme.AdminPanelScreen
 import com.example.ritik_2.ui.theme.ui.theme.Ritik_2Theme
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.Timestamp
 
 class AdminPanelActivity : ComponentActivity() {
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private var isCreatingUser = mutableStateOf(false)
+    private var adminCompanyName = mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,15 +27,25 @@ class AdminPanelActivity : ComponentActivity() {
             return
         }
 
-        // Verify admin role
+        // Verify admin role and load company
         verifyAdminRole(currentUserId)
+        loadAdminCompanyName(currentUserId)
 
         setContent {
             Ritik_2Theme {
                 AdminPanelScreen(
                     isCreating = isCreatingUser.value,
-                    onCreateUserClick = { name, email, role, companyName, designation, password ->
-                        createUserAccount(name, email, role, companyName, designation, password, currentUserId)
+                    companyName = adminCompanyName.value, // Auto-filled
+                    onCreateUserClick = { name, email, role, department, designation, password ->
+                        createUserAccount(
+                            name,
+                            email,
+                            role,
+                            department, // Now this is the actual department (IT, HR, etc.)
+                            designation,
+                            password,
+                            currentUserId
+                        )
                     }
                 )
             }
@@ -42,7 +53,6 @@ class AdminPanelActivity : ComponentActivity() {
     }
 
     private fun verifyAdminRole(userId: String) {
-        // Check in user_access_control collection for role verification
         firestore.collection("user_access_control").document(userId).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
@@ -64,38 +74,57 @@ class AdminPanelActivity : ComponentActivity() {
             }
     }
 
+    private fun loadAdminCompanyName(adminId: String) {
+        firestore.collection("user_access_control").document(adminId).get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    adminCompanyName.value = document.getString("department") ?: "Default Organization"
+                } else {
+                    adminCompanyName.value = "Default Organization"
+                }
+            }
+            .addOnFailureListener {
+                adminCompanyName.value = "Default Organization"
+            }
+    }
+
     private fun createUserAccount(
         name: String,
         email: String,
         role: String,
-        companyName: String,
+        department: String, // This is now the actual department like "IT", "HR", etc.
         designation: String,
         password: String,
         createdBy: String
     ) {
         if (isCreatingUser.value) {
-            Toast.makeText(this, "User creation in progress, please wait...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "User creation in progress, please wait...", Toast.LENGTH_SHORT)
+                .show()
             return
         }
 
-        // Validation
-        if (!validateUserInput(name, email, companyName, designation, password)) {
-            return
-        }
+        if (!validateUserInput(name, email, department, designation, password)) return
 
         isCreatingUser.value = true
 
-        // Sanitize company name for use as document ID (remove special characters, spaces to underscores)
-        val sanitizedCompanyName = sanitizeDocumentId(companyName)
+        // Use admin's company name for the new user
+        val companyName = adminCompanyName.value
+        val sanitizedCompany = sanitizeDocumentId(companyName)
 
-        // Create user authentication
         auth.createUserWithEmailAndPassword(email, password)
             .addOnSuccessListener { authResult ->
                 val newUserId = authResult.user?.uid
                 if (newUserId != null) {
-                    // Create the strict hierarchical structure
                     createStrictUserHierarchy(
-                        newUserId, name, email, role, companyName, sanitizedCompanyName, designation, createdBy
+                        newUserId,
+                        name,
+                        email,
+                        role,
+                        companyName, // Admin's company name
+                        sanitizedCompany,
+                        department, // User's department (IT, HR, etc.)
+                        designation,
+                        createdBy
                     )
                 } else {
                     Toast.makeText(this, "Failed to create user account", Toast.LENGTH_SHORT).show()
@@ -113,18 +142,19 @@ class AdminPanelActivity : ComponentActivity() {
         name: String,
         email: String,
         role: String,
-        originalCompanyName: String,
-        sanitizedCompanyName: String,
+        originalCompany: String, // Admin's company name
+        sanitizedCompany: String,
+        department: String, // User's department (IT, HR, etc.)
         designation: String,
         createdBy: String
     ) {
         val timestamp = Timestamp.now()
         val batch = firestore.batch()
 
-        // STRICT STRUCTURE: users/{companyName}/{role}/{userId}
+        // STRICT STRUCTURE: users/{company}/{role}/{userId}
         val userDocRef = firestore
             .collection("users")
-            .document(sanitizedCompanyName)
+            .document(sanitizedCompany)
             .collection(role)
             .document(userId)
 
@@ -134,8 +164,9 @@ class AdminPanelActivity : ComponentActivity() {
             "name" to name,
             "email" to email,
             "role" to role,
-            "companyName" to originalCompanyName,
-            "sanitizedCompanyName" to sanitizedCompanyName,
+            "companyName" to originalCompany, // Admin's company name
+            "sanitizedCompany" to sanitizedCompany,
+            "department" to department, // User's actual department (IT, HR, etc.)
             "designation" to designation,
             "createdAt" to timestamp,
             "createdBy" to createdBy,
@@ -151,7 +182,6 @@ class AdminPanelActivity : ComponentActivity() {
                 "dateOfBirth" to null,
                 "joiningDate" to timestamp,
                 "employeeId" to "",
-                "department" to "",
                 "reportingTo" to "",
                 "salary" to 0,
                 "emergencyContact" to mapOf(
@@ -184,34 +214,35 @@ class AdminPanelActivity : ComponentActivity() {
             "permissions" to getRolePermissions(role),
 
             // Full path for reference
-            "documentPath" to "users/$sanitizedCompanyName/$role/$userId"
+            "documentPath" to "users/$sanitizedCompany/$role/$userId"
         )
 
         batch.set(userDocRef, userData)
 
         // Create company metadata (if doesn't exist)
-        val companyMetaRef = firestore.collection("companies_metadata").document(sanitizedCompanyName)
+        val companyMetaRef = firestore.collection("companies_metadata").document(sanitizedCompany)
         val companyMetaData = mapOf(
-            "originalName" to originalCompanyName,
-            "sanitizedName" to sanitizedCompanyName,
+            "originalName" to originalCompany,
+            "sanitizedName" to sanitizedCompany,
             "createdAt" to timestamp,
             "lastUpdated" to timestamp,
             "totalUsers" to com.google.firebase.firestore.FieldValue.increment(1),
             "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
-            "availableRoles" to com.google.firebase.firestore.FieldValue.arrayUnion(role)
+            "availableRoles" to com.google.firebase.firestore.FieldValue.arrayUnion(role),
+            "departments" to com.google.firebase.firestore.FieldValue.arrayUnion(department)
         )
         batch.set(companyMetaRef, companyMetaData, com.google.firebase.firestore.SetOptions.merge())
 
         // Create role metadata within company
         val roleMetaRef = firestore
             .collection("companies_metadata")
-            .document(sanitizedCompanyName)
+            .document(sanitizedCompany)
             .collection("roles_metadata")
             .document(role)
 
         val roleMetaData = mapOf(
             "roleName" to role,
-            "companyName" to originalCompanyName,
+            "companyName" to originalCompany,
             "permissions" to getRolePermissions(role),
             "userCount" to com.google.firebase.firestore.FieldValue.increment(1),
             "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
@@ -220,18 +251,36 @@ class AdminPanelActivity : ComponentActivity() {
         )
         batch.set(roleMetaRef, roleMetaData, com.google.firebase.firestore.SetOptions.merge())
 
+        // Create department metadata within company
+        val departmentMetaRef = firestore
+            .collection("companies_metadata")
+            .document(sanitizedCompany)
+            .collection("departments_metadata")
+            .document(sanitizeDocumentId(department))
+
+        val departmentMetaData = mapOf(
+            "departmentName" to department,
+            "companyName" to originalCompany,
+            "userCount" to com.google.firebase.firestore.FieldValue.increment(1),
+            "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
+            "createdAt" to timestamp,
+            "lastUpdated" to timestamp
+        )
+        batch.set(departmentMetaRef, departmentMetaData, com.google.firebase.firestore.SetOptions.merge())
+
         // Create user access control for quick authentication checks
         val userAccessControlRef = firestore.collection("user_access_control").document(userId)
         val accessControlData = mapOf(
             "userId" to userId,
             "name" to name,
             "email" to email,
-            "companyName" to originalCompanyName,
-            "sanitizedCompanyName" to sanitizedCompanyName,
+            "companyName" to originalCompany, // Changed from 'department' to 'companyName'
+            "sanitizedCompany" to sanitizedCompany,
+            "department" to department, // User's actual department
             "role" to role,
             "permissions" to getRolePermissions(role),
             "isActive" to true,
-            "documentPath" to "users/$sanitizedCompanyName/$role/$userId",
+            "documentPath" to "users/$sanitizedCompany/$role/$userId",
             "createdAt" to timestamp,
             "lastAccess" to null
         )
@@ -243,16 +292,18 @@ class AdminPanelActivity : ComponentActivity() {
             "userId" to userId,
             "name" to name.lowercase(), // For case-insensitive search
             "email" to email.lowercase(),
-            "companyName" to originalCompanyName,
-            "sanitizedCompanyName" to sanitizedCompanyName,
+            "companyName" to originalCompany,
+            "sanitizedCompany" to sanitizedCompany,
+            "department" to department,
             "role" to role,
             "designation" to designation,
             "isActive" to true,
-            "documentPath" to "users/$sanitizedCompanyName/$role/$userId",
+            "documentPath" to "users/$sanitizedCompany/$role/$userId",
             "searchTerms" to listOf(
                 name.lowercase(),
                 email.lowercase(),
-                originalCompanyName.lowercase(),
+                originalCompany.lowercase(),
+                department.lowercase(),
                 role.lowercase(),
                 designation.lowercase()
             )
@@ -264,11 +315,12 @@ class AdminPanelActivity : ComponentActivity() {
             .addOnSuccessListener {
                 Toast.makeText(this, "User created successfully in company directory structure!", Toast.LENGTH_LONG).show()
 
-                // Sign out the newly created user
+                // Sign out the newly created user and sign back in the admin
                 auth.signOut()
 
                 // Log the created path for debugging
-                android.util.Log.d("AdminPanel", "User created at path: users/$sanitizedCompanyName/$role/$userId")
+                android.util.Log.d("AdminPanel", "User created at path: users/$sanitizedCompany/$role/$userId")
+                android.util.Log.d("AdminPanel", "Company: $originalCompany, Department: $department, Role: $role")
             }
             .addOnFailureListener { exception ->
                 Toast.makeText(this, "Error creating user structure: ${exception.message}", Toast.LENGTH_SHORT).show()
@@ -294,7 +346,7 @@ class AdminPanelActivity : ComponentActivity() {
                 "view_all_users", "modify_user", "view_hr_analytics", "manage_employees",
                 "access_personal_data", "generate_reports"
             )
-            "Team Lead" -> listOf(
+            "Team Leader" -> listOf(
                 "view_team_users", "assign_tasks", "view_team_performance", "approve_leave"
             )
             "Employee" -> listOf(
@@ -318,7 +370,7 @@ class AdminPanelActivity : ComponentActivity() {
     private fun validateUserInput(
         name: String,
         email: String,
-        companyName: String,
+        department: String,
         designation: String,
         password: String
     ): Boolean {
@@ -335,20 +387,20 @@ class AdminPanelActivity : ComponentActivity() {
                 Toast.makeText(this, "Please enter a valid email address", Toast.LENGTH_SHORT).show()
                 return false
             }
-            companyName.isBlank() -> {
-                Toast.makeText(this, "Company name is required", Toast.LENGTH_SHORT).show()
+            department.isBlank() -> {
+                Toast.makeText(this, "Department is required", Toast.LENGTH_SHORT).show()
                 return false
             }
-            companyName.length < 2 -> {
-                Toast.makeText(this, "Company name must be at least 2 characters", Toast.LENGTH_SHORT).show()
+            department.length < 2 -> {
+                Toast.makeText(this, "Department must be at least 2 characters", Toast.LENGTH_SHORT).show()
                 return false
             }
             designation.isBlank() -> {
                 Toast.makeText(this, "Designation is required", Toast.LENGTH_SHORT).show()
                 return false
             }
-            password.length < 6 -> {
-                Toast.makeText(this, "Password must be at least 6 characters", Toast.LENGTH_SHORT).show()
+            password.length < 4 -> {
+                Toast.makeText(this, "Password must be at least 4 characters", Toast.LENGTH_SHORT).show()
                 return false
             }
         }

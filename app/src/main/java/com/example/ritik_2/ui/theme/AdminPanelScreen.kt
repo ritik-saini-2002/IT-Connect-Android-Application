@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -29,20 +30,31 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminPanelScreen(
-    onCreateUserClick: (String, String, String, String, String, String) -> Unit,
-    isCreating: Boolean
+    onCreateUserClick: (String, String, String, String, String, String) -> Unit, // name, email, role, department, designation, password
+    isCreating: Boolean,
+    companyName: String
 ) {
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var role by remember { mutableStateOf("employee") }
-    var companyName by remember { mutableStateOf("") }
+    var role by remember { mutableStateOf("Employee") }
+    var department by remember { mutableStateOf("Technical") } // Default department
     var designation by remember { mutableStateOf("") }
     var showSuccessAnimation by remember { mutableStateOf(false) }
     var userCreated by remember { mutableStateOf(false) }
     var showErrors by remember { mutableStateOf(false) }
 
-    val roleOptions = listOf("Employee", "Team Leader", "Manager", "Administrator")
+    val roleOptions = listOf("Employee", "Team Leader", "Manager", "Administrator", "HR", "Intern")
+
+    // Department options with icons
+    val departmentOptions = listOf(
+        "Technical" to Icons.Filled.Computer,
+        "HR" to Icons.Filled.People,
+        "Administrative" to Icons.Filled.Apartment,
+        "IT Support" to Icons.Filled.Settings,
+        "Finance" to Icons.Filled.AttachMoney,
+        "General" to Icons.Filled.MoreHoriz
+    )
 
     // Success animation scale
     val successScale by animateFloatAsState(
@@ -54,10 +66,14 @@ fun AdminPanelScreen(
         label = "successScale"
     )
 
-    // Form validation
-    val isFormValid = email.isNotBlank() &&
-            password.length >= 6 &&
-            companyName.isNotBlank()
+    // Form validation - Updated validation logic
+    val isFormValid = name.isNotBlank() &&
+            name.length >= 2 &&
+            email.isNotBlank() &&
+            android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() &&
+            department.isNotBlank() &&
+            designation.isNotBlank() &&
+            password.length >= 4
 
     // Monitor creation completion
     LaunchedEffect(isCreating) {
@@ -71,7 +87,7 @@ fun AdminPanelScreen(
             email = ""
             password = ""
             role = "Employee"
-            companyName = ""
+            department = "Technical" // Reset to default department
             designation = ""
             userCreated = false
             showErrors = false
@@ -228,29 +244,54 @@ fun AdminPanelScreen(
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
 
+                            // Company Name Field (Read-only, auto-filled)
+                            TextField(
+                                value = companyName,
+                                onValueChange = {},
+                                label = { Text("Company Name") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Business,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                readOnly = true,
+                                colors = TextFieldDefaults.colors(
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                            )
+
                             // Name Field
                             OutlinedTextField(
                                 value = name,
                                 onValueChange = { name = it },
-                                label = { Text("Name") },
+                                label = { Text("Full Name") },
                                 leadingIcon = {
                                     Icon(
-                                        imageVector = Icons.Default.Email,
+                                        imageVector = Icons.Default.Person,
                                         contentDescription = null,
-                                        tint = if (showErrors && email.isBlank()) MaterialTheme.colorScheme.error
+                                        tint = if (showErrors && (name.isBlank() || name.length < 2)) MaterialTheme.colorScheme.error
                                         else MaterialTheme.colorScheme.primary
                                     )
                                 },
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
-                                isError = showErrors && email.isBlank()
+                                isError = showErrors && (name.isBlank() || name.length < 2)
                             )
 
                             if (showErrors && name.isBlank()) {
                                 Text(
                                     text = "Name is required",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(start = 16.dp)
+                                )
+                            } else if (showErrors && name.length < 2) {
+                                Text(
+                                    text = "Name must be at least 2 characters",
                                     color = MaterialTheme.colorScheme.error,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(start = 16.dp)
@@ -266,7 +307,7 @@ fun AdminPanelScreen(
                                     Icon(
                                         imageVector = Icons.Default.Email,
                                         contentDescription = null,
-                                        tint = if (showErrors && email.isBlank()) MaterialTheme.colorScheme.error
+                                        tint = if (showErrors && (email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches())) MaterialTheme.colorScheme.error
                                         else MaterialTheme.colorScheme.primary
                                     )
                                 },
@@ -274,7 +315,7 @@ fun AdminPanelScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
-                                isError = showErrors && email.isBlank()
+                                isError = showErrors && (email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches())
                             )
 
                             if (showErrors && email.isBlank()) {
@@ -284,31 +325,26 @@ fun AdminPanelScreen(
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(start = 16.dp)
                                 )
+                            } else if (showErrors && !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
+                                Text(
+                                    text = "Please enter a valid email address",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(start = 16.dp)
+                                )
                             }
 
-
-                            // Company Name Field
-                            OutlinedTextField(
-                                value = companyName,
-                                onValueChange = { companyName = it },
-                                label = { Text("Company/Organization Name") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Business,
-                                        contentDescription = null,
-                                        tint = if (showErrors && companyName.isBlank()) MaterialTheme.colorScheme.error
-                                        else MaterialTheme.colorScheme.primary
-                                    )
-                                },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                isError = showErrors && companyName.isBlank()
+                            // Department Dropdown (NEW)
+                            DepartmentDropdownMenuBox(
+                                departmentOptions = departmentOptions,
+                                selected = department,
+                                onDepartmentSelected = { department = it },
+                                isError = showErrors && department.isBlank()
                             )
 
-                            if (showErrors && companyName.isBlank()) {
+                            if (showErrors && department.isBlank()) {
                                 Text(
-                                    text = "Company name is required",
+                                    text = "Department is required",
                                     color = MaterialTheme.colorScheme.error,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(start = 16.dp)
@@ -322,17 +358,17 @@ fun AdminPanelScreen(
                                 label = { Text("Designation") },
                                 leadingIcon = {
                                     Icon(
-                                        imageVector = Icons.Default.Email,
+                                        imageVector = Icons.Default.Work,
                                         contentDescription = null,
-                                        tint = if (showErrors && email.isBlank()) MaterialTheme.colorScheme.error
+                                        tint = if (showErrors && designation.isBlank()) MaterialTheme.colorScheme.error
                                         else MaterialTheme.colorScheme.primary
                                     )
                                 },
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
-                                isError = showErrors && email.isBlank()
+                                isError = showErrors && designation.isBlank(),
+                                placeholder = { Text("e.g., Software Developer, HR Manager") }
                             )
 
                             if (showErrors && designation.isBlank()) {
@@ -345,43 +381,41 @@ fun AdminPanelScreen(
                             }
 
                             // Role Dropdown
-                            DropdownMenuBox(
+                            RoleDropdownMenuBox(
                                 roleOptions = roleOptions,
                                 selected = role,
                                 onRoleSelected = { role = it }
                             )
 
-                                        // Password Field
-                                        OutlinedTextField(
-                                            value = password,
-                                            onValueChange = { password = it },
-                                            label = { Text("Password") },
-                                            leadingIcon = {
-                                                Icon(
-                                                    imageVector = Icons.Default.Lock,
-                                                    contentDescription = null,
-                                                    tint = if (showErrors && password.length < 6) MaterialTheme.colorScheme.error
-                                                    else MaterialTheme.colorScheme.primary
-                                                )
-                                            },
-                                            singleLine = true,
-                                            visualTransformation = PasswordVisualTransformation(),
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = RoundedCornerShape(12.dp),
-                                            isError = showErrors && password.length < 6
-                                        )
+                            // Password Field
+                            OutlinedTextField(
+                                value = password,
+                                onValueChange = { password = it },
+                                label = { Text("Password") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = null,
+                                        tint = if (showErrors && password.length < 4) MaterialTheme.colorScheme.error
+                                        else MaterialTheme.colorScheme.primary
+                                    )
+                                },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                isError = showErrors && password.length < 4
+                            )
 
-                                        if (showErrors && password.length < 6) {
-                                            Text(
-                                                text = "Password must be at least 6 characters",
-                                                color = MaterialTheme.colorScheme.error,
-                                                fontSize = 12.sp,
-                                                modifier = Modifier.padding(start = 16.dp)
-                                            )
-                                        }
-
-                                        Spacer(modifier = Modifier.width(8.dp))
+                            if (showErrors && password.length < 4) {
+                                Text(
+                                    text = "Password must be at least 4 characters",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(start = 16.dp)
+                                )
+                            }
 
                             // Info Card
                             Card(
@@ -402,7 +436,7 @@ fun AdminPanelScreen(
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(20.dp)
                                         )
-
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Text(
                                             text = "Profile Completion",
                                             fontSize = 14.sp,
@@ -412,13 +446,12 @@ fun AdminPanelScreen(
                                     }
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
-                                        text = "The user will be able to complete their profile with additional information like name, phone number, designation, and professional details after their first login.",
+                                        text = "The user will be able to complete their profile with additional information like phone number, address, and other professional details after their first login.",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         lineHeight = 16.sp
                                     )
                                 }
-
                             }
                         }
                     }
@@ -436,7 +469,7 @@ fun AdminPanelScreen(
                         onClick = {
                             if (isFormValid) {
                                 userCreated = true
-                                onCreateUserClick(name, email, role, companyName, designation, password)
+                                onCreateUserClick(name, email, role, department, designation, password)
                             } else {
                                 showErrors = true
                             }
@@ -484,7 +517,7 @@ fun AdminPanelScreen(
                     exit = fadeOut()
                 ) {
                     Text(
-                        text = "Name, email, company name, designation and password are required. User can complete remaining profile details after first login.",
+                        text = "All fields are required. Company name is automatically set to your organization. User can complete remaining profile details after first login.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -496,9 +529,138 @@ fun AdminPanelScreen(
     }
 }
 
+// Department Dropdown Menu Box
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DropdownMenuBox(
+fun DepartmentDropdownMenuBox(
+    departmentOptions: List<Pair<String, ImageVector>>,
+    selected: String,
+    onDepartmentSelected: (String) -> Unit,
+    isError: Boolean = false
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    // Rotation animation for dropdown arrow
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(
+            durationMillis = 300,
+            easing = FastOutSlowInEasing
+        ),
+        label = "arrowRotation"
+    )
+
+    // Find the selected department's icon
+    val selectedIcon = departmentOptions.find { it.first == selected }?.second ?: Icons.Default.Apartment
+
+    Box {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            label = { Text("Department") },
+            leadingIcon = {
+                Icon(
+                    imageVector = selectedIcon,
+                    contentDescription = null,
+                    tint = if (isError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .rotate(arrowRotation)
+                        .clickable { expanded = !expanded },
+                    tint = if (isError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary
+                )
+            },
+            readOnly = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true },
+            shape = RoundedCornerShape(12.dp),
+            isError = isError
+        )
+
+        // Animated dropdown menu
+        AnimatedVisibility(
+            visible = expanded,
+            enter = slideInVertically(
+                animationSpec = tween(300, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(200)),
+            exit = slideOutVertically(
+                animationSpec = tween(300, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(200))
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column {
+                    departmentOptions.forEachIndexed { index, (departmentName, icon) ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = if (departmentName == selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = departmentName,
+                                        fontSize = 16.sp,
+                                        color = if (departmentName == selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = if (departmentName == selected) FontWeight.Medium
+                                        else FontWeight.Normal
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onDepartmentSelected(departmentName)
+                                expanded = false
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateContentSize()
+                        )
+                        if (index < departmentOptions.size - 1) {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Invisible clickable overlay to close dropdown
+        if (expanded) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { expanded = false }
+            )
+        }
+    }
+}
+
+// Role Dropdown Menu Box (renamed from DropdownMenuBox)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RoleDropdownMenuBox(
     roleOptions: List<String>,
     selected: String,
     onRoleSelected: (String) -> Unit
@@ -575,6 +737,8 @@ fun DropdownMenuBox(
                                             "Team Leader" -> Icons.Default.SupervisorAccount
                                             "Manager" -> Icons.Default.ManageAccounts
                                             "Administrator" -> Icons.Default.AdminPanelSettings
+                                            "HR" -> Icons.Default.Groups
+                                            "Intern" -> Icons.Default.School
                                             else -> Icons.Default.Person
                                         },
                                         contentDescription = null,
