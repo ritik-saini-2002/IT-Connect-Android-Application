@@ -31,11 +31,12 @@ class RegistrationActivity : ComponentActivity() {
                 RegistrationScreen(
                     //isRegistering = isRegistering.value,
                     onRegisterClick = { email, password, name, phoneNumber, designation, companyName,
-                                        experience, completedProjects, activeProjects, complaints, imageUri, role ->
+                                        experience, completedProjects, activeProjects, complaints, imageUri, role, department ->
 
                         performRegistration(
                             email, password, name, phoneNumber, designation, companyName,
-                            experience, completedProjects, activeProjects, complaints, imageUri, role ?: "Administrator"
+                            experience, completedProjects, activeProjects, complaints, imageUri,
+                            role ?: "Administrator", department ?: "Administrator"
                         )
                     },
                     onLoginClick = { navigateToLoginActivity() }
@@ -56,7 +57,8 @@ class RegistrationActivity : ComponentActivity() {
         activeProjects: Int,
         complaints: Int,
         imageUri: Uri?,
-        role: String
+        role: String,
+        department: String
     ) {
         if (isRegistering.value) {
             Toast.makeText(this, "Registration in progress, please wait...", Toast.LENGTH_SHORT).show()
@@ -64,7 +66,7 @@ class RegistrationActivity : ComponentActivity() {
         }
 
         // Validation
-        if (!validateRegistrationInput(email, password, name, companyName, designation)) {
+        if (!validateRegistrationInput(email, password, name, companyName, designation, department)) {
             return
         }
 
@@ -80,12 +82,12 @@ class RegistrationActivity : ComponentActivity() {
                         if (imageUri != null) {
                             uploadImageAndCreateHierarchy(
                                 userId, imageUri, name, phoneNumber, designation, companyName,
-                                experience, completedProjects, activeProjects, complaints, email, role
+                                experience, completedProjects, activeProjects, complaints, email, role, department
                             )
                         } else {
                             createUserHierarchicalStructure(
                                 userId, "", name, phoneNumber, designation, companyName,
-                                experience, completedProjects, activeProjects, complaints, email, role
+                                experience, completedProjects, activeProjects, complaints, email, role, department
                             )
                         }
                     } else {
@@ -113,10 +115,12 @@ class RegistrationActivity : ComponentActivity() {
         activeProjects: Int,
         complaints: Int,
         email: String,
-        role: String
+        role: String,
+        department: String
     ) {
         val sanitizedCompanyName = sanitizeDocumentId(companyName)
-        val storageRef = storage.reference.child("users/$sanitizedCompanyName/$role/$userId/profile.jpg")
+        val sanitizedDepartment = sanitizeDocumentId(department)
+        val storageRef = storage.reference.child("users/$sanitizedCompanyName/$sanitizedDepartment/$role/$userId/profile.jpg")
 
         storageRef.putFile(imageUri)
             .addOnSuccessListener {
@@ -127,7 +131,7 @@ class RegistrationActivity : ComponentActivity() {
                     // Create hierarchical structure with image URL
                     createUserHierarchicalStructure(
                         userId, downloadUri.toString(), name, phoneNumber, designation, companyName,
-                        experience, completedProjects, activeProjects, complaints, email, role
+                        experience, completedProjects, activeProjects, complaints, email, role, department
                     )
                 }
                     .addOnFailureListener { exception ->
@@ -165,18 +169,24 @@ class RegistrationActivity : ComponentActivity() {
         activeProjects: Int,
         complaints: Int,
         email: String,
-        role: String
+        role: String,
+        department: String
     ) {
         val timestamp = Timestamp.now()
         val sanitizedCompanyName = sanitizeDocumentId(companyName)
+        val sanitizedDepartment = sanitizeDocumentId(department)
         val batch = firestore.batch()
 
-        // 1. STRICT HIERARCHICAL STRUCTURE: users/{companyName}/{role}/{userId}
+        // NEW HIERARCHICAL STRUCTURE: users/{companyName}/{department}/{role}/users/{userId}
         val userDocRef = firestore
             .collection("users")
             .document(sanitizedCompanyName)
-            .collection(role)
+            .collection(sanitizedDepartment)
+            .document(role)
+            .collection("users")
             .document(userId)
+
+        val documentPath = "users/$sanitizedCompanyName/$sanitizedDepartment/$role/users/$userId"
 
         val userData = mapOf(
             "userId" to userId,
@@ -185,6 +195,8 @@ class RegistrationActivity : ComponentActivity() {
             "role" to role,
             "companyName" to companyName,
             "sanitizedCompanyName" to sanitizedCompanyName,
+            "department" to department,
+            "sanitizedDepartment" to sanitizedDepartment,
             "designation" to designation,
             "createdAt" to timestamp,
             "createdBy" to "self_registration",
@@ -200,7 +212,6 @@ class RegistrationActivity : ComponentActivity() {
                 "dateOfBirth" to null,
                 "joiningDate" to timestamp,
                 "employeeId" to "",
-                "department" to "",
                 "reportingTo" to "",
                 "salary" to 0,
                 "emergencyContact" to mapOf(
@@ -233,7 +244,7 @@ class RegistrationActivity : ComponentActivity() {
             "permissions" to getRolePermissions(role),
 
             // Document path for reference
-            "documentPath" to "users/$sanitizedCompanyName/$role/$userId"
+            "documentPath" to documentPath
         )
 
         batch.set(userDocRef, userData)
@@ -247,20 +258,43 @@ class RegistrationActivity : ComponentActivity() {
             "lastUpdated" to timestamp,
             "totalUsers" to com.google.firebase.firestore.FieldValue.increment(1),
             "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
-            "availableRoles" to com.google.firebase.firestore.FieldValue.arrayUnion(role)
+            "availableRoles" to com.google.firebase.firestore.FieldValue.arrayUnion(role),
+            "departments" to com.google.firebase.firestore.FieldValue.arrayUnion(department)
         )
         batch.set(companyMetaRef, companyMetaData, com.google.firebase.firestore.SetOptions.merge())
 
-        // 3. Create role metadata
+        // 3. Create department metadata within company
+        val departmentMetaRef = firestore
+            .collection("companies_metadata")
+            .document(sanitizedCompanyName)
+            .collection("departments_metadata")
+            .document(sanitizedDepartment)
+
+        val departmentMetaData = mapOf(
+            "departmentName" to department,
+            "companyName" to companyName,
+            "sanitizedName" to sanitizedDepartment,
+            "userCount" to com.google.firebase.firestore.FieldValue.increment(1),
+            "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
+            "availableRoles" to com.google.firebase.firestore.FieldValue.arrayUnion(role),
+            "createdAt" to timestamp,
+            "lastUpdated" to timestamp
+        )
+        batch.set(departmentMetaRef, departmentMetaData, com.google.firebase.firestore.SetOptions.merge())
+
+        // 4. Create role metadata within department
         val roleMetaRef = firestore
             .collection("companies_metadata")
             .document(sanitizedCompanyName)
+            .collection("departments_metadata")
+            .document(sanitizedDepartment)
             .collection("roles_metadata")
             .document(role)
 
         val roleMetaData = mapOf(
             "roleName" to role,
             "companyName" to companyName,
+            "department" to department,
             "permissions" to getRolePermissions(role),
             "userCount" to com.google.firebase.firestore.FieldValue.increment(1),
             "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
@@ -269,7 +303,7 @@ class RegistrationActivity : ComponentActivity() {
         )
         batch.set(roleMetaRef, roleMetaData, com.google.firebase.firestore.SetOptions.merge())
 
-        // 4. Create user access control
+        // 5. Create user access control
         val userAccessControlRef = firestore.collection("user_access_control").document(userId)
         val accessControlData = mapOf(
             "userId" to userId,
@@ -277,16 +311,18 @@ class RegistrationActivity : ComponentActivity() {
             "email" to email,
             "companyName" to companyName,
             "sanitizedCompanyName" to sanitizedCompanyName,
+            "department" to department,
+            "sanitizedDepartment" to sanitizedDepartment,
             "role" to role,
             "permissions" to getRolePermissions(role),
             "isActive" to true,
-            "documentPath" to "users/$sanitizedCompanyName/$role/$userId",
+            "documentPath" to documentPath,
             "createdAt" to timestamp,
             "lastAccess" to null
         )
         batch.set(userAccessControlRef, accessControlData)
 
-        // 5. Create user search index
+        // 6. Create user search index
         val userSearchIndexRef = firestore.collection("user_search_index").document(userId)
         val searchIndexData = mapOf(
             "userId" to userId,
@@ -294,14 +330,17 @@ class RegistrationActivity : ComponentActivity() {
             "email" to email.lowercase(),
             "companyName" to companyName,
             "sanitizedCompanyName" to sanitizedCompanyName,
+            "department" to department,
+            "sanitizedDepartment" to sanitizedDepartment,
             "role" to role,
             "designation" to designation,
             "isActive" to true,
-            "documentPath" to "users/$sanitizedCompanyName/$role/$userId",
+            "documentPath" to documentPath,
             "searchTerms" to listOf(
                 name.lowercase(),
                 email.lowercase(),
                 companyName.lowercase(),
+                department.lowercase(),
                 role.lowercase(),
                 designation.lowercase()
             ).filter { it.isNotEmpty() }
@@ -312,7 +351,7 @@ class RegistrationActivity : ComponentActivity() {
         batch.commit()
             .addOnSuccessListener {
                 Toast.makeText(this, "Registration successful! Please complete your profile.", Toast.LENGTH_LONG).show()
-                Log.d("Registration", "User created at path: users/$sanitizedCompanyName/$role/$userId")
+                Log.d("Registration", "User created at path: $documentPath")
 
                 // Navigate to profile completion
                 navigateToProfileCompletion(userId)
@@ -367,7 +406,8 @@ class RegistrationActivity : ComponentActivity() {
         password: String,
         name: String,
         companyName: String,
-        designation: String
+        designation: String,
+        department: String
     ): Boolean {
         when {
             name.isBlank() -> {
@@ -392,6 +432,14 @@ class RegistrationActivity : ComponentActivity() {
             }
             designation.isBlank() -> {
                 Toast.makeText(this, "Designation is required", Toast.LENGTH_SHORT).show()
+                return false
+            }
+            department.isBlank() -> {
+                Toast.makeText(this, "Department is required", Toast.LENGTH_SHORT).show()
+                return false
+            }
+            department.length < 2 -> {
+                Toast.makeText(this, "Department must be at least 2 characters", Toast.LENGTH_SHORT).show()
                 return false
             }
         }

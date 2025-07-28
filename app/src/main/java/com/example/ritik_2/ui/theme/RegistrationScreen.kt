@@ -34,7 +34,7 @@ import coil.compose.AsyncImage
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegistrationScreen(
-    onRegisterClick: (String, String, String, String, String, String, Int, Int, Int, Int, Uri?, String?) -> Unit,
+    onRegisterClick: (String, String, String, String, String, String, Int, Int, Int, Int, Uri?, String?, String?) -> Unit,
     onLoginClick: () -> Unit
 ) {
     // Form states - keeping defaults for fresh registration
@@ -43,6 +43,7 @@ fun RegistrationScreen(
     var confirmPassword by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var phoneNumber by remember { mutableStateOf("") }
+    var department by remember { mutableStateOf("Administrator") }
     var designation by remember { mutableStateOf("") }
     var companyName by remember { mutableStateOf("") }
     var experience by remember { mutableStateOf("0") }
@@ -358,6 +359,7 @@ fun RegistrationScreen(
                                 activeProjects.toIntOrNull() ?: 0,
                                 complaints.toIntOrNull() ?: 0,
                                 imageUri,
+                                department,
                                 selectedRole
                             )
                         } else {

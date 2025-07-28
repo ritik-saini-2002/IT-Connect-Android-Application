@@ -75,13 +75,29 @@ class AdminPanelActivity : ComponentActivity() {
     }
 
     private fun loadAdminCompanyName(adminId: String) {
+        // First try to get from user_access_control
         firestore.collection("user_access_control").document(adminId).get()
             .addOnSuccessListener { document ->
                 if (document.exists()) {
-                    adminCompanyName.value = document.getString("department") ?: "Default Organization"
-                } else {
-                    adminCompanyName.value = "Default Organization"
+                    val companyName = document.getString("companyName")
+                    if (!companyName.isNullOrBlank()) {
+                        adminCompanyName.value = companyName
+                        return@addOnSuccessListener
+                    }
                 }
+
+                // Fallback: search in user_search_index
+                firestore.collection("user_search_index").document(adminId).get()
+                    .addOnSuccessListener { searchDoc ->
+                        if (searchDoc.exists()) {
+                            adminCompanyName.value = searchDoc.getString("companyName") ?: "Default Organization"
+                        } else {
+                            adminCompanyName.value = "Default Organization"
+                        }
+                    }
+                    .addOnFailureListener {
+                        adminCompanyName.value = "Default Organization"
+                    }
             }
             .addOnFailureListener {
                 adminCompanyName.value = "Default Organization"
@@ -150,13 +166,18 @@ class AdminPanelActivity : ComponentActivity() {
     ) {
         val timestamp = Timestamp.now()
         val batch = firestore.batch()
+        val sanitizedDepartment = sanitizeDocumentId(department)
 
-        // STRICT STRUCTURE: users/{company}/{role}/{userId}
+        // NEW STRUCTURE: users/{company}/{department}/{role}/users/{userId}
         val userDocRef = firestore
             .collection("users")
             .document(sanitizedCompany)
-            .collection(role)
+            .collection(sanitizedDepartment)
+            .document(role)
+            .collection("users")
             .document(userId)
+
+        val documentPath = "users/$sanitizedCompany/$sanitizedDepartment/$role/users/$userId"
 
         // Complete user data stored in the hierarchical path
         val userData = mapOf(
@@ -167,6 +188,7 @@ class AdminPanelActivity : ComponentActivity() {
             "companyName" to originalCompany, // Admin's company name
             "sanitizedCompany" to sanitizedCompany,
             "department" to department, // User's actual department (IT, HR, etc.)
+            "sanitizedDepartment" to sanitizedDepartment,
             "designation" to designation,
             "createdAt" to timestamp,
             "createdBy" to createdBy,
@@ -214,7 +236,7 @@ class AdminPanelActivity : ComponentActivity() {
             "permissions" to getRolePermissions(role),
 
             // Full path for reference
-            "documentPath" to "users/$sanitizedCompany/$role/$userId"
+            "documentPath" to documentPath
         )
 
         batch.set(userDocRef, userData)
@@ -233,16 +255,19 @@ class AdminPanelActivity : ComponentActivity() {
         )
         batch.set(companyMetaRef, companyMetaData, com.google.firebase.firestore.SetOptions.merge())
 
-        // Create role metadata within company
+        // Create role metadata within company and department
         val roleMetaRef = firestore
             .collection("companies_metadata")
             .document(sanitizedCompany)
+            .collection("departments_metadata")
+            .document(sanitizedDepartment)
             .collection("roles_metadata")
             .document(role)
 
         val roleMetaData = mapOf(
             "roleName" to role,
             "companyName" to originalCompany,
+            "department" to department,
             "permissions" to getRolePermissions(role),
             "userCount" to com.google.firebase.firestore.FieldValue.increment(1),
             "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
@@ -256,13 +281,15 @@ class AdminPanelActivity : ComponentActivity() {
             .collection("companies_metadata")
             .document(sanitizedCompany)
             .collection("departments_metadata")
-            .document(sanitizeDocumentId(department))
+            .document(sanitizedDepartment)
 
         val departmentMetaData = mapOf(
             "departmentName" to department,
             "companyName" to originalCompany,
+            "sanitizedName" to sanitizedDepartment,
             "userCount" to com.google.firebase.firestore.FieldValue.increment(1),
             "activeUsers" to com.google.firebase.firestore.FieldValue.increment(1),
+            "availableRoles" to com.google.firebase.firestore.FieldValue.arrayUnion(role),
             "createdAt" to timestamp,
             "lastUpdated" to timestamp
         )
@@ -274,13 +301,14 @@ class AdminPanelActivity : ComponentActivity() {
             "userId" to userId,
             "name" to name,
             "email" to email,
-            "companyName" to originalCompany, // Changed from 'department' to 'companyName'
+            "companyName" to originalCompany,
             "sanitizedCompany" to sanitizedCompany,
             "department" to department, // User's actual department
+            "sanitizedDepartment" to sanitizedDepartment,
             "role" to role,
             "permissions" to getRolePermissions(role),
             "isActive" to true,
-            "documentPath" to "users/$sanitizedCompany/$role/$userId",
+            "documentPath" to documentPath,
             "createdAt" to timestamp,
             "lastAccess" to null
         )
@@ -295,10 +323,11 @@ class AdminPanelActivity : ComponentActivity() {
             "companyName" to originalCompany,
             "sanitizedCompany" to sanitizedCompany,
             "department" to department,
+            "sanitizedDepartment" to sanitizedDepartment,
             "role" to role,
             "designation" to designation,
             "isActive" to true,
-            "documentPath" to "users/$sanitizedCompany/$role/$userId",
+            "documentPath" to documentPath,
             "searchTerms" to listOf(
                 name.lowercase(),
                 email.lowercase(),
@@ -319,7 +348,7 @@ class AdminPanelActivity : ComponentActivity() {
                 auth.signOut()
 
                 // Log the created path for debugging
-                android.util.Log.d("AdminPanel", "User created at path: users/$sanitizedCompany/$role/$userId")
+                android.util.Log.d("AdminPanel", "User created at path: $documentPath")
                 android.util.Log.d("AdminPanel", "Company: $originalCompany, Department: $department, Role: $role")
             }
             .addOnFailureListener { exception ->
