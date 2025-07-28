@@ -32,5 +32,8 @@
     <color name="Purple">#800080</color>
     <color name="Orange">#FF7F50</color>
 
+    <color name="gray_light">#BDBDBD</color>
+
+
 
 </resources>

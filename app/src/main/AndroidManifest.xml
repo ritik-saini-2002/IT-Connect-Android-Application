@@ -34,7 +34,7 @@
         tools:targetApi="35">
 
         <activity
-            android:name=".SplashActivity"
+            android:name=".splash.SplashActivity"
             android:exported="true"
             android:theme="@style/Theme.Ritik_2">
             <intent-filter>
@@ -44,46 +44,46 @@
         </activity>
 
         <activity
-            android:name=".MainActivity"
+            android:name=".main.MainActivity"
             android:exported="false"
             android:label="@string/title_activity_saini"
             android:theme="@style/Theme.Ritik_2" />
 
         <activity
-            android:name=".RegisterComplain"
+            android:name=".complaint.complaintregistration.RegisterComplain"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
         <activity
-            android:name=".Test"
+            android:name=".researchanddevelopment.Test"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
         <activity
-            android:name=".ProfileActivity"
+            android:name=".profile.ProfileActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
-        <activity android:name=".ProfileCompletionActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2"/>
-
-        <activity
-            android:name=".RegistrationActivity"
+        <activity android:name=".profile.profilecompletion.ProfileCompletionActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
         <activity
-            android:name=".ComplaintViewActivity"
+            android:name=".registration.RegistrationActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2"/>
+
+        <activity
+            android:name=".complaint.viewcomplaint.ComplaintViewActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".AdminPanelActivity"
+        <activity android:name=".administrator.AdminPanelActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
         <activity
-            android:name=".LoginActivity"
+            android:name=".login.LoginActivity"
             android:exported="true"
             android:theme="@style/Theme.Ritik_2">
             <!--<intent-filter>
@@ -92,7 +92,7 @@
             </intent-filter>-->
         </activity>
         
-        <activity android:name=".ServerConnectActivity"
+        <activity android:name=".winshare.ServerConnectActivity"
             android:theme="@style/Theme.Ritik_2"
             android:exported="false"/>
 
