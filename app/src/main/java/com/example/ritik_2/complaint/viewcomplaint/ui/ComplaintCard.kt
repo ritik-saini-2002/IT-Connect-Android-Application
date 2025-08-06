@@ -1,4 +1,4 @@
-package com.example.ritik_2.complaint.viewcomplaint.ui.components
+package com.example.ritik_2.complaint.viewcomplaint.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +15,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.ritik_2.complaint.viewcomplaint.data.models.*
+import com.example.ritik_2.complaint.viewcomplaint.ui.components.AssignComplaintDialog
+import com.example.ritik_2.complaint.viewcomplaint.ui.components.ChangeStatusDialog
+import com.example.ritik_2.complaint.viewcomplaint.ui.components.CloseComplaintDialog
+import com.example.ritik_2.complaint.viewcomplaint.ui.components.EditComplaintDialog
 import com.example.ritik_2.complaint.viewcomplaint.ui.profile.ProfilePicture
 
 @OptIn(ExperimentalMaterial3Api::class)

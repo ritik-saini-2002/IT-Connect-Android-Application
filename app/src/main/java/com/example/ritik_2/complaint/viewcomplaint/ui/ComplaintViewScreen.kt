@@ -15,7 +15,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ritik_2.complaint.viewcomplaint.data.models.*
-import com.example.ritik_2.complaint.viewcomplaint.ui.components.ComplaintCard
 import com.example.ritik_2.complaint.viewcomplaint.ui.profile.UserProfileDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
