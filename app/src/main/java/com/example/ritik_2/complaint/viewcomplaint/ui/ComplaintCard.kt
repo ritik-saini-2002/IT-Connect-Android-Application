@@ -70,7 +70,7 @@ fun ComplaintCard(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     ProfilePicture(
-                        profilePictureUrl = userProfile?.profilePictureUrl,
+                        profilePictureUrl = complaint.createdBy.profilePictureUrl, // Set this after fetching
                         userName = complaint.createdBy.name,
                         size = 40.dp,
                         onClick = { onViewUserProfile(complaint.createdBy.userId) }

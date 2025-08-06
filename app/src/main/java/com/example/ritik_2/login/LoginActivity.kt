@@ -99,24 +99,9 @@ class LoginActivity : ComponentActivity() {
         userDocRef.get()
             .addOnSuccessListener { document ->
                 if (document.exists()) {
-                    val status = document.getString("status") ?: "pending"
-                    val phone = document.getString("phoneNumber") ?: ""
-                    val company = document.getString("companyName") ?: ""
-
-                    if (status == "pending" || phone.isEmpty() || company.isEmpty()) {
-                        Log.d(TAG, "📝 Profile incomplete, redirecting to ProfileCompletionActivity")
-                        val intent = ProfileCompletionActivity.Companion.createIntent(this, userId)
-                        startActivity(intent)
-                        finish()
-                    } else {
-                        Log.d(TAG, "🏠 Profile complete, navigating to MainActivity")
-                        navigateToMainActivity()
-                    }
+                    navigateToMainActivity()
                 } else {
-                    Log.d(TAG, "⚠️ User document not found, redirecting to ProfileCompletionActivity")
-                    val intent = ProfileCompletionActivity.Companion.createIntent(this, userId)
-                    startActivity(intent)
-                    finish()
+                    navigateToMainActivity()
                 }
             }
             .addOnFailureListener { exception ->

@@ -22,6 +22,7 @@ import com.example.ritik_2.complaint.viewcomplaint.ComplaintViewActivity
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.complaint.complaintregistration.RegisterComplain
+import com.example.ritik_2.notifications.NotificationManager
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.winshare.ServerConnectActivity
 import com.google.firebase.auth.FirebaseAuth
@@ -164,6 +165,11 @@ class MainActivity : ComponentActivity() {
                 4 -> {
                     Log.d(TAG, "🔗 Navigating to Server Connect")
                     startActivity(Intent(this, ServerConnectActivity::class.java))
+                }
+
+                5 -> {
+                    Log.d(TAG, "🔗 Navigating to Server Connect")
+                    startActivity(Intent(this, NotificationManager::class.java))
                 }
                 // Add more cases as needed
                 else -> {

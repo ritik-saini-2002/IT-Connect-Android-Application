@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.theme.Ritik_2Theme
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
@@ -34,15 +35,21 @@ class ProfileCompletionActivity : ComponentActivity() {
         }
     }
 
-    private val firestore = FirebaseFirestore.getInstance()
-    private val firebaseAuth = FirebaseAuth.getInstance()
-    private val storage = FirebaseStorage.getInstance()
+    private val firestore by lazy { FirebaseFirestore.getInstance() }
+    private val firebaseAuth by lazy { FirebaseAuth.getInstance() }
+    private val storage by lazy { FirebaseStorage.getInstance() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val userId = intent.getStringExtra(EXTRA_USER_ID) ?: ""
         Log.d(TAG, "ProfileCompletionActivity started for user: $userId")
+
+        if (userId.isEmpty()) {
+            Toast.makeText(this, "Invalid user session", Toast.LENGTH_SHORT).show()
+            navigateToLogin()
+            return
+        }
 
         setContent {
             Ritik_2Theme {
@@ -52,14 +59,6 @@ class ProfileCompletionActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = if (isDarkTheme) Color(0xFF121212) else Color(0xFFFAFAFA)
                 ) {
-                    if (userId.isEmpty()) {
-                        LaunchedEffect(Unit) {
-                            Toast.makeText(this@ProfileCompletionActivity, "Invalid user session", Toast.LENGTH_SHORT).show()
-                            navigateToLogin()
-                        }
-                        return@Surface
-                    }
-
                     ProfileCompletionScreen(
                         userId = userId,
                         isDarkTheme = isDarkTheme,
@@ -86,10 +85,15 @@ class ProfileCompletionActivity : ComponentActivity() {
     ) {
         Log.d(TAG, "Starting profile update for user: $userId")
 
-        if (imageUri != null) {
-            uploadImageAndUpdateProfile(imageUri, updatedData, newPassword, userId)
-        } else {
-            updateProfileData(updatedData, newPassword, userId)
+        try {
+            if (imageUri != null) {
+                uploadImageAndUpdateProfile(imageUri, updatedData, newPassword, userId)
+            } else {
+                updateHierarchicalProfileData(updatedData, newPassword, userId)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling profile update", e)
+            Toast.makeText(this, "Profile update failed: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -99,46 +103,99 @@ class ProfileCompletionActivity : ComponentActivity() {
         newPassword: String?,
         userId: String
     ) {
-        val imageRef = storage.reference.child("profile_images/$userId.jpg")
+        firestore.collection("user_access_control").document(userId).get()
+            .addOnSuccessListener { accessDoc ->
+                if (accessDoc.exists()) {
+                    val sanitizedCompany = accessDoc.getString("sanitizedCompany") ?: "default_company"
+                    val sanitizedDepartment = accessDoc.getString("sanitizedDepartment") ?: "default_department"
+                    val role = accessDoc.getString("role") ?: "Employee"
 
-        imageRef.putFile(imageUri)
-            .addOnSuccessListener {
-                imageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
-                    val dataWithImage = updatedData.toMutableMap()
-                    dataWithImage["imageUrl"] = downloadUrl.toString()
-                    updateProfileData(dataWithImage, newPassword, userId)
-                }.addOnFailureListener { e ->
-                    Log.e(TAG, "Failed to get download URL", e)
-                    Toast.makeText(this, "Image upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    val imageRef = storage.reference.child("users/$sanitizedCompany/$sanitizedDepartment/$role/$userId/profile.jpg")
+
+                    imageRef.putFile(imageUri)
+                        .addOnSuccessListener {
+                            imageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
+                                val dataWithImage = updatedData.toMutableMap()
+                                dataWithImage["profile.imageUrl"] = downloadUrl.toString()
+                                dataWithImage["lastUpdated"] = Timestamp.now()
+                                updateHierarchicalProfileData(dataWithImage, newPassword, userId)
+                            }.addOnFailureListener { e ->
+                                Log.e(TAG, "Failed to get download URL", e)
+                                Toast.makeText(this, "Image upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e(TAG, "Image upload failed", e)
+                            Toast.makeText(this, "Image upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                } else {
+                    Log.e(TAG, "User access control not found")
+                    Toast.makeText(this, "User access control not found", Toast.LENGTH_SHORT).show()
                 }
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "Image upload failed", e)
-                Toast.makeText(this, "Image upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Failed to get user access control", e)
+                Toast.makeText(this, "Failed to get user information: ${e.message}", Toast.LENGTH_SHORT).show()
             }
     }
 
-    private fun updateProfileData(
+    private fun updateHierarchicalProfileData(
         updatedData: Map<String, Any>,
         newPassword: String?,
         userId: String
     ) {
-        Log.d(TAG, "Updating profile data for user: $userId")
+        Log.d(TAG, "Updating hierarchical profile data for user: $userId")
 
-        firestore.collection("users").document(userId)
-            .update(updatedData)
-            .addOnSuccessListener {
-                Log.d(TAG, "Profile updated successfully")
-                if (newPassword != null && newPassword.isNotEmpty()) {
-                    updatePassword(newPassword)
+        firestore.collection("user_access_control").document(userId).get()
+            .addOnSuccessListener { accessDoc ->
+                if (accessDoc.exists()) {
+                    val sanitizedCompany = accessDoc.getString("sanitizedCompany") ?: "default_company"
+                    val sanitizedDepartment = accessDoc.getString("sanitizedDepartment") ?: "default_department"
+                    val role = accessDoc.getString("role") ?: "Employee"
+
+                    val userDocRef = firestore
+                        .collection("users")
+                        .document(sanitizedCompany)
+                        .collection(sanitizedDepartment)
+                        .document(role)
+                        .collection("users")
+                        .document(userId)
+
+                    val batch = firestore.batch()
+                    val finalUpdateData = updatedData.toMutableMap()
+                    finalUpdateData["lastUpdated"] = Timestamp.now()
+                    finalUpdateData["isProfileComplete"] = true
+
+                    batch.update(userDocRef, finalUpdateData)
+
+                    // Update user_access_control
+                    batch.update(
+                        firestore.collection("user_access_control").document(userId),
+                        mapOf("lastAccess" to Timestamp.now())
+                    )
+
+                    batch.commit()
+                        .addOnSuccessListener {
+                            Log.d(TAG, "Hierarchical profile updated successfully")
+                            if (newPassword != null && newPassword.isNotEmpty()) {
+                                updatePassword(newPassword)
+                            } else {
+                                Toast.makeText(this, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
+                                navigateToMainActivity()
+                            }
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e(TAG, "Hierarchical profile update failed", e)
+                            Toast.makeText(this, "Profile update failed: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
                 } else {
-                    Toast.makeText(this, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
-                    navigateToMainActivity()
+                    Log.e(TAG, "User access control document not found")
+                    Toast.makeText(this, "User access control not found", Toast.LENGTH_SHORT).show()
                 }
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "Profile update failed", e)
-                Toast.makeText(this, "Profile update failed: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Failed to get user access control", e)
+                Toast.makeText(this, "Failed to get user information: ${e.message}", Toast.LENGTH_LONG).show()
             }
     }
 
@@ -169,10 +226,15 @@ class ProfileCompletionActivity : ComponentActivity() {
     }
 
     private fun navigateToLogin() {
-        val intent = Intent(this, LoginActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        startActivity(intent)
-        finish()
+        try {
+            val intent = Intent(this, LoginActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            startActivity(intent)
+            finish()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error navigating to login", e)
+            finish()
+        }
     }
 
     private fun navigateToMainActivity() {
