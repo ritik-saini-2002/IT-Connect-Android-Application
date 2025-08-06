@@ -1,4 +1,4 @@
-package com.example.ritik_2.complaint.viewcomplaint.ui
+package com.example.ritik_2.complaint.viewcomplaint.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,19 +14,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.ritik_2.complaint.viewcomplaint.data.models.ComplaintUpdates
-import com.example.ritik_2.complaint.viewcomplaint.data.models.ComplaintWithDetails
-import com.example.ritik_2.complaint.viewcomplaint.data.models.UserData
-import com.example.ritik_2.complaint.viewcomplaint.data.models.UserPermissions
-import com.example.ritik_2.complaint.viewcomplaint.data.models.canBeAssigned
-import com.example.ritik_2.complaint.viewcomplaint.data.models.canBeClosed
-import com.example.ritik_2.complaint.viewcomplaint.data.models.canBeDeleted
-import com.example.ritik_2.complaint.viewcomplaint.data.models.canBeEdited
-import com.example.ritik_2.complaint.viewcomplaint.data.models.canBeReopened
-import com.example.ritik_2.complaint.viewcomplaint.data.models.getAssigneeText
-import com.example.ritik_2.complaint.viewcomplaint.data.models.getDepartmentText
-import com.example.ritik_2.complaint.viewcomplaint.data.models.getTimeSinceCreation
-import com.example.ritik_2.complaint.viewcomplaint.data.models.isOverdue
+import com.example.ritik_2.complaint.viewcomplaint.data.models.*
+import com.example.ritik_2.complaint.viewcomplaint.ui.profile.ProfilePicture
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,6 +24,7 @@ fun ComplaintCard(
     currentUser: UserData?,
     userPermissions: UserPermissions?,
     availableEmployees: List<UserData>,
+    userProfile: UserProfile?, // Add this parameter
     onEdit: (ComplaintUpdates) -> Unit,
     onDelete: () -> Unit,
     onAssign: (String, String) -> Unit,
@@ -42,6 +32,7 @@ fun ComplaintCard(
     onReopen: () -> Unit,
     onChangeStatus: (String, String) -> Unit,
     onViewDetails: () -> Unit,
+    onViewUserProfile: (String) -> Unit, // Add this parameter
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -62,26 +53,39 @@ fun ComplaintCard(
         Column(
             modifier = Modifier.padding(16.dp)
         ) {
-            // Header Row
+            // Header Row with Profile Picture
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Title and ID
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = complaint.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                // Profile Picture and Title
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    ProfilePicture(
+                        profilePictureUrl = userProfile?.profilePictureUrl,
+                        userName = complaint.createdBy.name,
+                        size = 40.dp,
+                        onClick = { onViewUserProfile(complaint.createdBy.userId) }
                     )
-                    Text(
-                        text = "ID: ${complaint.id.take(8)}...",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = complaint.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "ID: ${complaint.id.take(8)}...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 // Menu Button
@@ -112,7 +116,7 @@ fun ComplaintCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Status and Priority Row
             Row(
@@ -120,31 +124,19 @@ fun ComplaintCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Status Chip
-                StatusChip(
-                    status = complaint.status,
-                    modifier = Modifier
-                )
+                StatusChip(status = complaint.status)
+                UrgencyChip(urgency = complaint.urgency)
 
-                // Urgency Chip
-                UrgencyChip(
-                    urgency = complaint.urgency,
-                    modifier = Modifier
-                )
-
-                // Global Badge
                 if (complaint.isGlobal) {
                     GlobalBadge()
                 }
 
-                // Overdue Badge
                 if (complaint.isOverdue()) {
                     OverdueBadge()
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Attachment Icon
                 if (complaint.hasAttachment) {
                     Icon(
                         Icons.Default.Attachment,
@@ -174,7 +166,6 @@ fun ComplaintCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Department
                 InfoItem(
                     icon = Icons.Default.Business,
                     label = "Department",
@@ -182,7 +173,6 @@ fun ComplaintCard(
                     modifier = Modifier.weight(1f)
                 )
 
-                // Assigned To
                 InfoItem(
                     icon = Icons.Default.Person,
                     label = "Assigned to",
@@ -199,7 +189,6 @@ fun ComplaintCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Created info
                 Column {
                     Text(
                         text = "Created by ${complaint.createdBy.name}",
@@ -217,10 +206,9 @@ fun ComplaintCard(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // Quick assign button for managers
                     if (complaint.canBeAssigned(userPermissions) && complaint.assignedToUser == null) {
                         IconButton(
-                            onClick = { /* Quick assign to first available employee */ },
+                            onClick = { /* Quick assign logic */ },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
@@ -231,7 +219,6 @@ fun ComplaintCard(
                         }
                     }
 
-                    // Quick close button for resolvers
                     if (complaint.canBeClosed(userPermissions)) {
                         IconButton(
                             onClick = { onClose("Quick resolution") },

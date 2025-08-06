@@ -20,10 +20,13 @@ import com.example.ritik_2.complaint.complaintregistration.RegisterComplain
 import com.example.ritik_2.complaint.viewcomplaint.data.ComplaintRepository
 import com.example.ritik_2.complaint.viewcomplaint.data.UserRepository
 import com.example.ritik_2.complaint.viewcomplaint.data.models.*
+import com.example.ritik_2.complaint.viewcomplaint.repository.UserProfileRepository
 import com.example.ritik_2.complaint.viewcomplaint.ui.ComplaintViewScreen
 import com.example.ritik_2.complaint.viewcomplaint.utils.NotificationManager
 import com.example.ritik_2.complaint.viewcomplaint.utils.PermissionChecker
+import com.example.ritik_2.complaint.viewcomplaint.utils.ProfilePictureManager
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +39,8 @@ class ComplaintViewActivity : ComponentActivity() {
     private lateinit var notificationManager: NotificationManager
     private lateinit var permissionChecker: PermissionChecker
 
+    private lateinit var userProfileRepository: UserProfileRepository
+
     // Firebase instances
     private val auth = FirebaseAuth.getInstance()
 
@@ -45,6 +50,9 @@ class ComplaintViewActivity : ComponentActivity() {
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading
+
+    private val _userProfiles = MutableStateFlow<Map<String, UserProfile>>(emptyMap())
+    val userProfiles: StateFlow<Map<String, UserProfile>> = _userProfiles
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
@@ -119,6 +127,7 @@ class ComplaintViewActivity : ComponentActivity() {
                 val employees by availableEmployees.collectAsState()
                 val stats by complaintStats.collectAsState()
                 val error by errorMessage.collectAsState()
+                val profiles by userProfiles.collectAsState() // Add this
 
                 if (loading && complaintsList.isEmpty() && userData == null) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -139,6 +148,7 @@ class ComplaintViewActivity : ComponentActivity() {
                         availableEmployees = employees,
                         complaintStats = stats,
                         errorMessage = error,
+                        userProfiles = profiles,
                         onDeleteComplaint = ::deleteComplaint,
                         onUpdateComplaint = ::updateComplaint,
                         onAssignComplaint = ::assignComplaint,
@@ -153,7 +163,8 @@ class ComplaintViewActivity : ComponentActivity() {
                         onViewModeChange = ::updateViewMode,
                         onNavigateToActivity = ::navigateToActivity,
                         onBackClick = { finish() },
-                        onClearError = { _errorMessage.value = null }
+                        onClearError = { _errorMessage.value = null },
+                        onViewUserProfile = ::onViewUserProfile
                     )
                 }
             }
@@ -165,6 +176,35 @@ class ComplaintViewActivity : ComponentActivity() {
         userRepository = UserRepository()
         notificationManager = NotificationManager(this)
         permissionChecker = PermissionChecker()
+
+        // Add profile picture manager and repository
+        val profilePictureManager = ProfilePictureManager(this)
+        userProfileRepository = UserProfileRepository(
+            FirebaseFirestore.getInstance(),
+            profilePictureManager
+        )
+    }
+
+    private fun loadUserProfiles(complaints: List<ComplaintWithDetails>) {
+        lifecycleScope.launch {
+            val currentProfiles = _userProfiles.value.toMutableMap()
+            val userIdsToLoad = complaints.map { it.createdBy.userId }
+                .filter { !currentProfiles.containsKey(it) }
+                .distinct()
+
+            userIdsToLoad.forEach { userId ->
+                try {
+                    val result = userProfileRepository.getUserProfile(userId)
+                    result.getOrNull()?.let { profile ->
+                        currentProfiles[userId] = profile
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error loading profile for user: $userId", e)
+                }
+            }
+
+            _userProfiles.value = currentProfiles
+        }
     }
 
     private fun handleAuthenticationFailure() {
@@ -296,6 +336,9 @@ class ComplaintViewActivity : ComponentActivity() {
                     _complaints.value = currentList + complaints
                 }
 
+                // Load user profiles for the complaints
+                loadUserProfiles(complaints)
+
                 _hasMoreData.value = complaints.size >= 15 // Batch size
 
             } catch (e: Exception) {
@@ -309,6 +352,24 @@ class ComplaintViewActivity : ComponentActivity() {
             } finally {
                 _isLoading.value = false
                 onComplete()
+            }
+        }
+    }
+
+    // Add method to handle profile picture clicks
+    private fun onViewUserProfile(userId: String) {
+        lifecycleScope.launch {
+            try {
+                val result = userProfileRepository.getUserProfile(userId)
+                result.getOrNull()?.let { profile ->
+                    // Update the profile in the map
+                    val currentProfiles = _userProfiles.value.toMutableMap()
+                    currentProfiles[userId] = profile
+                    _userProfiles.value = currentProfiles
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading detailed profile for user: $userId", e)
+                showError("Error loading user profile: ${e.message}")
             }
         }
     }

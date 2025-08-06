@@ -15,6 +15,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ritik_2.complaint.viewcomplaint.data.models.*
+import com.example.ritik_2.complaint.viewcomplaint.ui.components.ComplaintCard
+import com.example.ritik_2.complaint.viewcomplaint.ui.profile.UserProfileDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,6 +34,7 @@ fun ComplaintViewScreen(
     availableEmployees: List<UserData>,
     complaintStats: ComplaintStats?,
     errorMessage: String?,
+    userProfiles: Map<String, UserProfile>, // Add this parameter
     onDeleteComplaint: (String) -> Unit,
     onUpdateComplaint: (String, ComplaintUpdates) -> Unit,
     onAssignComplaint: (String, String, String) -> Unit,
@@ -46,18 +49,18 @@ fun ComplaintViewScreen(
     onViewModeChange: (ViewMode) -> Unit,
     onNavigateToActivity: (String) -> Unit,
     onBackClick: () -> Unit,
-    onClearError: () -> Unit
+    onClearError: () -> Unit,
+    onViewUserProfile: (String) -> Unit // Add this parameter
 ) {
     val context = LocalContext.current
     var showFilterDialog by remember { mutableStateOf(false) }
     var showSortDialog by remember { mutableStateOf(false) }
     var showViewModeDialog by remember { mutableStateOf(false) }
     var selectedComplaint by remember { mutableStateOf<ComplaintWithDetails?>(null) }
+    var selectedUserProfile by remember { mutableStateOf<UserProfile?>(null) }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
+        modifier = Modifier.fillMaxSize()
     ) {
         // Top App Bar
         TopAppBar(
@@ -97,122 +100,178 @@ fun ComplaintViewScreen(
                 IconButton(onClick = { onNavigateToActivity("RegisterComplain") }) {
                     Icon(Icons.Default.Add, contentDescription = "Add Complaint")
                 }
+
+                // Refresh Button
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        modifier = if (isRefreshing) Modifier.size(20.dp) else Modifier
+                    )
+                }
             }
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Search Bar
-        SearchBar(
-            query = searchQuery,
-            onQueryChange = onSearchQueryChange,
-            placeholder = "Search complaints..."
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Statistics Card (if available)
-        complaintStats?.let { stats ->
-            StatisticsCard(
-                stats = stats,
-                modifier = Modifier.fillMaxWidth()
+        // Progress Indicator
+        if (isRefreshing || showRefreshAnimation) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary
             )
-            Spacer(modifier = Modifier.height(8.dp))
+        } else {
+            // Invisible spacer to maintain layout consistency
+            Spacer(modifier = Modifier.height(4.dp))
         }
 
-        // Error Message
-        errorMessage?.let { error ->
-            ErrorCard(
-                message = error,
-                onDismiss = onClearError,
-                modifier = Modifier.fillMaxWidth()
-            )
+        // Main Content
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+        ) {
             Spacer(modifier = Modifier.height(8.dp))
-        }
 
-        // Filter and Sort Info
-        FilterSortInfo(
-            currentFilter = currentFilterOption,
-            currentSort = currentSortOption,
-            onClearFilter = { onFilterOptionChange(null) }
-        )
+            // Search Bar
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = onSearchQueryChange,
+                placeholder = "Search complaints..."
+            )
 
-        Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-        // Complaints List
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (complaints.isEmpty() && !isRefreshing) {
-                EmptyStateView(
-                    viewMode = currentViewMode,
-                    onCreateComplaint = { onNavigateToActivity("RegisterComplain") }
+            // Statistics Card (if available)
+            complaintStats?.let { stats ->
+                StatisticsCard(
+                    stats = stats,
+                    modifier = Modifier.fillMaxWidth()
                 )
-            } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(
-                        items = complaints,
-                        key = { complaint -> complaint.id }
-                    ) { complaint ->
-                        ComplaintCard(
-                            complaint = complaint,
-                            currentUser = currentUserData,
-                            userPermissions = userPermissions,
-                            availableEmployees = availableEmployees,
-                            onEdit = { updates ->
-                                onUpdateComplaint(complaint.id, updates)
-                            },
-                            onDelete = {
-                                onDeleteComplaint(complaint.id)
-                            },
-                            onAssign = { assigneeId, assigneeName ->
-                                onAssignComplaint(complaint.id, assigneeId, assigneeName)
-                            },
-                            onClose = { resolution ->
-                                onCloseComplaint(complaint.id, resolution)
-                            },
-                            onReopen = {
-                                onReopenComplaint(complaint.id)
-                            },
-                            onChangeStatus = { newStatus, reason ->
-                                onChangeStatus(complaint.id, newStatus, reason)
-                            },
-                            onViewDetails = {
-                                selectedComplaint = complaint
-                            }
-                        )
-                    }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
-                    // Load More Button
-                    if (hasMoreData && complaints.isNotEmpty()) {
-                        item {
-                            LoadMoreButton(
-                                onClick = onLoadMore,
-                                isLoading = isRefreshing
+            // Error Message
+            errorMessage?.let { error ->
+                ErrorCard(
+                    message = error,
+                    onDismiss = onClearError,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Filter and Sort Info
+            FilterSortInfo(
+                currentFilter = currentFilterOption,
+                currentSort = currentSortOption,
+                onClearFilter = { onFilterOptionChange(null) }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Complaints List
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (complaints.isEmpty() && !isRefreshing) {
+                    EmptyStateView(
+                        viewMode = currentViewMode,
+                        onCreateComplaint = { onNavigateToActivity("RegisterComplain") }
+                    )
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(
+                            items = complaints,
+                            key = { complaint -> complaint.id }
+                        ) { complaint ->
+                            ComplaintCard(
+                                complaint = complaint,
+                                currentUser = currentUserData,
+                                userPermissions = userPermissions,
+                                availableEmployees = availableEmployees,
+                                userProfile = userProfiles[complaint.createdBy.userId], // Pass user profile
+                                onEdit = { updates ->
+                                    onUpdateComplaint(complaint.id, updates)
+                                },
+                                onDelete = {
+                                    onDeleteComplaint(complaint.id)
+                                },
+                                onAssign = { assigneeId, assigneeName ->
+                                    onAssignComplaint(complaint.id, assigneeId, assigneeName)
+                                },
+                                onClose = { resolution ->
+                                    onCloseComplaint(complaint.id, resolution)
+                                },
+                                onReopen = {
+                                    onReopenComplaint(complaint.id)
+                                },
+                                onChangeStatus = { newStatus, reason ->
+                                    onChangeStatus(complaint.id, newStatus, reason)
+                                },
+                                onViewDetails = {
+                                    selectedComplaint = complaint
+                                },
+                                onViewUserProfile = { userId ->
+                                    val profile = userProfiles[userId]
+                                    if (profile != null) {
+                                        selectedUserProfile = profile
+                                    } else {
+                                        onViewUserProfile(userId)
+                                    }
+                                }
+                            )
+                        }
+
+                        // Load More Button
+                        if (hasMoreData && complaints.isNotEmpty()) {
+                            item {
+                                LoadMoreButton(
+                                    onClick = onLoadMore,
+                                    isLoading = isRefreshing
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Loading Indicator for initial load
+                if (isRefreshing && complaints.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = "Loading complaints...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
             }
-
-            // Refresh Animation Overlay
-            if (showRefreshAnimation) {
-                RefreshAnimation(
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-
-            // Loading Indicator
-            if (isRefreshing && complaints.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
         }
+    }
+
+    // User Profile Dialog
+    selectedUserProfile?.let { profile ->
+        UserProfileDialog(
+            userProfile = profile,
+            onDismiss = { selectedUserProfile = null },
+            onSendMessage = {
+                // Handle send message functionality
+                selectedUserProfile = null
+            },
+            onViewAllComplaints = {
+                // Filter complaints by this user
+                onSearchQueryChange(profile.name)
+                selectedUserProfile = null
+            }
+        )
     }
 
     // Dialogs

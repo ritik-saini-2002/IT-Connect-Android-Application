@@ -48,7 +48,8 @@ data class UserInfo(
     val userId: String,
     val name: String,
     val email: String,
-    val department: String
+    val department: String,
+    val profilePictureUrl: String? = null
 )
 
 data class UserData(
@@ -84,6 +85,32 @@ data class UserPermissions(
     val canEditComplaints: Boolean = false,
     val canViewStatistics: Boolean = false,
     val canManageUsers: Boolean = false
+)
+
+data class UserProfile(
+    val userId: String,
+    val name: String,
+    val email: String,
+    val phoneNumber: String,
+    val designation: String,
+    val department: String,
+    val role: String,
+    val companyName: String,
+    val profilePictureUrl: String? = null,
+    val joinedDate: Long,
+    val lastLoginDate: Long? = null,
+    val isActive: Boolean = true,
+    val bio: String? = null,
+    val skills: List<String> = emptyList(),
+    val complaintsCreated: Int = 0,
+    val complaintsResolved: Int = 0
+)
+
+data class ProfilePictureInfo(
+    val url: String,
+    val uploadedAt: Long,
+    val fileName: String,
+    val fileSize: Long
 )
 
 data class ComplaintUpdates(
