@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -33,8 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.tasks.await
 
-// System-aware Color Scheme (same as before)
+// System-aware Color Scheme
 object ThemedColors {
     @Composable
     fun primary(isDark: Boolean) = if (isDark) Color(0xFF8B8CF6) else Color(0xFF6366F1)
@@ -61,50 +61,53 @@ object ThemedColors {
     fun outline(isDark: Boolean) = if (isDark) Color(0xFF4A4A4A) else Color(0xFFE5E7EB)
 
     @Composable
-    fun readOnlyBackground(isDark: Boolean) = if (isDark) Color(0xFF2A2A2A) else Color(0xFFF8F9FA)
+    fun success(isDark: Boolean) = if (isDark) Color(0xFF4ADE80) else Color(0xFF10B981)
+
+    @Composable
+    fun warning(isDark: Boolean) = if (isDark) Color(0xFFFBBF24) else Color(0xFFF59E0B)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileCompletionScreen(
     userId: String,
+    userRole: String,
     isDarkTheme: Boolean,
     onProfileUpdateClick: (Map<String, Any>, String?, Uri?) -> Unit,
     onSkipClick: () -> Unit,
     onLogoutClick: () -> Unit
 ) {
-    // Core user data states (from hierarchical structure)
+    // User data states
     var email by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var role by remember { mutableStateOf("") }
     var designation by remember { mutableStateOf("") }
+    var phoneNumber by remember { mutableStateOf("") }
     var companyName by remember { mutableStateOf("") }
     var department by remember { mutableStateOf("") }
-    var createdBy by remember { mutableStateOf("") }
-
-    // Profile data states (user can edit these)
-    var phoneNumber by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
     var dateOfBirth by remember { mutableStateOf("") }
+    var skills by remember { mutableStateOf("") }
+    var salary by remember { mutableStateOf("") }
     var employeeId by remember { mutableStateOf("") }
     var reportingTo by remember { mutableStateOf("") }
-    var salary by remember { mutableStateOf("") }
-    var emergencyContactName by remember { mutableStateOf("") }
-    var emergencyContactPhone by remember { mutableStateOf("") }
-    var emergencyContactRelation by remember { mutableStateOf("") }
-    var currentImageUrl by remember { mutableStateOf("") }
+    var joiningDate by remember { mutableStateOf("") }
 
-    // Work Stats (user can edit some of these)
+    // Work stats
     var experience by remember { mutableStateOf("0") }
     var completedProjects by remember { mutableStateOf("0") }
     var activeProjects by remember { mutableStateOf("0") }
     var pendingTasks by remember { mutableStateOf("0") }
     var completedTasks by remember { mutableStateOf("0") }
+    var totalWorkingHours by remember { mutableStateOf("0") }
 
-    // Admin restrictions
-    var isAdminCreated by remember { mutableStateOf(false) }
-    var canEditBasicInfo by remember { mutableStateOf(true) }
+    // Emergency contact
+    var emergencyContactName by remember { mutableStateOf("") }
+    var emergencyContactPhone by remember { mutableStateOf("") }
+    var emergencyContactRelation by remember { mutableStateOf("") }
 
+    // Image and password
+    var currentImageUrl by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var confirmNewPassword by remember { mutableStateOf("") }
 
@@ -113,8 +116,10 @@ fun ProfileCompletionScreen(
     var isConfirmPasswordVisible by remember { mutableStateOf(false) }
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var isUpdating by remember { mutableStateOf(false) }
     var showErrors by remember { mutableStateOf(false) }
     var isDataLoaded by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val scrollState = rememberScrollState()
 
@@ -124,111 +129,177 @@ fun ProfileCompletionScreen(
         imageUri = uri
     }
 
-    // Load hierarchical user data
+    // Check if user can modify core data (Administrator or Manager only)
+    val canModifyCoreData = userRole in listOf("Administrator", "Manager")
+
+    // Load existing user data
     LaunchedEffect(userId) {
         if (userId.isNotEmpty()) {
-            // First get access control to find the document path
-            FirebaseFirestore.getInstance().collection("user_access_control").document(userId).get()
-                .addOnSuccessListener { accessDoc ->
-                    if (accessDoc.exists()) {
-                        val documentPath = accessDoc.getString("documentPath") ?: ""
-                        val sanitizedCompany = accessDoc.getString("sanitizedCompany") ?: ""
-                        val sanitizedDepartment = accessDoc.getString("sanitizedDepartment") ?: ""
-                        val userRole = accessDoc.getString("role") ?: ""
+            isLoading = true
+            try {
+                // First try to get access control data
+                val accessControlDoc = FirebaseFirestore.getInstance()
+                    .collection("user_access_control")
+                    .document(userId)
+                    .get()
+                    .await()
 
-                        // Set access control data
-                        email = accessDoc.getString("email") ?: ""
-                        name = accessDoc.getString("name") ?: ""
-                        role = userRole
-                        companyName = accessDoc.getString("companyName") ?: ""
-                        department = accessDoc.getString("department") ?: ""
+                if (accessControlDoc.exists()) {
+                    val accessData = accessControlDoc.data ?: emptyMap()
 
-                        // Now get the full user data from hierarchical structure
-                        if (documentPath.isNotEmpty()) {
-                            val userDocRef = FirebaseFirestore.getInstance()
-                                .collection("users")
-                                .document(sanitizedCompany)
-                                .collection(sanitizedDepartment)
-                                .document(userRole)
-                                .collection("users")
-                                .document(userId)
+                    // Load basic data from access control
+                    email = accessData["email"]?.toString() ?: ""
+                    name = accessData["name"]?.toString() ?: ""
+                    role = accessData["role"]?.toString() ?: userRole
+                    companyName = accessData["companyName"]?.toString() ?: ""
+                    department = accessData["department"]?.toString() ?: ""
 
-                            userDocRef.get()
-                                .addOnSuccessListener { userDoc ->
-                                    if (userDoc.exists()) {
-                                        val data = userDoc.data ?: emptyMap()
+                    // Try to get detailed data from hierarchical structure
+                    val documentPath = accessData["documentPath"]?.toString()
+                    if (!documentPath.isNullOrEmpty()) {
+                        try {
+                            val userDoc = FirebaseFirestore.getInstance()
+                                .document(documentPath)
+                                .get()
+                                .await()
 
-                                        // Core info (mostly read-only)
-                                        designation = data["designation"]?.toString() ?: ""
-                                        createdBy = data["createdBy"]?.toString() ?: ""
+                            if (userDoc.exists()) {
+                                val userData = userDoc.data ?: emptyMap()
 
-                                        // Check if admin created (restrictions apply)
-                                        isAdminCreated = createdBy != "self_registration"
-                                        canEditBasicInfo = !isAdminCreated
+                                // Basic info
+                                designation = userData["designation"]?.toString() ?: ""
 
-                                        // Profile data (user can edit)
-                                        val profile = data["profile"] as? Map<*, *>
-                                        if (profile != null) {
-                                            currentImageUrl = profile["imageUrl"]?.toString() ?: ""
-                                            phoneNumber = profile["phoneNumber"]?.toString() ?: ""
-                                            address = profile["address"]?.toString() ?: ""
-                                            dateOfBirth = profile["dateOfBirth"]?.toString() ?: ""
-                                            employeeId = profile["employeeId"]?.toString() ?: ""
-                                            reportingTo = profile["reportingTo"]?.toString() ?: ""
-                                            salary = profile["salary"]?.toString() ?: ""
+                                // Profile data
+                                val profile = userData["profile"] as? Map<String, Any> ?: emptyMap()
+                                phoneNumber = profile["phoneNumber"]?.toString() ?: ""
+                                address = profile["address"]?.toString() ?: ""
+                                dateOfBirth = profile["dateOfBirth"]?.toString() ?: ""
+                                currentImageUrl = profile["imageUrl"]?.toString() ?: ""
+                                salary = profile["salary"]?.toString() ?: ""
+                                employeeId = profile["employeeId"]?.toString() ?: ""
+                                reportingTo = profile["reportingTo"]?.toString() ?: ""
+                                joiningDate = profile["joiningDate"]?.toString() ?: ""
 
-                                            val emergencyContact = profile["emergencyContact"] as? Map<*, *>
-                                            if (emergencyContact != null) {
-                                                emergencyContactName = emergencyContact["name"]?.toString() ?: ""
-                                                emergencyContactPhone = emergencyContact["phone"]?.toString() ?: ""
-                                                emergencyContactRelation = emergencyContact["relation"]?.toString() ?: ""
-                                            }
-                                        }
+                                // Emergency contact
+                                val emergencyContact = profile["emergencyContact"] as? Map<String, Any> ?: emptyMap()
+                                emergencyContactName = emergencyContact["name"]?.toString() ?: ""
+                                emergencyContactPhone = emergencyContact["phone"]?.toString() ?: ""
+                                emergencyContactRelation = emergencyContact["relation"]?.toString() ?: ""
 
-                                        // Work stats
-                                        val workStats = data["workStats"] as? Map<*, *>
-                                        if (workStats != null) {
-                                            experience = workStats["experience"]?.toString() ?: "0"
-                                            completedProjects = workStats["completedProjects"]?.toString() ?: "0"
-                                            activeProjects = workStats["activeProjects"]?.toString() ?: "0"
-                                            pendingTasks = workStats["pendingTasks"]?.toString() ?: "0"
-                                            completedTasks = workStats["completedTasks"]?.toString() ?: "0"
-                                        }
-                                    }
-                                    isDataLoaded = true
-                                }
-                                .addOnFailureListener {
-                                    isDataLoaded = true
-                                }
-                        } else {
-                            isDataLoaded = true
+                                // Work stats
+                                val workStats = userData["workStats"] as? Map<String, Any> ?: emptyMap()
+                                experience = (workStats["experience"] as? Number)?.toString() ?: "0"
+                                completedProjects = (workStats["completedProjects"] as? Number)?.toString() ?: "0"
+                                activeProjects = (workStats["activeProjects"] as? Number)?.toString() ?: "0"
+                                pendingTasks = (workStats["pendingTasks"] as? Number)?.toString() ?: "0"
+                                completedTasks = (workStats["completedTasks"] as? Number)?.toString() ?: "0"
+                                totalWorkingHours = (workStats["totalWorkingHours"] as? Number)?.toString() ?: "0"
+
+                                // Skills
+                                val skillsList = userData["skills"] as? List<String> ?: emptyList()
+                                skills = skillsList.joinToString(", ")
+                            }
+                        } catch (e: Exception) {
+                            println("Error loading detailed user data: $e")
                         }
-                    } else {
-                        isDataLoaded = true
+                    }
+                } else {
+                    // Fallback: try direct users collection
+                    val userDoc = FirebaseFirestore.getInstance()
+                        .collection("users")
+                        .document(userId)
+                        .get()
+                        .await()
+
+                    if (userDoc.exists()) {
+                        val data = userDoc.data ?: emptyMap()
+                        email = data["email"]?.toString() ?: ""
+                        name = data["name"]?.toString() ?: ""
+                        role = data["role"]?.toString() ?: userRole
+                        designation = data["designation"]?.toString() ?: ""
+                        companyName = data["companyName"]?.toString() ?: ""
+                        phoneNumber = data["phoneNumber"]?.toString() ?: ""
+                        address = data["address"]?.toString() ?: ""
+                        experience = data["experience"]?.toString() ?: "0"
+                        completedProjects = data["completedProjects"]?.toString() ?: "0"
+                        activeProjects = data["activeProjects"]?.toString() ?: "0"
+                        skills = (data["skills"] as? List<String>)?.joinToString(", ") ?: ""
+                        department = data["department"]?.toString() ?: ""
+                        salary = data["salary"]?.toString() ?: ""
+                        dateOfBirth = data["dateOfBirth"]?.toString() ?: ""
+                        currentImageUrl = data["imageUrl"]?.toString() ?: ""
                     }
                 }
-                .addOnFailureListener {
-                    isDataLoaded = true
-                }
+
+                isDataLoaded = true
+
+            } catch (e: Exception) {
+                println("Exception loading user data: $e")
+                errorMessage = "Error loading profile data: ${e.message}"
+                isDataLoaded = true
+            } finally {
+                isLoading = false
+            }
         }
     }
 
-    // Validation - phone number is required
+    // Form validation
     val isFormValid = phoneNumber.isNotBlank() &&
-            (newPassword.isEmpty() || (newPassword.length >= 6 && newPassword == confirmNewPassword))
+            (newPassword.isEmpty() || (newPassword.length >= 6 && newPassword == confirmNewPassword)) &&
+            (if (canModifyCoreData) {
+                name.isNotBlank() && companyName.isNotBlank() && department.isNotBlank()
+            } else true)
 
-    if (!isDataLoaded) {
+    // Loading screen
+    if (isLoading) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(color = ThemedColors.primary(isDarkTheme))
+                CircularProgressIndicator(
+                    color = ThemedColors.primary(isDarkTheme),
+                    modifier = Modifier.size(48.dp)
+                )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     "Loading your profile...",
-                    color = ThemedColors.onSurfaceVariant(isDarkTheme)
+                    color = ThemedColors.onSurfaceVariant(isDarkTheme),
+                    fontSize = 16.sp
                 )
+            }
+        }
+        return
+    }
+
+    // Error display
+    errorMessage?.let { message ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                Icons.Filled.Error,
+                contentDescription = null,
+                tint = ThemedColors.error(isDarkTheme),
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                message,
+                color = ThemedColors.error(isDarkTheme),
+                textAlign = TextAlign.Center,
+                fontSize = 16.sp
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = { errorMessage = null },
+                colors = ButtonDefaults.buttonColors(containerColor = ThemedColors.primary(isDarkTheme))
+            ) {
+                Text("Retry")
             }
         }
         return
@@ -241,7 +312,7 @@ fun ProfileCompletionScreen(
             .verticalScroll(scrollState)
             .padding(16.dp)
     ) {
-        // Header with restrictions info
+        // Header Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = ThemedColors.primary(isDarkTheme)),
@@ -270,8 +341,8 @@ fun ProfileCompletionScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = if (isAdminCreated) {
-                        "Your account was created by an administrator.\nSome fields are protected and cannot be modified."
+                    text = if (canModifyCoreData) {
+                        "You have administrator privileges - you can modify all fields"
                     } else {
                         "Update your information or skip to continue"
                     },
@@ -279,26 +350,6 @@ fun ProfileCompletionScreen(
                     color = Color.White.copy(alpha = 0.9f),
                     textAlign = TextAlign.Center
                 )
-
-                if (isAdminCreated) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Filled.AdminPanelSettings,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            "Created by: Administrator",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.8f)
-                        )
-                    }
-                }
             }
         }
 
@@ -312,7 +363,8 @@ fun ProfileCompletionScreen(
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                // Profile Image
+
+                // Profile Image Section
                 ProfileImageSection(
                     imageUri = imageUri,
                     currentImageUrl = currentImageUrl,
@@ -322,30 +374,105 @@ fun ProfileCompletionScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Basic Information (Protected for admin-created users)
-                SectionHeader(
-                    title = "Basic Information",
-                    icon = Icons.Filled.Person,
-                    isDarkTheme = isDarkTheme,
-                    isProtected = isAdminCreated
-                )
+                // Core Information (editable by Admin/Manager only)
+                SectionHeader("Core Information", Icons.Filled.AdminPanelSettings, isDarkTheme)
+
+                if (!canModifyCoreData) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = ThemedColors.warning(isDarkTheme).copy(alpha = 0.1f)),
+                        border = BorderStroke(1.dp, ThemedColors.warning(isDarkTheme).copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.Lock,
+                                contentDescription = null,
+                                tint = ThemedColors.warning(isDarkTheme),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Core information is read-only. Contact Administrator to modify.",
+                                fontSize = 12.sp,
+                                color = ThemedColors.warning(isDarkTheme)
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
-                ThemedReadOnlyField(name, "Full Name", isDarkTheme, isProtected = true)
-                Spacer(modifier = Modifier.height(8.dp))
-                ThemedReadOnlyField(email, "Email Address", isDarkTheme, isProtected = true)
-                Spacer(modifier = Modifier.height(8.dp))
-                ThemedReadOnlyField(role, "Role", isDarkTheme, isProtected = true)
-                Spacer(modifier = Modifier.height(8.dp))
-                ThemedReadOnlyField(designation, "Designation", isDarkTheme, isProtected = isAdminCreated)
-                Spacer(modifier = Modifier.height(8.dp))
-                ThemedReadOnlyField(companyName, "Company/Organization", isDarkTheme, isProtected = true)
-                Spacer(modifier = Modifier.height(8.dp))
-                ThemedReadOnlyField(department, "Department", isDarkTheme, isProtected = isAdminCreated)
+                if (canModifyCoreData) {
+                    ThemedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = "Full Name *",
+                        isError = showErrors && name.isBlank(),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    ThemedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = "Email Address *",
+                        keyboardType = KeyboardType.Email,
+                        isError = showErrors && email.isBlank(),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    RoleSelectionDropdown(
+                        selectedRole = role,
+                        onRoleSelected = { role = it },
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    ThemedTextField(
+                        value = companyName,
+                        onValueChange = { companyName = it },
+                        label = "Company/Organization *",
+                        isError = showErrors && companyName.isBlank(),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    ThemedTextField(
+                        value = department,
+                        onValueChange = { department = it },
+                        label = "Department *",
+                        isError = showErrors && department.isBlank(),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    ThemedTextField(
+                        value = designation,
+                        onValueChange = { designation = it },
+                        label = "Designation",
+                        isDarkTheme = isDarkTheme
+                    )
+                } else {
+                    ThemedReadOnlyField(name, "Full Name", isDarkTheme)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ThemedReadOnlyField(email, "Email Address", isDarkTheme)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ThemedReadOnlyField(role, "Role", isDarkTheme)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ThemedReadOnlyField(companyName, "Company/Organization", isDarkTheme)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ThemedReadOnlyField(department, "Department", isDarkTheme)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ThemedReadOnlyField(designation, "Designation", isDarkTheme)
+                }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Contact Information (User can edit)
+                // Contact Information
                 SectionHeader("Contact Information", Icons.Filled.ContactPhone, isDarkTheme)
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -369,21 +496,11 @@ fun ProfileCompletionScreen(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Personal Details
-                SectionHeader("Personal Details", Icons.Filled.Person, isDarkTheme)
+                // Professional Information
+                SectionHeader("Professional Information", Icons.Filled.Work, isDarkTheme)
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    ThemedTextField(
-                        value = dateOfBirth,
-                        onValueChange = { dateOfBirth = it },
-                        label = "Date of Birth",
-                        modifier = Modifier.weight(1f),
-                        isDarkTheme = isDarkTheme
-                    )
+                Row(modifier = Modifier.fillMaxWidth()) {
                     ThemedTextField(
                         value = employeeId,
                         onValueChange = { employeeId = it },
@@ -391,21 +508,7 @@ fun ProfileCompletionScreen(
                         modifier = Modifier.weight(1f),
                         isDarkTheme = isDarkTheme
                     )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    ThemedTextField(
-                        value = reportingTo,
-                        onValueChange = { reportingTo = it },
-                        label = "Reporting To",
-                        modifier = Modifier.weight(1f),
-                        isDarkTheme = isDarkTheme
-                    )
+                    Spacer(modifier = Modifier.width(12.dp))
                     ThemedTextField(
                         value = salary,
                         onValueChange = { salary = it },
@@ -416,10 +519,118 @@ fun ProfileCompletionScreen(
                     )
                 }
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ThemedTextField(
+                        value = joiningDate,
+                        onValueChange = { joiningDate = it },
+                        label = "Joining Date (YYYY-MM-DD)",
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    ThemedTextField(
+                        value = reportingTo,
+                        onValueChange = { reportingTo = it },
+                        label = "Reporting To",
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                ThemedTextField(
+                    value = dateOfBirth,
+                    onValueChange = { dateOfBirth = it },
+                    label = "Date of Birth (YYYY-MM-DD)",
+                    isDarkTheme = isDarkTheme
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                ThemedTextField(
+                    value = skills,
+                    onValueChange = { skills = it },
+                    label = "Skills (comma-separated)",
+                    isDarkTheme = isDarkTheme
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Work Statistics
+                SectionHeader("Work Statistics", Icons.Filled.Analytics, isDarkTheme)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ThemedTextField(
+                        value = experience,
+                        onValueChange = { experience = it },
+                        label = "Experience (years)",
+                        keyboardType = KeyboardType.Number,
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    ThemedTextField(
+                        value = totalWorkingHours,
+                        onValueChange = { totalWorkingHours = it },
+                        label = "Total Working Hours",
+                        keyboardType = KeyboardType.Number,
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ThemedTextField(
+                        value = completedProjects,
+                        onValueChange = { completedProjects = it },
+                        label = "Completed Projects",
+                        keyboardType = KeyboardType.Number,
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    ThemedTextField(
+                        value = activeProjects,
+                        onValueChange = { activeProjects = it },
+                        label = "Active Projects",
+                        keyboardType = KeyboardType.Number,
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    ThemedTextField(
+                        value = pendingTasks,
+                        onValueChange = { pendingTasks = it },
+                        label = "Pending Tasks",
+                        keyboardType = KeyboardType.Number,
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    ThemedTextField(
+                        value = completedTasks,
+                        onValueChange = { completedTasks = it },
+                        label = "Completed Tasks",
+                        keyboardType = KeyboardType.Number,
+                        modifier = Modifier.weight(1f),
+                        isDarkTheme = isDarkTheme
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Emergency Contact
-                SectionHeader("Emergency Contact", Icons.Filled.ContactEmergency, isDarkTheme)
+                SectionHeader("Emergency Contact", Icons.Filled.EmergencyShare, isDarkTheme)
                 Spacer(modifier = Modifier.height(12.dp))
 
                 ThemedTextField(
@@ -431,18 +642,16 @@ fun ProfileCompletionScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth()) {
                     ThemedTextField(
                         value = emergencyContactPhone,
                         onValueChange = { emergencyContactPhone = it },
-                        label = "Emergency Phone",
+                        label = "Emergency Contact Phone",
                         keyboardType = KeyboardType.Phone,
                         modifier = Modifier.weight(1f),
                         isDarkTheme = isDarkTheme
                     )
+                    Spacer(modifier = Modifier.width(12.dp))
                     ThemedTextField(
                         value = emergencyContactRelation,
                         onValueChange = { emergencyContactRelation = it },
@@ -451,90 +660,6 @@ fun ProfileCompletionScreen(
                         isDarkTheme = isDarkTheme
                     )
                 }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-// Work Statistics (Some restrictions for admin-created users)
-                SectionHeader(
-                    title = "Work Statistics",
-                    icon = Icons.Filled.Work,
-                    isDarkTheme = isDarkTheme,
-                    isProtected = isAdminCreated && (experience != "0" || completedProjects != "0")
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (isAdminCreated && experience != "0") {
-                        ThemedReadOnlyField(
-                            value = experience,
-                            label = "Experience (Years)",
-                            isDarkTheme = isDarkTheme,
-                            isProtected = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        ThemedNumberField(
-                            value = experience,
-                            onValueChange = { experience = it },
-                            label = "Experience (Years)",
-                            modifier = Modifier.weight(1f),
-                            isDarkTheme = isDarkTheme
-                        )
-                    }
-
-                    if (isAdminCreated && completedProjects != "0") {
-                        ThemedReadOnlyField(
-                            value = completedProjects,
-                            label = "Completed Projects",
-                            isDarkTheme = isDarkTheme,
-                            isProtected = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        ThemedNumberField(
-                            value = completedProjects,
-                            onValueChange = { completedProjects = it },
-                            label = "Completed Projects",
-                            modifier = Modifier.weight(1f),
-                            isDarkTheme = isDarkTheme
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    ThemedNumberField(
-                        value = activeProjects,
-                        onValueChange = { activeProjects = it },
-                        label = "Active Projects",
-                        modifier = Modifier.weight(1f),
-                        isDarkTheme = isDarkTheme
-                    )
-                    ThemedNumberField(
-                        value = pendingTasks,
-                        onValueChange = { pendingTasks = it },
-                        label = "Pending Tasks",
-                        modifier = Modifier.weight(1f),
-                        isDarkTheme = isDarkTheme
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                ThemedNumberField(
-                    value = completedTasks,
-                    onValueChange = { completedTasks = it },
-                    label = "Completed Tasks",
-                    modifier = Modifier.fillMaxWidth(),
-                    isDarkTheme = isDarkTheme
-                )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -565,83 +690,58 @@ fun ProfileCompletionScreen(
                     )
                 }
 
-                // Restriction Notice for Admin-Created Users
-                if (isAdminCreated) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = ThemedColors.surfaceVariant(isDarkTheme)
-                        ),
-                        border = BorderStroke(1.dp, ThemedColors.primary(isDarkTheme).copy(alpha = 0.3f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Filled.Info,
-                                contentDescription = null,
-                                tint = ThemedColors.primary(isDarkTheme),
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    "Admin Restrictions",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.sp,
-                                    color = ThemedColors.primary(isDarkTheme)
-                                )
-                                Text(
-                                    "Basic information and pre-filled work statistics are protected by administrator settings.",
-                                    fontSize = 12.sp,
-                                    color = ThemedColors.onSurfaceVariant(isDarkTheme),
-                                    lineHeight = 16.sp
-                                )
-                            }
-                        }
-                    }
-                }
-
                 Spacer(modifier = Modifier.height(32.dp))
 
                 // Action Buttons
                 Button(
                     onClick = {
                         if (isFormValid) {
-                            isLoading = true
+                            isUpdating = true
 
-                            // Build update data properly
+                            // Prepare updated data
                             val updatedData = mutableMapOf<String, Any>()
 
-                            // Profile updates
-                            updatedData["profile.phoneNumber"] = phoneNumber
-                            updatedData["profile.address"] = address
-                            updatedData["profile.dateOfBirth"] = dateOfBirth
-                            updatedData["profile.employeeId"] = employeeId
-                            updatedData["profile.reportingTo"] = reportingTo
-                            updatedData["profile.salary"] = salary.toIntOrNull() ?: 0
-                            updatedData["profile.emergencyContact"] = mapOf(
-                                "name" to emergencyContactName,
-                                "phone" to emergencyContactPhone,
-                                "relation" to emergencyContactRelation
-                            )
+                            // Core data (only if user can modify)
+                            if (canModifyCoreData) {
+                                updatedData["name"] = name
+                                updatedData["email"] = email
+                                updatedData["role"] = role
+                                updatedData["companyName"] = companyName
+                                updatedData["department"] = department
+                                updatedData["designation"] = designation
+                            }
 
-                            // Work stats updates (only if not admin-restricted)
-                            if (!isAdminCreated || experience == "0") {
-                                updatedData["workStats.experience"] = experience.toIntOrNull() ?: 0
+                            // Contact information
+                            updatedData["phoneNumber"] = phoneNumber
+                            updatedData["address"] = address
+
+                            // Professional information
+                            if (employeeId.isNotEmpty()) updatedData["employeeId"] = employeeId
+                            if (salary.isNotEmpty()) updatedData["salary"] = salary.toIntOrNull() ?: 0
+                            if (joiningDate.isNotEmpty()) updatedData["joiningDate"] = joiningDate
+                            if (reportingTo.isNotEmpty()) updatedData["reportingTo"] = reportingTo
+                            if (dateOfBirth.isNotEmpty()) updatedData["dateOfBirth"] = dateOfBirth
+
+                            // Skills
+                            if (skills.isNotEmpty()) {
+                                updatedData["skills"] = skills.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                             }
-                            if (!isAdminCreated || completedProjects == "0") {
-                                updatedData["workStats.completedProjects"] = completedProjects.toIntOrNull() ?: 0
-                            }
-                            updatedData["workStats.activeProjects"] = activeProjects.toIntOrNull() ?: 0
-                            updatedData["workStats.pendingTasks"] = pendingTasks.toIntOrNull() ?: 0
-                            updatedData["workStats.completedTasks"] = completedTasks.toIntOrNull() ?: 0
-                            updatedData["isProfileComplete"] = true
+
+                            // Work statistics
+                            updatedData["experience"] = experience.toIntOrNull() ?: 0
+                            updatedData["completedProjects"] = completedProjects.toIntOrNull() ?: 0
+                            updatedData["activeProjects"] = activeProjects.toIntOrNull() ?: 0
+                            updatedData["pendingTasks"] = pendingTasks.toIntOrNull() ?: 0
+                            updatedData["completedTasks"] = completedTasks.toIntOrNull() ?: 0
+                            updatedData["totalWorkingHours"] = totalWorkingHours.toIntOrNull() ?: 0
+
+                            // Emergency contact
+                            updatedData["emergencyContactName"] = emergencyContactName
+                            updatedData["emergencyContactPhone"] = emergencyContactPhone
+                            updatedData["emergencyContactRelation"] = emergencyContactRelation
 
                             val passwordToUpdate = if (newPassword.isNotEmpty()) newPassword else null
-                            onProfileUpdateClick(updatedData.toMap(), passwordToUpdate, imageUri)
+                            onProfileUpdateClick(updatedData, passwordToUpdate, imageUri)
                         } else {
                             showErrors = true
                         }
@@ -649,11 +749,11 @@ fun ProfileCompletionScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
-                    enabled = !isLoading,
+                    enabled = !isUpdating,
                     colors = ButtonDefaults.buttonColors(containerColor = ThemedColors.primary(isDarkTheme)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    if (isLoading) {
+                    if (isUpdating) {
                         CircularProgressIndicator(
                             color = Color.White,
                             modifier = Modifier.size(20.dp),
@@ -674,63 +774,116 @@ fun ProfileCompletionScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Skip Button
-                OutlinedButton(
-                    onClick = onSkipClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = ThemedColors.onSurface(isDarkTheme)
-                    ),
-                    border = BorderStroke(1.dp, ThemedColors.outline(isDarkTheme))
-                ) {
-                    Icon(Icons.Filled.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Skip for Now", fontWeight = FontWeight.Medium)
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
+//                // Skip Button
+//                OutlinedButton(
+//                    onClick = onSkipClick,
+//                    modifier = Modifier.fillMaxWidth(),
+//                    shape = RoundedCornerShape(12.dp),
+//                    colors = ButtonDefaults.outlinedButtonColors(
+//                        contentColor = ThemedColors.onSurface(isDarkTheme)
+//                    ),
+//                    border = BorderStroke(1.dp, ThemedColors.outline(isDarkTheme))
+//                ) {
+//                    Icon(Icons.Filled.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
+//                    Spacer(modifier = Modifier.width(8.dp))
+//                    Text("Skip for Now", fontWeight = FontWeight.Medium)
+//                }
+//
+//                Spacer(modifier = Modifier.height(12.dp))
 
                 // Logout Button
-                OutlinedButton(
-                    onClick = onLogoutClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = ThemedColors.error(isDarkTheme)
-                    ),
-                    border = BorderStroke(1.dp, ThemedColors.error(isDarkTheme).copy(alpha = 0.5f))
-                ) {
-                    Icon(Icons.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Logout", fontWeight = FontWeight.Medium)
-                }
+//                OutlinedButton(
+//                    onClick = onLogoutClick,
+//                    modifier = Modifier.fillMaxWidth(),
+//                    shape = RoundedCornerShape(12.dp),
+//                    colors = ButtonDefaults.outlinedButtonColors(
+//                        contentColor = ThemedColors.error(isDarkTheme)
+//                    ),
+//                    border = BorderStroke(1.dp, ThemedColors.error(isDarkTheme).copy(alpha = 0.5f))
+//                ) {
+//                    Icon(Icons.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+//                    Spacer(modifier = Modifier.width(8.dp))
+//                    Text("Logout", fontWeight = FontWeight.Medium)
+//                }
 
-                if (showErrors && phoneNumber.isBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Phone number is required",
-                        color = ThemedColors.error(isDarkTheme),
-                        fontSize = 12.sp
-                    )
-                }
+                // Validation error messages
+                if (showErrors) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = ThemedColors.error(isDarkTheme).copy(alpha = 0.1f)),
+                        border = BorderStroke(1.dp, ThemedColors.error(isDarkTheme).copy(alpha = 0.3f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    Icons.Filled.Error,
+                                    contentDescription = null,
+                                    tint = ThemedColors.error(isDarkTheme),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        "Please fix the following errors:",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = ThemedColors.error(isDarkTheme)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
 
-                if (showErrors && newPassword.isNotEmpty() && newPassword.length < 6) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Password must be at least 6 characters",
-                        color = ThemedColors.error(isDarkTheme),
-                        fontSize = 12.sp
-                    )
-                }
+                                    if (phoneNumber.isBlank()) {
+                                        Text(
+                                            "• Phone number is required",
+                                            fontSize = 11.sp,
+                                            color = ThemedColors.error(isDarkTheme)
+                                        )
+                                    }
 
-                if (showErrors && newPassword.isNotEmpty() && newPassword != confirmNewPassword) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Passwords do not match",
-                        color = ThemedColors.error(isDarkTheme),
-                        fontSize = 12.sp
-                    )
+                                    if (canModifyCoreData) {
+                                        if (name.isBlank()) {
+                                            Text(
+                                                "• Full name is required",
+                                                fontSize = 11.sp,
+                                                color = ThemedColors.error(isDarkTheme)
+                                            )
+                                        }
+                                        if (companyName.isBlank()) {
+                                            Text(
+                                                "• Company name is required",
+                                                fontSize = 11.sp,
+                                                color = ThemedColors.error(isDarkTheme)
+                                            )
+                                        }
+                                        if (department.isBlank()) {
+                                            Text(
+                                                "• Department is required",
+                                                fontSize = 11.sp,
+                                                color = ThemedColors.error(isDarkTheme)
+                                            )
+                                        }
+                                    }
+
+                                    if (newPassword.isNotEmpty() && newPassword.length < 6) {
+                                        Text(
+                                            "• Password must be at least 6 characters",
+                                            fontSize = 11.sp,
+                                            color = ThemedColors.error(isDarkTheme)
+                                        )
+                                    }
+
+                                    if (newPassword.isNotEmpty() && newPassword != confirmNewPassword) {
+                                        Text(
+                                            "• Passwords do not match",
+                                            fontSize = 11.sp,
+                                            color = ThemedColors.error(isDarkTheme)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -739,13 +892,61 @@ fun ProfileCompletionScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SectionHeader(
-    title: String,
-    icon: ImageVector,
-    isDarkTheme: Boolean,
-    isProtected: Boolean = false
+fun RoleSelectionDropdown(
+    selectedRole: String,
+    onRoleSelected: (String) -> Unit,
+    isDarkTheme: Boolean
 ) {
+    var expanded by remember { mutableStateOf(false) }
+    val roles = listOf("Administrator", "Manager", "HR", "Team Lead", "Employee", "Intern")
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = selectedRole,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Role *") },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(),
+            shape = RoundedCornerShape(8.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = ThemedColors.primary(isDarkTheme),
+                unfocusedBorderColor = ThemedColors.outline(isDarkTheme),
+                focusedLabelColor = ThemedColors.primary(isDarkTheme),
+                unfocusedLabelColor = ThemedColors.onSurfaceVariant(isDarkTheme),
+                focusedTextColor = ThemedColors.onSurface(isDarkTheme),
+                unfocusedTextColor = ThemedColors.onSurface(isDarkTheme)
+            )
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            roles.forEach { role ->
+                DropdownMenuItem(
+                    text = { Text(role) },
+                    onClick = {
+                        onRoleSelected(role)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SectionHeader(title: String, icon: ImageVector, isDarkTheme: Boolean) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth()
@@ -753,7 +954,7 @@ fun SectionHeader(
         Icon(
             icon,
             contentDescription = null,
-            tint = if (isProtected) ThemedColors.onSurfaceVariant(isDarkTheme) else ThemedColors.primary(isDarkTheme),
+            tint = ThemedColors.primary(isDarkTheme),
             modifier = Modifier.size(20.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
@@ -761,62 +962,24 @@ fun SectionHeader(
             text = title,
             fontWeight = FontWeight.SemiBold,
             fontSize = 16.sp,
-            color = if (isProtected) ThemedColors.onSurfaceVariant(isDarkTheme) else ThemedColors.primary(isDarkTheme)
+            color = ThemedColors.primary(isDarkTheme)
         )
-        if (isProtected) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Icon(
-                Icons.Filled.Lock,
-                contentDescription = "Protected by administrator",
-                tint = ThemedColors.onSurfaceVariant(isDarkTheme),
-                modifier = Modifier.size(16.dp)
-            )
-        }
     }
 }
 
 @Composable
-fun ThemedReadOnlyField(
-    value: String,
-    label: String,
-    isDarkTheme: Boolean,
-    isProtected: Boolean = false,
-    modifier: Modifier = Modifier
-) {
+fun ThemedReadOnlyField(value: String, label: String, isDarkTheme: Boolean) {
     OutlinedTextField(
         value = value,
         onValueChange = {},
-        label = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    label,
-                    color = ThemedColors.onSurfaceVariant(isDarkTheme).copy(alpha = 0.7f)
-                )
-                if (isProtected) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        Icons.Filled.Lock,
-                        contentDescription = null,
-                        tint = ThemedColors.onSurfaceVariant(isDarkTheme).copy(alpha = 0.5f),
-                        modifier = Modifier.size(12.dp)
-                    )
-                }
-            }
-        },
-        modifier = modifier.fillMaxWidth(),
+        label = { Text(label, color = ThemedColors.onSurfaceVariant(isDarkTheme)) },
+        modifier = Modifier.fillMaxWidth(),
         enabled = false,
         shape = RoundedCornerShape(8.dp),
         colors = OutlinedTextFieldDefaults.colors(
             disabledTextColor = ThemedColors.onSurface(isDarkTheme).copy(alpha = 0.7f),
-            disabledBorderColor = if (isProtected)
-                ThemedColors.error(isDarkTheme).copy(alpha = 0.3f)
-            else
-                ThemedColors.outline(isDarkTheme).copy(alpha = 0.5f),
-            disabledLabelColor = ThemedColors.onSurfaceVariant(isDarkTheme).copy(alpha = 0.6f),
-            disabledContainerColor = if (isProtected)
-                ThemedColors.error(isDarkTheme).copy(alpha = 0.05f)
-            else
-                ThemedColors.readOnlyBackground(isDarkTheme)
+            disabledBorderColor = ThemedColors.outline(isDarkTheme).copy(alpha = 0.5f),
+            disabledLabelColor = ThemedColors.onSurfaceVariant(isDarkTheme).copy(alpha = 0.6f)
         )
     )
 }
@@ -828,8 +991,8 @@ fun ThemedTextField(
     label: String,
     keyboardType: KeyboardType = KeyboardType.Text,
     isError: Boolean = false,
-    isDarkTheme: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isDarkTheme: Boolean
 ) {
     OutlinedTextField(
         value = value,
@@ -843,33 +1006,6 @@ fun ThemedTextField(
             focusedBorderColor = ThemedColors.primary(isDarkTheme),
             unfocusedBorderColor = ThemedColors.outline(isDarkTheme),
             errorBorderColor = ThemedColors.error(isDarkTheme),
-            focusedLabelColor = ThemedColors.primary(isDarkTheme),
-            unfocusedLabelColor = ThemedColors.onSurfaceVariant(isDarkTheme),
-            cursorColor = ThemedColors.primary(isDarkTheme),
-            focusedTextColor = ThemedColors.onSurface(isDarkTheme),
-            unfocusedTextColor = ThemedColors.onSurface(isDarkTheme)
-        )
-    )
-}
-
-@Composable
-fun ThemedNumberField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    modifier: Modifier,
-    isDarkTheme: Boolean
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = { if (it.all { c -> c.isDigit() }) onValueChange(it) },
-        label = { Text(label) },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = ThemedColors.primary(isDarkTheme),
-            unfocusedBorderColor = ThemedColors.outline(isDarkTheme),
             focusedLabelColor = ThemedColors.primary(isDarkTheme),
             unfocusedLabelColor = ThemedColors.onSurfaceVariant(isDarkTheme),
             cursorColor = ThemedColors.primary(isDarkTheme),

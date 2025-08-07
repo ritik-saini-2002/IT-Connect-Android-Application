@@ -29,25 +29,34 @@ class AuthManager private constructor() {
     private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 
     // Flow to observe authentication state changes
+    // Add this to your AuthManager class
     val authStateFlow: Flow<AuthState> = callbackFlow {
+        Log.d(TAG, "🔄 AuthStateFlow: Setting up listener")
+
         val authStateListener = FirebaseAuth.AuthStateListener { auth ->
             val user = auth.currentUser
+            Log.d(TAG, "🔄 AuthStateFlow: Listener triggered, user = ${user?.email}")
+
             if (user != null) {
-                Log.d(TAG, "User authenticated: ${user.uid}")
+                Log.d(TAG, "🔄 AuthStateFlow: User authenticated, checking role...")
                 trySend(AuthState.Loading)
+
                 // Check user role in background
                 checkUserRole(user.uid) { authState ->
+                    Log.d(TAG, "🔄 AuthStateFlow: Role check result = $authState")
                     trySend(authState)
                 }
             } else {
-                Log.d(TAG, "User not authenticated")
+                Log.d(TAG, "🔄 AuthStateFlow: User not authenticated")
                 trySend(AuthState.NotAuthenticated)
             }
         }
 
         firebaseAuth.addAuthStateListener(authStateListener)
+        Log.d(TAG, "🔄 AuthStateFlow: Listener added")
 
         awaitClose {
+            Log.d(TAG, "🔄 AuthStateFlow: Removing listener")
             firebaseAuth.removeAuthStateListener(authStateListener)
         }
     }

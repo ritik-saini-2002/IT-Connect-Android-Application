@@ -76,6 +76,7 @@ class ProfileActivity : ComponentActivity() {
             Ritik_2Theme {
                 ProfileScreen(
                     profileImageUrl = profileImageUri,
+                    userId = userId,
                     name = name,
                     email = email,
                     phoneNumber = phoneNumber,

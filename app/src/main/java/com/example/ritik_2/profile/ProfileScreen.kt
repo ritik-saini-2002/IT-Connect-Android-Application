@@ -1,5 +1,6 @@
 package com.example.ritik_2.profile
 
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -25,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
+import kotlin.compareTo
 
 @Composable
 fun ProfileScreen(
@@ -35,6 +38,7 @@ fun ProfileScreen(
     designation: String,
     companyName: String,
     role: String,
+    userId: String,
     complaints: Int = 0,
     experience: Int,
     completedProjects: Int,
@@ -49,14 +53,12 @@ fun ProfileScreen(
     var showEditDialog by remember { mutableStateOf(false) }
     var selectedField by remember { mutableStateOf("") }
     var selectedValue by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     // Animation for flip
     val rotation by animateFloatAsState(
         targetValue = if (isFlipped) 180f else 0f,
-        animationSpec = tween(
-            durationMillis = 800,
-            easing = FastOutSlowInEasing
-        ),
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
         label = "cardFlip"
     )
 
@@ -68,14 +70,6 @@ fun ProfileScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Instructions
-        /*Text(
-            text = "Tap the card to flip",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )*/
-
         // Flip Card
         Card(
             modifier = Modifier
@@ -88,15 +82,19 @@ fun ProfileScreen(
                 .clickable { isFlipped = !isFlipped },
             shape = RoundedCornerShape(16.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (rotation > 180f) Color.White else Color.White
-            )
+            colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize()
-            ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Front side (visible when rotation <= 90f)
                 if (rotation <= 90f) {
-                    // Front side - Full profile information
+                    ProfileBackSide(
+                        profileImageUrl = profileImageUrl,
+                        name = name,
+                        designation = designation,
+                        modifier = Modifier.graphicsLayer { rotationY = 0f }
+                    )
+                } else {
+                    // Back side (visible when rotation > 90f) - needs 180° rotation to appear correctly
                     ProfileFrontSide(
                         profileImageUrl = profileImageUrl,
                         name = name,
@@ -113,17 +111,8 @@ fun ProfileScreen(
                             selectedValue = value
                             showEditDialog = true
                         },
-                        onChangeProfilePic = onChangeProfilePic
-                    )
-                } else {
-                    // Back side - Profile picture with name
-                    ProfileBackSide(
-                        profileImageUrl = profileImageUrl,
-                        name = name,
-                        designation = designation,
-                        modifier = Modifier.graphicsLayer {
-                            rotationY = 180f
-                        }
+                        onChangeProfilePic = onChangeProfilePic,
+                        modifier = Modifier.graphicsLayer { rotationY = 180f }
                     )
                 }
             }
@@ -131,16 +120,17 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Action Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             Button(
-                onClick = { isFlipped = !isFlipped },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
+                onClick = {
+                    val intent = Intent(context, ProfileCompletionActivity::class.java)
+                    intent.putExtra("userId", userId)
+                    context.startActivity(intent)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.weight(1f)
             ) {
                 Icon(
@@ -156,9 +146,7 @@ fun ProfileScreen(
 
             Button(
                 onClick = onLogoutClick,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.Red
-                ),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                 modifier = Modifier.weight(1f)
             ) {
                 Icon(
@@ -199,10 +187,11 @@ fun ProfileFrontSide(
     activeProjects: Int,
     complaints: Int,
     onEditClick: (String, String) -> Unit,
-    onChangeProfilePic: () -> Unit
+    onChangeProfilePic: () -> Unit,
+    modifier: Modifier = Modifier // Add this parameter
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier // Apply the modifier here
             .fillMaxSize()
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally

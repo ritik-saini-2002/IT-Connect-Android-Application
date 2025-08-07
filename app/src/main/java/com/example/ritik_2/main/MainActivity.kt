@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import com.example.ritik_2.administrator.AdminPanelActivity
+import com.example.ritik_2.authentication.AuthManager
 import com.example.ritik_2.complaint.viewcomplaint.ComplaintViewActivity
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.profile.ProfileActivity
@@ -25,14 +26,11 @@ import com.example.ritik_2.complaint.complaintregistration.RegisterComplain
 import com.example.ritik_2.notifications.NotificationManager
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.winshare.ServerConnectActivity
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: MainViewModel
-    private val firebaseAuth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
+    private val authManager = AuthManager.getInstance()
 
     companion object {
         const val TAG = "MainActivity"
@@ -48,7 +46,7 @@ class MainActivity : ComponentActivity() {
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
 
         // Check authentication status
-        val currentUser = firebaseAuth.currentUser
+        val currentUser = authManager.currentUser
         if (currentUser == null) {
             Log.w(TAG, "⚠️ No authenticated user found")
             navigateToLogin()
@@ -57,13 +55,20 @@ class MainActivity : ComponentActivity() {
 
         Log.d(TAG, "👤 Authenticated user: ${currentUser.email}")
 
+        // Load user data and show UI
+        initializeMainContent()
+    }
+
+    private fun initializeMainContent() {
+        Log.d(TAG, "🎯 Initializing main content")
+
         // Load user data
         loadUserData()
 
         setContent {
             ITConnectTheme {
                 Surface(
-                    modifier = Modifier.Companion.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     // Use state holders from ViewModel
@@ -87,11 +92,8 @@ class MainActivity : ComponentActivity() {
                                 viewModel.clearError()
 
                                 // If it's an authentication error, navigate to login
-                                if (it.contains("deactivated") || it.contains("not found") || it.contains(
-                                        "authentication"
-                                    )
-                                ) {
-                                    firebaseAuth.signOut()
+                                if (it.contains("deactivated") || it.contains("not found") || it.contains("authentication")) {
+                                    authManager.signOut()
                                     navigateToLogin()
                                 }
                             }
@@ -103,15 +105,11 @@ class MainActivity : ComponentActivity() {
                         isLoading = isLoading,
                         onLogout = {
                             Log.d(TAG, "🚪 User logging out")
-                            firebaseAuth.signOut()
+                            authManager.signOut()
                             navigateToLogin()
                         },
                         onCardClick = { cardId -> handleCardClick(cardId) },
-                        onProfileClick = { navigateToProfile() },
-                        /*onRefresh = {
-                            Log.d(TAG, "🔄 Refreshing user data")
-                            loadUserData()
-                        }*/
+                        onProfileClick = { navigateToProfile() }
                     )
                 }
             }
@@ -122,7 +120,7 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "📊 Loading user data")
         viewModel.isLoadingState.value = true
 
-        firebaseAuth.currentUser?.uid?.let { userId ->
+        authManager.currentUser?.uid?.let { userId ->
             Log.d(TAG, "📋 Loading profile for user ID: $userId")
             viewModel.loadUserProfile(userId)
         } ?: run {
@@ -166,12 +164,10 @@ class MainActivity : ComponentActivity() {
                     Log.d(TAG, "🔗 Navigating to Server Connect")
                     startActivity(Intent(this, ServerConnectActivity::class.java))
                 }
-
                 5 -> {
-                    Log.d(TAG, "🔗 Navigating to Server Connect")
+                    Log.d(TAG, "📢 Navigating to Notification Manager")
                     startActivity(Intent(this, NotificationManager::class.java))
                 }
-                // Add more cases as needed
                 else -> {
                     Log.w(TAG, "⚠️ Unknown card ID: $cardId")
                     Toast.makeText(this, "Feature coming soon!", Toast.LENGTH_SHORT).show()
@@ -215,7 +211,15 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "📱 MainActivity resumed - refreshing data")
-        // Refresh user data when returning to the activity
-        loadUserData()
+
+        // Check if user is still authenticated
+        val currentUser = authManager.currentUser
+        if (currentUser != null) {
+            // Refresh user data when returning to the activity
+            loadUserData()
+        } else {
+            Log.w(TAG, "⚠️ No authenticated user on resume")
+            navigateToLogin()
+        }
     }
 }

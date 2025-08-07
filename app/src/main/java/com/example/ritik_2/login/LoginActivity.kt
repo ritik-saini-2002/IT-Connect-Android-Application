@@ -6,51 +6,64 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.lifecycle.lifecycleScope
+import com.example.ritik_2.authentication.AuthManager
+import com.example.ritik_2.authentication.AuthState
 import com.example.ritik_2.main.MainActivity
-import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.registration.RegistrationActivity
 import com.example.ritik_2.theme.Ritik_2Theme
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 
 class LoginActivity : ComponentActivity() {
     private lateinit var firebaseAuth: FirebaseAuth
     private lateinit var firestore: FirebaseFirestore
+    private val authManager = AuthManager.getInstance()
 
     companion object {
         const val TAG = "LoginActivity"
-        val VALID_ROLES = listOf(
-            "Administrator", "Manager", "HR", "Team Lead", "Employee", "Intern"
-        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         firebaseAuth = FirebaseAuth.getInstance()
         firestore = FirebaseFirestore.getInstance()
 
+        Log.d(TAG, "🚀 LoginActivity started")
+
+        // Check if user is already authenticated
+        checkExistingAuthentication()
+    }
+
+    private fun checkExistingAuthentication() {
         val currentUser = firebaseAuth.currentUser
         if (currentUser != null) {
-            // User is authenticated, check profile and proceed
-            checkUserProfile(currentUser.uid)
-            return
-        }
+            Log.d(TAG, "👤 Found existing user: ${currentUser.email}")
 
-        // No Firebase user, clear login state if set
-        val sharedPref = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
-        with(sharedPref.edit()) {
-            putBoolean("isLoggedIn", false)
-            apply()
+            // User is authenticated, navigate to MainActivity
+            // MainActivity will handle profile completion logic
+            updateLastLogin(currentUser.uid)
+            navigateToMainActivity()
+        } else {
+            Log.d(TAG, "❌ No existing user found")
+            // Clear any stored login state
+            clearLoginState()
+            showLoginScreen()
         }
+    }
 
-        // Show login screen
+    private fun showLoginScreen() {
+        Log.d(TAG, "🖥️ Showing login screen")
+
         setContent {
             Ritik_2Theme {
                 LoginScreen(
                     onLoginClick = { email, password -> performLogin(email, password) },
                     onRegisterClick = {
+                        Log.d(TAG, "📝 Navigating to registration")
                         startActivity(Intent(this, RegistrationActivity::class.java))
                     },
                     onForgotPasswordClick = { email, callback ->
@@ -74,16 +87,19 @@ class LoginActivity : ComponentActivity() {
                 if (task.isSuccessful) {
                     Log.d(TAG, "✅ Firebase Auth login successful")
                     Toast.makeText(this, "Login Successful!", Toast.LENGTH_SHORT).show()
+
                     // Save login state
-                    val sharedPref = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
-                    with(sharedPref.edit()) {
-                        putBoolean("isLoggedIn", true)
-                        apply()
-                    }
+                    saveLoginState()
+
                     val userId = firebaseAuth.currentUser?.uid
                     if (userId != null) {
                         updateLastLogin(userId)
-                        checkUserProfile(userId)
+                        // Always navigate to MainActivity
+                        // MainActivity will handle profile completion check
+                        navigateToMainActivity()
+                    } else {
+                        Log.e(TAG, "❌ No user ID after successful login")
+                        Toast.makeText(this, "Login error: No user ID", Toast.LENGTH_SHORT).show()
                     }
                 } else {
                     Log.e(TAG, "❌ Login failed: ${task.exception?.message}")
@@ -92,47 +108,61 @@ class LoginActivity : ComponentActivity() {
             }
     }
 
-    private fun checkUserProfile(userId: String) {
-        Log.d(TAG, "🔍 Checking user profile for: $userId")
-
-        val userDocRef = firestore.collection("users").document(userId)
-        userDocRef.get()
-            .addOnSuccessListener { document ->
-                if (document.exists()) {
-                    navigateToMainActivity()
-                } else {
-                    navigateToMainActivity()
-                }
-            }
-            .addOnFailureListener { exception ->
-                Log.e(TAG, "❌ Error checking profile", exception)
-                Toast.makeText(this, "Error checking profile: ${exception.message}", Toast.LENGTH_SHORT).show()
-            }
-    }
-
     private fun updateLastLogin(userId: String) {
-        val timestamp = Timestamp.Companion.now()
+        Log.d(TAG, "⏰ Updating last login for user: $userId")
 
+        val timestamp = Timestamp.now()
+
+        // Update access control
         firestore.collection("user_access_control").document(userId)
             .update("lastAccess", timestamp)
-            .addOnSuccessListener { Log.d(TAG, "✅ Last access updated in access control") }
-            .addOnFailureListener { e -> Log.w(TAG, "⚠️ Failed to update last access in access control", e) }
+            .addOnSuccessListener {
+                Log.d(TAG, "✅ Last access updated in access control")
+            }
+            .addOnFailureListener { e ->
+                Log.w(TAG, "⚠️ Failed to update last access in access control", e)
+            }
 
+        // Update user document
         firestore.collection("user_access_control").document(userId).get()
             .addOnSuccessListener { doc ->
                 val documentPath = doc.getString("documentPath")
                 if (!documentPath.isNullOrEmpty()) {
                     firestore.document(documentPath)
                         .update("lastLogin", timestamp)
-                        .addOnSuccessListener { Log.d(TAG, "✅ Last login updated in user document") }
-                        .addOnFailureListener { e -> Log.w(TAG, "⚠️ Failed to update last login in user document", e) }
+                        .addOnSuccessListener {
+                            Log.d(TAG, "✅ Last login updated in user document")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(TAG, "⚠️ Failed to update last login in user document", e)
+                        }
+                } else {
+                    // Fallback: update users collection directly
+                    firestore.collection("users").document(userId)
+                        .update("lastLogin", timestamp)
+                        .addOnSuccessListener {
+                            Log.d(TAG, "✅ Last login updated in users collection")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(TAG, "⚠️ Failed to update last login in users collection", e)
+                        }
                 }
+            }
+            .addOnFailureListener { e ->
+                Log.w(TAG, "⚠️ Failed to get document path", e)
+                // Fallback: update users collection directly
+                firestore.collection("users").document(userId)
+                    .update("lastLogin", timestamp)
             }
     }
 
     private fun navigateToMainActivity() {
+        Log.d(TAG, "🏠 Navigating to main activity")
+        Log.d(TAG, "🔍 Current user before navigation: ${authManager.currentUser?.email}")
         try {
-            startActivity(Intent(this, MainActivity::class.java))
+            val intent = Intent(this, MainActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            startActivity(intent)
             finish()
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error navigating to main activity", e)
@@ -156,9 +186,39 @@ class LoginActivity : ComponentActivity() {
             }
     }
 
+    private fun saveLoginState() {
+        val sharedPref = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
+        with(sharedPref.edit()) {
+            putBoolean("isLoggedIn", true)
+            apply()
+        }
+        Log.d(TAG, "💾 Login state saved")
+    }
+
+    private fun clearLoginState() {
+        val sharedPref = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
+        with(sharedPref.edit()) {
+            putBoolean("isLoggedIn", false)
+            apply()
+        }
+        Log.d(TAG, "🗑️ Login state cleared")
+    }
+
     override fun onBackPressed() {
         Log.d(TAG, "🔙 Back pressed - exiting app")
         finishAffinity()
         super.onBackPressed()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Log.d(TAG, "📱 LoginActivity resumed")
+
+        // If user is authenticated on resume, go to MainActivity
+        val currentUser = authManager.currentUser
+        if (currentUser != null) {
+            Log.d(TAG, "✅ User authenticated on resume, navigating to MainActivity")
+            navigateToMainActivity()
+        }
     }
 }
