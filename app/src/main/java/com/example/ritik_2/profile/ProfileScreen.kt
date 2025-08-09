@@ -135,11 +135,11 @@ fun ProfileScreen(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Flip,
-                    contentDescription = "Details",
+                    contentDescription = "Update Profile",
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Details")
+                Text("Update Profile")
             }
 
             Spacer(modifier = Modifier.width(16.dp))

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -26,15 +27,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlin.math.*
+import android.content.Context
+import android.content.Intent
 
 @Composable
 fun ITConnectSplashScreen(
-    onSplashComplete: () -> Unit = {}
+    onSplashComplete: (Boolean) -> Unit = {} // Boolean indicates if user is logged in
 ) {
     var animationState by remember { mutableStateOf(SplashAnimationState.INITIAL) }
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
     val isDarkTheme = isSystemInDarkTheme()
+    val context = LocalContext.current
 
     // Optimized responsive sizing
     val logoSize = remember(screenWidth) {
@@ -46,7 +50,7 @@ fun ITConnectSplashScreen(
         SplashThemeColors.create(isDarkTheme)
     }
 
-    // Optimized animation sequence
+    // Optimized animation sequence with authentication check
     LaunchedEffect(Unit) {
         val animationSequence = listOf(
             300L to SplashAnimationState.LOGO_APPEAR,
@@ -61,7 +65,9 @@ fun ITConnectSplashScreen(
             animationState = state
         }
 
-        onSplashComplete()
+        // Check if user is logged in
+        val isLoggedIn = checkUserLoginStatus(context)
+        onSplashComplete(isLoggedIn)
     }
 
     Box(
@@ -82,6 +88,31 @@ fun ITConnectSplashScreen(
             screenWidth = screenWidth
         )
     }
+}
+
+// Function to check user login status using SharedPreferences
+private fun checkUserLoginStatus(context: Context): Boolean {
+    val sharedPreferences = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+
+    // Check for authentication token or user ID
+    val authToken = sharedPreferences.getString("auth_token", null)
+    val isLoggedIn = sharedPreferences.getBoolean("is_logged_in", false)
+    val userId = sharedPreferences.getString("user_id", null)
+
+    // You can customize this logic based on your authentication implementation
+    return !authToken.isNullOrEmpty() && isLoggedIn && !userId.isNullOrEmpty()
+}
+
+// Alternative function if you're using a different authentication method
+private fun checkUserLoginStatusAlternative(context: Context): Boolean {
+    val sharedPreferences = context.getSharedPreferences("user_session", Context.MODE_PRIVATE)
+
+    // Check for session expiry
+    val sessionExpiry = sharedPreferences.getLong("session_expiry", 0L)
+    val currentTime = System.currentTimeMillis()
+    val isLoggedIn = sharedPreferences.getBoolean("is_logged_in", false)
+
+    return isLoggedIn && currentTime < sessionExpiry
 }
 
 @Composable
@@ -127,6 +158,7 @@ private fun SplashContent(
     }
 }
 
+// Rest of your existing code remains the same...
 @Composable
 private fun SplashText(
     themeColors: SplashThemeColors,
@@ -153,6 +185,7 @@ private fun SplashText(
         )
     }
 }
+
 
 @Composable
 fun ITConnectLogo(

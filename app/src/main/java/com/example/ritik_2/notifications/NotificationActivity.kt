@@ -1,5 +1,6 @@
 //package com.example.ritik_2.notifications
 //
+//import android.content.Context
 //import android.content.Intent
 //import android.os.Bundle
 //import android.util.Log
@@ -34,7 +35,6 @@
 //import com.example.ritik_2.theme.ITConnectTheme
 //import com.google.firebase.Timestamp
 //import com.google.firebase.auth.FirebaseAuth
-//import com.google.firebase.firestore.FieldValue
 //import com.google.firebase.firestore.FirebaseFirestore
 //import com.google.firebase.firestore.ListenerRegistration
 //import com.google.firebase.firestore.Query
@@ -49,7 +49,7 @@
 //
 //    private val auth = FirebaseAuth.getInstance()
 //    private val firestore = FirebaseFirestore.getInstance()
-//    private var notificationManager: com.example.ritik_2.notifications.NotificationManager? = null
+//    private var notificationManager: NotificationManager? = null
 //
 //    private val _notifications = MutableStateFlow<List<NotificationItem>>(emptyList())
 //    private val notifications: StateFlow<List<NotificationItem>> = _notifications
@@ -73,8 +73,7 @@
 //        super.onCreate(savedInstanceState)
 //
 //        // Initialize notification manager
-//        notificationManager =
-//            com.example.ritik_2.notifications.NotificationManager.getInstance(this)
+//        notificationManager = NotificationManager.getInstance(this)
 //
 //        // Setup as popup if requested
 //        val showAsPopup = intent.getBooleanExtra(EXTRA_SHOW_AS_POPUP, false)
@@ -151,11 +150,9 @@
 //            "Administrator", "Manager" -> {
 //                setupAdminNotificationListeners(userData)
 //            }
-//
 //            "Team Leader" -> {
 //                setupTeamLeaderNotificationListeners(userData)
 //            }
-//
 //            else -> {
 //                setupUserNotificationListeners(userData)
 //            }
@@ -328,18 +325,14 @@
 //            }
 //    }
 //
-//    private fun createActivityNotification(
-//        activityData: Map<String, Any>,
-//        userData: UserNotificationData
-//    ): NotificationItem? {
+//    private fun createActivityNotification(activityData: Map<String, Any>, userData: UserNotificationData): NotificationItem? {
 //        return try {
 //            NotificationItem(
 //                id = activityData["activityId"] as? String ?: UUID.randomUUID().toString(),
 //                title = "Activity: ${activityData["action"] as? String ?: "Unknown Action"}",
 //                message = activityData["description"] as? String ?: "No description",
 //                type = NotificationType.ACTIVITY,
-//                timestamp = (activityData["timestamp"] as? Timestamp)?.toDate()?.time
-//                    ?: System.currentTimeMillis(),
+//                timestamp = (activityData["timestamp"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
 //                isRead = false,
 //                priority = NotificationPriority.MEDIUM,
 //                actionData = mapOf(
@@ -354,10 +347,7 @@
 //        }
 //    }
 //
-//    private fun createGlobalComplaintNotification(
-//        complaintData: Map<String, Any>,
-//        userData: UserNotificationData
-//    ): NotificationItem? {
+//    private fun createGlobalComplaintNotification(complaintData: Map<String, Any>, userData: UserNotificationData): NotificationItem? {
 //        return try {
 //            val createdBy = complaintData["createdBy"] as? Map<*, *>
 //            val title = complaintData["title"] as? String ?: "New Global Complaint"
@@ -369,8 +359,7 @@
 //                title = "Global Complaint: $title",
 //                message = "Priority: $urgency - Submitted by: $createdByName",
 //                type = NotificationType.GLOBAL_COMPLAINT,
-//                timestamp = (complaintData["createdAt"] as? Timestamp)?.toDate()?.time
-//                    ?: System.currentTimeMillis(),
+//                timestamp = (complaintData["createdAt"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
 //                isRead = false,
 //                priority = when (urgency) {
 //                    "Critical" -> NotificationPriority.CRITICAL
@@ -389,10 +378,7 @@
 //        }
 //    }
 //
-//    private fun createComplaintNotification(
-//        complaintData: Map<String, Any>,
-//        userData: UserNotificationData
-//    ): NotificationItem? {
+//    private fun createComplaintNotification(complaintData: Map<String, Any>, userData: UserNotificationData): NotificationItem? {
 //        return try {
 //            val title = complaintData["title"] as? String ?: "New Complaint"
 //            val department = complaintData["department"] as? String ?: "Unknown Department"
@@ -405,8 +391,7 @@
 //                title = "New Complaint: $title",
 //                message = "Department: $department - Priority: $urgency - By: $createdByName",
 //                type = NotificationType.COMPLAINT,
-//                timestamp = (complaintData["createdAt"] as? Timestamp)?.toDate()?.time
-//                    ?: System.currentTimeMillis(),
+//                timestamp = (complaintData["createdAt"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
 //                isRead = false,
 //                priority = when (urgency) {
 //                    "Critical" -> NotificationPriority.CRITICAL
@@ -425,10 +410,7 @@
 //        }
 //    }
 //
-//    private fun createUserManagementNotification(
-//        managementData: Map<String, Any>,
-//        userData: UserNotificationData
-//    ): NotificationItem? {
+//    private fun createUserManagementNotification(managementData: Map<String, Any>, userData: UserNotificationData): NotificationItem? {
 //        return try {
 //            val action = managementData["action"] as? String ?: "Unknown Action"
 //            val targetUserName = managementData["targetUserName"] as? String ?: "Unknown User"
@@ -439,8 +421,7 @@
 //                title = "User Management: $action",
 //                message = "User: $targetUserName - Action by: $performedByName",
 //                type = NotificationType.USER_MANAGEMENT,
-//                timestamp = (managementData["timestamp"] as? Timestamp)?.toDate()?.time
-//                    ?: System.currentTimeMillis(),
+//                timestamp = (managementData["timestamp"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
 //                isRead = false,
 //                priority = NotificationPriority.MEDIUM,
 //                actionData = mapOf(
@@ -455,22 +436,16 @@
 //        }
 //    }
 //
-//    private fun createNotificationFromDoc(
-//        notificationData: Map<String, Any>,
-//        userData: UserNotificationData
-//    ): NotificationItem? {
+//    private fun createNotificationFromDoc(notificationData: Map<String, Any>, userData: UserNotificationData): NotificationItem? {
 //        return try {
 //            NotificationItem(
 //                id = notificationData["notificationId"] as? String ?: UUID.randomUUID().toString(),
 //                title = notificationData["title"] as? String ?: "Notification",
 //                message = notificationData["message"] as? String ?: "No message",
 //                type = NotificationType.valueOf(notificationData["type"] as? String ?: "GENERAL"),
-//                timestamp = (notificationData["timestamp"] as? Timestamp)?.toDate()?.time
-//                    ?: System.currentTimeMillis(),
+//                timestamp = (notificationData["timestamp"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
 //                isRead = notificationData["isRead"] as? Boolean ?: false,
-//                priority = NotificationPriority.valueOf(
-//                    notificationData["priority"] as? String ?: "MEDIUM"
-//                ),
+//                priority = NotificationPriority.valueOf(notificationData["priority"] as? String ?: "MEDIUM"),
 //                actionData = notificationData["actionData"] as? Map<String, Any> ?: emptyMap()
 //            )
 //        } catch (e: Exception) {
@@ -484,8 +459,7 @@
 //            val currentNotifications = _notifications.value.toMutableList()
 //
 //            newNotifications.forEach { newNotification ->
-//                val existingIndex =
-//                    currentNotifications.indexOfFirst { it.id == newNotification.id }
+//                val existingIndex = currentNotifications.indexOfFirst { it.id == newNotification.id }
 //                if (existingIndex >= 0) {
 //                    currentNotifications[existingIndex] = newNotification
 //                } else {
@@ -507,8 +481,7 @@
 //            when (notification.type) {
 //                NotificationType.GLOBAL_COMPLAINT -> {
 //                    val urgency = notification.actionData["urgency"] as? String ?: "Medium"
-//                    val submittedBy =
-//                        notification.actionData["submittedBy"] as? String ?: "Unknown User"
+//                    val submittedBy = notification.actionData["submittedBy"] as? String ?: "Unknown User"
 //                    val companyName = currentUserData.value?.companyName ?: "Company"
 //
 //                    manager.showNewGlobalComplaint(
@@ -518,7 +491,6 @@
 //                        companyName
 //                    )
 //                }
-//
 //                NotificationType.COMPLAINT -> {
 //                    val department = notification.actionData["department"] as? String ?: "Unknown"
 //                    val urgency = notification.actionData["urgency"] as? String ?: "Medium"
@@ -530,19 +502,17 @@
 //                        false
 //                    )
 //                }
-//
 //                NotificationType.ACTIVITY -> {
 //                    manager.showNotification(
-//                        com.example.ritik_2.notifications.NotificationManager.NotificationType.SYSTEM,
+//                        NotificationManager.NotificationType.SYSTEM,
 //                        "System Activity",
 //                        notification.message,
 //                        notification.title
 //                    )
 //                }
-//
 //                else -> {
 //                    manager.showNotification(
-//                        com.example.ritik_2.notifications.NotificationManager.NotificationType.SYSTEM,
+//                        NotificationManager.NotificationType.SYSTEM,
 //                        notification.title,
 //                        notification.message
 //                    )
@@ -832,6 +802,96 @@
 //            }
 //        }
 //    }
+//
+//    private fun formatTimestamp(timestamp: Long): String {
+//        val now = System.currentTimeMillis()
+//        val diff = now - timestamp
+//
+//        return when {
+//            diff < 60_000 -> "Just now"
+//            diff < 3600_000 -> "${diff / 60_000}m ago"
+//            diff < 86400_000 -> "${diff / 3600_000}h ago"
+//            diff < 604800_000 -> "${diff / 86400_000}d ago"
+//            else -> SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(timestamp))
+//        }
+//    }
+//
+//    override fun onDestroy() {
+//        super.onDestroy()
+//        // Clean up listeners
+//        notificationListener?.remove()
+//        globalComplaintListener?.remove()
+//        activityListener?.remove()
+//    }
+//
+//    companion object {
+//        fun showAsPopup(context: Context) {
+//            val intent = Intent(context, NotificationActivity::class.java)
+//            intent.putExtra(EXTRA_SHOW_AS_POPUP, true)
+//            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+//            context.startActivity(intent)
+//        }
+//
+//        fun showAsActivity(context: Context) {
+//            val intent = Intent(context, NotificationActivity::class.java)
+//            context.startActivity(intent)
+//        }
+//    }
 //}
 //
-//    //private fun formatTimestamp(timestamp:
+//// Data classes for notifications
+//data class NotificationItem(
+//    val id: String,
+//    val title: String,
+//    val message: String,
+//    val type: NotificationType,
+//    val timestamp: Long,
+//    val isRead: Boolean,
+//    val priority: NotificationPriority,
+//    val actionData: Map<String, Any> = emptyMap(),
+//    val isNew: Boolean = true
+//)
+//
+//data class UserNotificationData(
+//    val userId: String,
+//    val name: String,
+//    val role: String,
+//    val companyName: String,
+//    val sanitizedCompanyName: String,
+//    val department: String,
+//    val permissions: List<String>
+//)
+//
+//enum class NotificationType {
+//    GLOBAL_COMPLAINT,
+//    COMPLAINT,
+//    ACTIVITY,
+//    USER_MANAGEMENT,
+//    SYSTEM,
+//    GENERAL;
+//
+//    fun getIcon(): ImageVector = when (this) {
+//        GLOBAL_COMPLAINT -> Icons.Default.Campaign
+//        COMPLAINT -> Icons.Default.ReportProblem
+//        ACTIVITY -> Icons.Default.Activity
+//        USER_MANAGEMENT -> Icons.Default.ManageAccounts
+//        SYSTEM -> Icons.Default.Settings
+//        GENERAL -> Icons.Default.Notifications
+//    }
+//
+//    fun getColor(): Color = when (this) {
+//        GLOBAL_COMPLAINT -> Color(0xFFFF6B6B)
+//        COMPLAINT -> Color(0xFFFFB74D)
+//        ACTIVITY -> Color(0xFF64B5F6)
+//        USER_MANAGEMENT -> Color(0xFF81C784)
+//        SYSTEM -> Color(0xFF9C27B0)
+//        GENERAL -> Color(0xFF757575)
+//    }
+//}
+//
+//enum class NotificationPriority {
+//    LOW,
+//    MEDIUM,
+//    HIGH,
+//    CRITICAL
+//}

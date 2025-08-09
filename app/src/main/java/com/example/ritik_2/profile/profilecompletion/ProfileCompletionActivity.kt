@@ -76,40 +76,23 @@ class ProfileCompletionActivity : ComponentActivity() {
 
     private fun verifyAuthentication(userId: String) {
         lifecycleScope.launch {
-            try {
-                val authState = authManager.checkAuthenticationState()
-                Log.d(TAG, "📊 Current auth state: $authState")
-
-                when (authState) {
-                    is AuthState.Authenticated -> {
-                        Log.d(TAG, "✅ User properly authenticated, initializing UI")
-                        initializeUI(userId, authState.user.role)
-                    }
-                    is AuthState.InvalidRole -> {
-                        Log.w(TAG, "⚠️ Invalid role detected: ${authState.role}")
-                        initializeUI(userId, authState.role ?: "Employee")
-                    }
-                    is AuthState.UserNotFound -> {
-                        Log.w(TAG, "⚠️ User document not found")
-                        initializeUI(userId, "Employee")
-                    }
-                    is AuthState.NotAuthenticated -> {
-                        Log.e(TAG, "❌ User not authenticated")
-                        handleAuthError("Please log in to continue")
-                    }
-                    is AuthState.Error -> {
-                        Log.e(TAG, "❌ Authentication error: ${authState.message}")
-                        handleAuthError("Authentication error: ${authState.message}")
-                    }
-                    is AuthState.Loading -> {
-                        Log.d(TAG, "⏳ Auth state loading...")
-                        kotlinx.coroutines.delay(1000)
-                        verifyAuthentication(userId)
-                    }
+            val authState = authManager.checkAuthenticationState()
+            when (authState) {
+                is AuthState.Authenticated -> {
+                    initializeUI(userId, authState.user.role)  // ✅ Uses database role
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Error verifying authentication", e)
-                handleAuthError("Session verification failed")
+
+                is AuthState.InvalidRole -> {
+                    initializeUI(userId, authState.role ?: "Employee")  // ⚠️ Problem here
+                }
+
+                is AuthState.UserNotFound -> {
+                    initializeUI(userId, "Employee")  // ❌ HARDCODED Employee!
+                }
+
+                is AuthState.Error -> TODO()
+                AuthState.Loading -> TODO()
+                AuthState.NotAuthenticated -> TODO()
             }
         }
     }
@@ -177,7 +160,7 @@ class ProfileCompletionActivity : ComponentActivity() {
         try {
             // Get user info for storage path
             val accessControlDoc = firestore.collection("user_access_control").document(userId).get().await()
-            val companyName = sanitizeDocumentId(accessControlDoc.getString("sanitizedCompanyName") ?: "default_company")
+            val companyName = sanitizeDocumentId(accessControlDoc.getString("sanitizedCompany") ?: "default_company")
             val department = sanitizeDocumentId(accessControlDoc.getString("sanitizedDepartment") ?: "default_department")
             val role = accessControlDoc.getString("role") ?: "Employee"
 
@@ -211,7 +194,9 @@ class ProfileCompletionActivity : ComponentActivity() {
             val accessControlDoc = firestore.collection("user_access_control").document(userId).get().await()
 
             if (!accessControlDoc.exists()) {
-                throw Exception("User access control not found")
+                // User doesn't exist in system, create new hierarchical structure
+                createNewUserHierarchy(userId, updatedData, newPassword)
+                return
             }
 
             val currentDocumentPath = accessControlDoc.getString("documentPath")
@@ -240,6 +225,86 @@ class ProfileCompletionActivity : ComponentActivity() {
             Log.e(TAG, "❌ Profile update failed", e)
             Toast.makeText(this, "Profile update failed: ${e.message}", Toast.LENGTH_LONG).show()
             throw e
+        }
+    }
+
+    private suspend fun createNewUserHierarchy(
+        userId: String,
+        updatedData: Map<String, Any>,
+        newPassword: String?
+    ) {
+        Log.d(TAG, "🆕 Creating new user hierarchy for: $userId")
+
+        val timestamp = Timestamp.now()
+        val role = updatedData["role"]?.toString() ?: "Employee"
+        val companyName = updatedData["companyName"]?.toString() ?: "Default Company"
+        val department = updatedData["department"]?.toString() ?: "General"
+        val name = updatedData["name"]?.toString() ?: "Unknown User"
+        val email = updatedData["email"]?.toString() ?: ""
+
+        val sanitizedCompanyName = sanitizeDocumentId(companyName)
+        val sanitizedDepartment = sanitizeDocumentId(department)
+        val documentPath = "users/$sanitizedCompanyName/$sanitizedDepartment/$role/users/$userId"
+
+        val batch = firestore.batch()
+
+        // Create hierarchical user document
+        val userDocRef = firestore.document(documentPath)
+        val hierarchicalUserData = createHierarchicalUserData(userId, updatedData, timestamp, documentPath)
+        batch.set(userDocRef, hierarchicalUserData)
+
+        // Create metadata documents
+        createMetadataDocuments(batch, sanitizedCompanyName, companyName, sanitizedDepartment, department, role, timestamp)
+
+        // Create access control
+        val accessControlRef = firestore.collection("user_access_control").document(userId)
+        val accessControlData = mapOf(
+            "userId" to userId,
+            "name" to name,
+            "email" to email,
+            "companyName" to companyName,
+            "sanitizedCompany" to sanitizedCompanyName,
+            "department" to department,
+            "sanitizedDepartment" to sanitizedDepartment,
+            "role" to role,
+            "permissions" to getRolePermissions(role),
+            "isActive" to true,
+            "documentPath" to documentPath,
+            "lastAccess" to timestamp
+        )
+        batch.set(accessControlRef, accessControlData)
+
+        // Create search index
+        val searchIndexRef = firestore.collection("user_search_index").document(userId)
+        val searchIndexData = mapOf(
+            "userId" to userId,
+            "name" to name.lowercase(),
+            "email" to email.lowercase(),
+            "companyName" to companyName,
+            "sanitizedCompany" to sanitizedCompanyName,
+            "department" to department,
+            "sanitizedDepartment" to sanitizedDepartment,
+            "role" to role,
+            "designation" to (updatedData["designation"] ?: ""),
+            "isActive" to true,
+            "documentPath" to documentPath,
+            "searchTerms" to listOf(
+                name.lowercase(),
+                email.lowercase(),
+                companyName.lowercase(),
+                department.lowercase(),
+                role.lowercase()
+            ).filter { it.isNotEmpty() }
+        )
+        batch.set(searchIndexRef, searchIndexData)
+
+        batch.commit().await()
+        Log.d(TAG, "✅ New user hierarchy created at: $documentPath")
+
+        if (newPassword != null && newPassword.isNotEmpty()) {
+            updatePassword(newPassword)
+        } else {
+            handleProfileUpdateSuccess()
         }
     }
 
@@ -333,69 +398,20 @@ class ProfileCompletionActivity : ComponentActivity() {
 
         // 1. Create/Update hierarchical user document
         val userDocRef = firestore.document(newDocumentPath)
-
         val hierarchicalUserData = createHierarchicalUserData(userId, finalData, timestamp, newDocumentPath)
         batch.set(userDocRef, hierarchicalUserData)
 
-        // 2. Update company metadata
-        val companyMetaRef = firestore.collection("companies_metadata").document(sanitizedCompanyName)
-        val companyMetaData = mapOf(
-            "originalName" to companyName,
-            "sanitizedName" to sanitizedCompanyName,
-            "lastUpdated" to timestamp,
-            "totalUsers" to FieldValue.increment(1),
-            "activeUsers" to FieldValue.increment(1),
-            "availableRoles" to FieldValue.arrayUnion(role),
-            "departments" to FieldValue.arrayUnion(department)
-        )
-        batch.set(companyMetaRef, companyMetaData, SetOptions.merge())
+        // 2. Create metadata documents
+        createMetadataDocuments(batch, sanitizedCompanyName, companyName, sanitizedDepartment, department, role, timestamp)
 
-        // 3. Update department metadata
-        val departmentMetaRef = firestore
-            .collection("companies_metadata")
-            .document(sanitizedCompanyName)
-            .collection("departments_metadata")
-            .document(sanitizedDepartment)
-
-        val departmentMetaData = mapOf(
-            "departmentName" to department,
-            "companyName" to companyName,
-            "sanitizedName" to sanitizedDepartment,
-            "userCount" to FieldValue.increment(1),
-            "activeUsers" to FieldValue.increment(1),
-            "availableRoles" to FieldValue.arrayUnion(role),
-            "lastUpdated" to timestamp
-        )
-        batch.set(departmentMetaRef, departmentMetaData, SetOptions.merge())
-
-        // 4. Update role metadata
-        val roleMetaRef = firestore
-            .collection("companies_metadata")
-            .document(sanitizedCompanyName)
-            .collection("departments_metadata")
-            .document(sanitizedDepartment)
-            .collection("roles_metadata")
-            .document(role)
-
-        val roleMetaData = mapOf(
-            "roleName" to role,
-            "companyName" to companyName,
-            "department" to department,
-            "permissions" to getRolePermissions(role),
-            "userCount" to FieldValue.increment(1),
-            "activeUsers" to FieldValue.increment(1),
-            "lastUpdated" to timestamp
-        )
-        batch.set(roleMetaRef, roleMetaData, SetOptions.merge())
-
-        // 5. Update user access control
+        // 3. Update user access control
         val userAccessControlRef = firestore.collection("user_access_control").document(userId)
         val accessControlData = mapOf(
             "userId" to userId,
             "name" to (finalData["name"] ?: "Unknown User"),
             "email" to (finalData["email"] ?: ""),
             "companyName" to companyName,
-            "sanitizedCompanyName" to sanitizedCompanyName,
+            "sanitizedCompany" to sanitizedCompanyName,
             "department" to department,
             "sanitizedDepartment" to sanitizedDepartment,
             "role" to role,
@@ -406,14 +422,14 @@ class ProfileCompletionActivity : ComponentActivity() {
         )
         batch.set(userAccessControlRef, accessControlData)
 
-        // 6. Update user search index
+        // 4. Update user search index
         val userSearchIndexRef = firestore.collection("user_search_index").document(userId)
         val searchIndexData = mapOf(
             "userId" to userId,
             "name" to (finalData["name"]?.toString()?.lowercase() ?: ""),
             "email" to (finalData["email"]?.toString()?.lowercase() ?: ""),
             "companyName" to companyName,
-            "sanitizedCompanyName" to sanitizedCompanyName,
+            "sanitizedCompany" to sanitizedCompanyName,
             "department" to department,
             "sanitizedDepartment" to sanitizedDepartment,
             "role" to role,
@@ -441,6 +457,67 @@ class ProfileCompletionActivity : ComponentActivity() {
         } else {
             handleProfileUpdateSuccess()
         }
+    }
+
+    private fun createMetadataDocuments(
+        batch: com.google.firebase.firestore.WriteBatch,
+        sanitizedCompanyName: String,
+        companyName: String,
+        sanitizedDepartment: String,
+        department: String,
+        role: String,
+        timestamp: Timestamp
+    ) {
+        // Company metadata
+        val companyMetaRef = firestore.collection("companies_metadata").document(sanitizedCompanyName)
+        val companyMetaData = mapOf(
+            "originalName" to companyName,
+            "sanitizedName" to sanitizedCompanyName,
+            "lastUpdated" to timestamp,
+            "totalUsers" to FieldValue.increment(1),
+            "activeUsers" to FieldValue.increment(1),
+            "availableRoles" to FieldValue.arrayUnion(role),
+            "departments" to FieldValue.arrayUnion(department)
+        )
+        batch.set(companyMetaRef, companyMetaData, SetOptions.merge())
+
+        // Department metadata
+        val departmentMetaRef = firestore
+            .collection("companies_metadata")
+            .document(sanitizedCompanyName)
+            .collection("departments_metadata")
+            .document(sanitizedDepartment)
+
+        val departmentMetaData = mapOf(
+            "departmentName" to department,
+            "companyName" to companyName,
+            "sanitizedName" to sanitizedDepartment,
+            "userCount" to FieldValue.increment(1),
+            "activeUsers" to FieldValue.increment(1),
+            "availableRoles" to FieldValue.arrayUnion(role),
+            "lastUpdated" to timestamp
+        )
+        batch.set(departmentMetaRef, departmentMetaData, SetOptions.merge())
+
+        // Role metadata
+        val roleMetaRef = firestore
+            .collection("companies_metadata")
+            .document(sanitizedCompanyName)
+            .collection("departments_metadata")
+            .document(sanitizedDepartment)
+            .collection("roles_metadata")
+            .document(role)
+
+        val roleMetaData = mapOf(
+            "roleName" to role,
+            "companyName" to companyName,
+            "department" to department,
+            "permissions" to getRolePermissions(role),
+            "userCount" to FieldValue.increment(1),
+            "activeUsers" to FieldValue.increment(1),
+            "lastUpdated" to timestamp
+        )
+        batch.set(roleMetaRef, roleMetaData, SetOptions.merge())
     }
 
     private fun createHierarchicalUserData(
@@ -517,26 +594,26 @@ class ProfileCompletionActivity : ComponentActivity() {
             "Administrator" -> listOf(
                 "create_user", "delete_user", "modify_user", "view_all_users",
                 "manage_roles", "view_analytics", "system_settings", "manage_companies",
-                "access_all_data", "export_data", "manage_permissions"
+                "access_all_data", "export_data", "manage_permissions", "modify_all_data"
             )
             "Manager" -> listOf(
                 "view_team_users", "modify_team_user", "view_team_analytics",
-                "assign_projects", "approve_requests", "view_reports"
+                "assign_projects", "approve_requests", "view_reports", "modify_personal_data"
             )
             "HR" -> listOf(
                 "view_all_users", "modify_user", "view_hr_analytics", "manage_employees",
-                "access_personal_data", "generate_reports"
+                "access_personal_data", "generate_reports", "modify_personal_data"
             )
             "Team Lead" -> listOf(
-                "view_team_users", "assign_tasks", "view_team_performance", "approve_leave"
+                "view_team_users", "assign_tasks", "view_team_performance", "approve_leave", "modify_personal_data"
             )
             "Employee" -> listOf(
-                "view_profile", "edit_profile", "view_assigned_projects", "submit_reports"
+                "view_profile", "edit_profile", "view_assigned_projects", "submit_reports", "modify_personal_data"
             )
             "Intern" -> listOf(
-                "view_profile", "edit_basic_profile", "view_assigned_tasks"
+                "view_profile", "edit_basic_profile", "view_assigned_tasks", "modify_personal_data"
             )
-            else -> listOf("view_profile", "edit_basic_profile")
+            else -> listOf("view_profile", "edit_basic_profile", "modify_personal_data")
         }
     }
 

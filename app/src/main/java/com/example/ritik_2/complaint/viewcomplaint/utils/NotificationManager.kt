@@ -2,6 +2,7 @@ package com.example.ritik_2.complaint.viewcomplaint.utils
 
 import android.Manifest
 import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,6 +14,7 @@ import com.example.ritik_2.R
 import com.example.ritik_2.complaint.viewcomplaint.data.UserRepository
 import com.example.ritik_2.complaint.viewcomplaint.data.models.NotificationData
 import com.example.ritik_2.complaint.viewcomplaint.data.models.UserData
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,13 +41,13 @@ class NotificationManager(private val context: Context) {
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE)
-                    as android.app.NotificationManager
+                    as NotificationManager
 
             // Regular complaint notifications
             val regularChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Complaint Updates",
-                android.app.NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Notifications for complaint status updates"
                 enableVibration(true)
@@ -56,7 +58,7 @@ class NotificationManager(private val context: Context) {
             val assignmentChannel = NotificationChannel(
                 ASSIGNMENT_CHANNEL_ID,
                 "Complaint Assignments",
-                android.app.NotificationManager.IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifications when complaints are assigned to you"
                 enableVibration(true)
@@ -67,7 +69,7 @@ class NotificationManager(private val context: Context) {
             val managementChannel = NotificationChannel(
                 MANAGEMENT_CHANNEL_ID,
                 "Management Updates",
-                android.app.NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Notifications for managers about team activities"
                 enableVibration(true)
@@ -78,7 +80,7 @@ class NotificationManager(private val context: Context) {
             val globalChannel = NotificationChannel(
                 GLOBAL_CHANNEL_ID,
                 "Global Complaints",
-                android.app.NotificationManager.IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifications for company-wide complaints"
                 enableVibration(true)
@@ -476,7 +478,7 @@ class NotificationManager(private val context: Context) {
         notificationData: NotificationData
     ) {
         try {
-            val timestamp = com.google.firebase.Timestamp.now()
+            val timestamp = Timestamp.now()
             val notificationDoc = mapOf(
                 "title" to notificationData.title,
                 "message" to notificationData.message,
@@ -506,7 +508,7 @@ class NotificationManager(private val context: Context) {
                 .document(userId)
                 .collection("notifications")
                 .document(notificationId)
-                .update("isRead", true, "readAt", com.google.firebase.Timestamp.now())
+                .update("isRead", true, "readAt", Timestamp.now())
                 .await()
 
             Log.d(TAG, "Notification marked as read: $notificationId")

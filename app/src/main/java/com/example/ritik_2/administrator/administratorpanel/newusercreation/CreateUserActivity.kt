@@ -1,4 +1,4 @@
-package com.example.ritik_2.administrator
+package com.example.ritik_2.administrator.administratorpanel.newusercreation
 
 import android.os.Bundle
 import android.util.Log
@@ -14,7 +14,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 
-class AdminPanelActivity : ComponentActivity() {
+class CreateUserActivity : ComponentActivity() {
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private var isCreatingUser = mutableStateOf(false)
@@ -22,7 +22,6 @@ class AdminPanelActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val currentUserId = auth.currentUser?.uid
         if (currentUserId == null) {
             Toast.makeText(this, "Not authenticated", Toast.LENGTH_SHORT).show()
@@ -36,7 +35,7 @@ class AdminPanelActivity : ComponentActivity() {
 
         setContent {
             Ritik_2Theme {
-                AdminPanelScreen(
+                CreateUserScreen(
                     isCreating = isCreatingUser.value,
                     companyName = adminCompanyName.value, // Auto-filled
                     onCreateUserClick = { name, email, role, department, designation, password ->

@@ -403,6 +403,24 @@ fun ProfileDialog(onDismiss: () -> Unit, onSeeProfile: () -> Unit, onLogout: () 
             }
         }
     )
+
+    @Composable
+    fun NotificationFAB(
+        modifier: Modifier = Modifier,
+        onClick: () -> Unit
+    ) {
+        FloatingActionButton(
+            onClick = onClick,
+            modifier = modifier,
+            containerColor = MaterialTheme.colorScheme.primary
+        ) {
+            Icon(
+                Icons.Default.Notifications,
+                contentDescription = "Notifications",
+                tint = MaterialTheme.colorScheme.onPrimary
+            )
+        }
+    }
 }
 
 /*@Preview(showBackground = true)

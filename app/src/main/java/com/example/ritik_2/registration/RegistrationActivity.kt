@@ -75,34 +75,67 @@ class RegistrationActivity : ComponentActivity() {
 
         isRegistering.value = true
 
-        firebaseAuth.createUserWithEmailAndPassword(email, password)
-            .addOnCompleteListener(this) { task ->
-                if (task.isSuccessful) {
-                    val userId = firebaseAuth.currentUser?.uid
-                    if (userId != null) {
-                        Log.d("Registration", "User created with ID: $userId")
+        // First check if company already exists
+        checkCompanyExists(companyName) { companyExists ->
+            if (companyExists) {
+                Toast.makeText(
+                    this,
+                    "Company '$companyName' already exists in the system. Please contact your administrator or use a different company name.",
+                    Toast.LENGTH_LONG
+                ).show()
+                isRegistering.value = false
+                return@checkCompanyExists
+            }
 
-                        if (imageUri != null) {
-                            uploadImageAndCreateHierarchy(
-                                userId, imageUri, name, phoneNumber, designation, companyName,
-                                experience, completedProjects, activeProjects, complaints, email, role, department
-                            )
+            // If company doesn't exist, proceed with registration
+            firebaseAuth.createUserWithEmailAndPassword(email, password)
+                .addOnCompleteListener(this) { task ->
+                    if (task.isSuccessful) {
+                        val userId = firebaseAuth.currentUser?.uid
+                        if (userId != null) {
+                            Log.d("Registration", "User created with ID: $userId")
+
+                            if (imageUri != null) {
+                                uploadImageAndCreateHierarchy(
+                                    userId, imageUri, name, phoneNumber, designation, companyName,
+                                    experience, completedProjects, activeProjects, complaints, email, role, department
+                                )
+                            } else {
+                                createUserHierarchicalStructure(
+                                    userId, "", name, phoneNumber, designation, companyName,
+                                    experience, completedProjects, activeProjects, complaints, email, role, department
+                                )
+                            }
                         } else {
-                            createUserHierarchicalStructure(
-                                userId, "", name, phoneNumber, designation, companyName,
-                                experience, completedProjects, activeProjects, complaints, email, role, department
-                            )
+                            Toast.makeText(this, "Failed to get user ID", Toast.LENGTH_SHORT).show()
+                            isRegistering.value = false
                         }
                     } else {
-                        Toast.makeText(this, "Failed to get user ID", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            this, "Registration failed: ${task.exception?.message}", Toast.LENGTH_SHORT
+                        ).show()
                         isRegistering.value = false
                     }
-                } else {
-                    Toast.makeText(
-                        this, "Registration failed: ${task.exception?.message}", Toast.LENGTH_SHORT
-                    ).show()
-                    isRegistering.value = false
                 }
+        }
+    }
+
+    private fun checkCompanyExists(
+        companyName: String,
+        onResult: (Boolean) -> Unit
+    ) {
+        val sanitizedCompanyName = sanitizeDocumentId(companyName)
+
+        firestore.collection("companies_metadata")
+            .document(sanitizedCompanyName)
+            .get()
+            .addOnSuccessListener { document ->
+                onResult(document.exists())
+            }
+            .addOnFailureListener { exception ->
+                Log.e("Registration", "Error checking company existence", exception)
+                // On error, allow registration to proceed (fail-safe approach)
+                onResult(false)
             }
     }
 

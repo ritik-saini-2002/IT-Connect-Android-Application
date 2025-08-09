@@ -33,15 +33,15 @@
         android:theme="@style/Theme.Ritik_2"
         tools:targetApi="35">
 
-        <activity
-            android:name=".splash.SplashActivity"
-            android:exported="true"
-            android:theme="@style/Theme.Ritik_2">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+<!--        <activity-->
+<!--            android:name=".splash.SplashActivity"-->
+<!--            android:exported="true"-->
+<!--            android:theme="@style/Theme.Ritik_2">-->
+<!--            <intent-filter>-->
+<!--                <action android:name="android.intent.action.MAIN" />-->
+<!--                <category android:name="android.intent.category.LAUNCHER" />-->
+<!--            </intent-filter>-->
+<!--        </activity>-->
 
         <activity
             android:name=".main.MainActivity"
@@ -51,6 +51,10 @@
 
         <activity
             android:name=".complaint.complaintregistration.RegisterComplain"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2"/>
+
+        <activity android:name=".administrator.administratorpanel.AdministratorPanelActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
@@ -68,6 +72,10 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
+        <activity android:name=".profile.profileaccess.ProfileAccessActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2"/>
+
         <activity
             android:name=".registration.RegistrationActivity"
             android:exported="false"
@@ -78,7 +86,7 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".administrator.AdminPanelActivity"
+        <activity android:name=".administrator.administratorpanel.newusercreation.CreateUserActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
@@ -86,10 +94,10 @@
             android:name=".login.LoginActivity"
             android:exported="true"
             android:theme="@style/Theme.Ritik_2">
-            <!--<intent-filter>
+            <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>-->
+            </intent-filter>
         </activity>
         
         <activity android:name=".winshare.ServerConnectActivity"

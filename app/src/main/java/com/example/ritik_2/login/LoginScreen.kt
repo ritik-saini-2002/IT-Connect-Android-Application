@@ -395,22 +395,22 @@ fun AnimatedUserLogo() {
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.size(50.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Person,
-                        contentDescription = "Female User",
-                        modifier = Modifier.size(35.dp),
-                        tint = Color.White
-                    )
-                    // Add a small indicator for female (like hair or accessories)
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .offset(x = 8.dp, y = (-12).dp)
-                            .background(
-                                Color.White.copy(alpha = 0.8f),
-                                CircleShape
-                            )
-                    )
+//                    Icon(
+//                        Icons.Default.Person,
+//                        contentDescription = "Female User",
+//                        modifier = Modifier.size(35.dp),
+//                        tint = Color.White
+//                    )
+//                    // Add a small indicator for female (like hair or accessories)
+//                    Box(
+//                        modifier = Modifier
+//                            .size(12.dp)
+//                            .offset(x = 8.dp, y = (-12).dp)
+//                            .background(
+//                                Color.White.copy(alpha = 0.8f),
+//                                CircleShape
+//                            )
+//                    )
                 }
             } else {
                 // Male user icon

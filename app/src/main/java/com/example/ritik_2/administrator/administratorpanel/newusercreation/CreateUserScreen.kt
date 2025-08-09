@@ -1,4 +1,4 @@
-package com.example.ritik_2.administrator
+package com.example.ritik_2.administrator.administratorpanel.newusercreation
 
 import android.util.Patterns
 import androidx.compose.animation.*
@@ -30,7 +30,7 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AdminPanelScreen(
+fun CreateUserScreen(
     onCreateUserClick: (String, String, String, String, String, String) -> Unit, // name, email, role, department, designation, password
     isCreating: Boolean,
     companyName: String

@@ -315,6 +315,7 @@ fun ComplaintViewScreen(
             currentUser = currentUserData,
             userPermissions = userPermissions,
             availableEmployees = availableEmployees,
+            userProfiles = userProfiles, // <-- Add this line
             onDismiss = { selectedComplaint = null },
             onEdit = { updates ->
                 onUpdateComplaint(complaint.id, updates)
@@ -335,7 +336,8 @@ fun ComplaintViewScreen(
             },
             onChangeStatus = { newStatus, reason ->
                 onChangeStatus(complaint.id, newStatus, reason)
-            }
+            },
+            onViewUserProfile = onViewUserProfile
         )
     }
 }

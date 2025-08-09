@@ -15,6 +15,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.ritik_2.complaint.viewcomplaint.data.models.*
 import com.example.ritik_2.complaint.viewcomplaint.utils.PermissionChecker
+import com.example.ritik_2.complaint.viewcomplaint.ui.profile.ProfilePicture
+import com.example.ritik_2.complaint.viewcomplaint.ui.profile.UserProfileDialog
+
 
 @Composable
 fun FilterDialog(
@@ -175,6 +178,8 @@ fun ComplaintDetailsDialog(
     currentUser: UserData?,
     userPermissions: UserPermissions?,
     availableEmployees: List<UserData>,
+    userProfiles: Map<String, UserProfile>,
+    onViewUserProfile: (String) -> Unit,
     onDismiss: () -> Unit,
     onEdit: (ComplaintUpdates) -> Unit,
     onDelete: () -> Unit,
@@ -188,6 +193,8 @@ fun ComplaintDetailsDialog(
     var showCloseDialog by remember { mutableStateOf(false) }
     var showStatusDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showUserProfileDialog by remember { mutableStateOf(false) }
+    val creatorProfile = userProfiles[complaint.createdBy.userId]
 
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -201,20 +208,25 @@ fun ComplaintDetailsDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 item {
-                    // Header
+                    // Show profile picture and name
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        ProfilePicture(
+                            profilePictureUrl = creatorProfile?.profilePictureUrl,
+                            userName = complaint.createdBy.name,
+                            size = 48.dp,
+                            onClick = {
+                                onViewUserProfile(complaint.createdBy.userId)
+                                showUserProfileDialog = true
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Complaint Details",
-                            style = MaterialTheme.typography.headlineSmall,
+                            text = complaint.createdBy.name,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close")
-                        }
                     }
                 }
 

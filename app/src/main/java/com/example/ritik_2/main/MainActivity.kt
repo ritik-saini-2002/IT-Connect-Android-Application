@@ -17,13 +17,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
-import com.example.ritik_2.administrator.AdminPanelActivity
+import com.example.ritik_2.administrator.administratorpanel.newusercreation.CreateUserActivity
+import com.example.ritik_2.administrator.administratorpanel.AdministratorPanelActivity
 import com.example.ritik_2.authentication.AuthManager
 import com.example.ritik_2.complaint.viewcomplaint.ComplaintViewActivity
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.complaint.complaintregistration.RegisterComplain
-import com.example.ritik_2.notifications.NotificationManager
+import com.example.ritik_2.profile.profileaccess.ProfileAccessActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.winshare.ServerConnectActivity
 
@@ -102,6 +103,7 @@ class MainActivity : ComponentActivity() {
 
                     MainScreen(
                         userProfile = userProfile,
+                        //onNotificationClick = { NotificationIntegrationHelper.showNotificationPopup(this) },
                         isLoading = isLoading,
                         onLogout = {
                             Log.d(TAG, "🚪 User logging out")
@@ -155,7 +157,7 @@ class MainActivity : ComponentActivity() {
                     Log.d(TAG, "⚙️ Navigating to Admin Panel")
                     // Check if user has admin permissions
                     if (userProfile.role in listOf("Administrator", "Manager", "HR")) {
-                        startActivity(Intent(this, AdminPanelActivity::class.java))
+                        startActivity(Intent(this, AdministratorPanelActivity::class.java))
                     } else {
                         Toast.makeText(this, "Access denied. Admin privileges required.", Toast.LENGTH_SHORT).show()
                     }
@@ -166,7 +168,7 @@ class MainActivity : ComponentActivity() {
                 }
                 5 -> {
                     Log.d(TAG, "📢 Navigating to Notification Manager")
-                    startActivity(Intent(this, NotificationManager::class.java))
+                    startActivity(Intent(this, ProfileAccessActivity::class.java))
                 }
                 else -> {
                     Log.w(TAG, "⚠️ Unknown card ID: $cardId")
