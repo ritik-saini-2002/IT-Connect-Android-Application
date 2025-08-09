@@ -10,11 +10,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.example.ritik_2.administrator.administratorpanel.newusercreation.CreateUserActivity
+import com.example.ritik_2.administrator.administratorpanel.usermanagement.ManageUserActivity
 import com.example.ritik_2.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import kotlinx.coroutines.tasks.await
 
 class AdministratorPanelActivity : ComponentActivity() {
     private val auth = FirebaseAuth.getInstance()

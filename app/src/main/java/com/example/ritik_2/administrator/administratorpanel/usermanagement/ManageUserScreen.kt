@@ -1,4 +1,4 @@
-package com.example.ritik_2.administrator.administratorpanel
+package com.example.ritik_2.administrator.administratorpanel.usermanagement
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -14,25 +14,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.compareTo
-import kotlin.sequences.ifEmpty
-import kotlin.toString
 
 // Complete Color Scheme
 object ManageUserColors {
@@ -325,7 +321,7 @@ private fun SelectionCard(
     items: List<Pair<String, String>>,
     selectedValue: String,
     onSelectionChanged: (String) -> Unit,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     color: Color
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -404,7 +400,7 @@ private fun InfoCard(
     title: String,
     value: String,
     subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     color: Color
 ) {
     Card(

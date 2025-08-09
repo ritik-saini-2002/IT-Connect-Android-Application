@@ -1,4 +1,4 @@
-package com.example.ritik_2.administrator.administratorpanel
+package com.example.ritik_2.administrator.administratorpanel.usermanagement
 
 import android.content.Context
 import android.content.Intent

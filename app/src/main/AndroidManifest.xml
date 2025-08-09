@@ -76,7 +76,7 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
-        <activity android:name=".administrator.administratorpanel.ManageUserActivity"
+        <activity android:name=".administrator.administratorpanel.usermanagement.ManageUserActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
