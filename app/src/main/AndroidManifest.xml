@@ -76,6 +76,10 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
+        <activity android:name=".administrator.administratorpanel.ManageUserActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2"/>
+
         <activity
             android:name=".registration.RegistrationActivity"
             android:exported="false"

@@ -229,7 +229,7 @@ class AdministratorPanelActivity : ComponentActivity() {
                 startActivity(Intent(this, CreateUserActivity::class.java))
             }
             "manage_users" -> {
-                Toast.makeText(this, "Navigate to User Management", Toast.LENGTH_SHORT).show()
+                startActivity(Intent(this, ManageUserActivity::class.java))
             }
             "view_analytics" -> {
                 Toast.makeText(this, "Navigate to Analytics Dashboard", Toast.LENGTH_SHORT).show()
