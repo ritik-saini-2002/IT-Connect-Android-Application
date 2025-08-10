@@ -355,7 +355,7 @@ class ProfileCompletionActivity : ComponentActivity() {
                 // Upload image if new image is selected
                 profileData.imageUri?.let { uri ->
                     try {
-                        imageUrl = uploadProfileImage(userId, uri)
+                        imageUrl = uploadProfileImage(userId, uri, profileData)
                     } catch (e: Exception) {
                         Toast.makeText(this@ProfileCompletionActivity,
                             "Failed to upload image: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -606,12 +606,31 @@ class ProfileCompletionActivity : ComponentActivity() {
         ))
     }
 
-    private suspend fun uploadProfileImage(userId: String, imageUri: Uri): String {
+    private suspend fun uploadProfileImage(
+        userId: String,
+        imageUri: Uri,
+        profileData: ProfileData
+    ): String {
         return try {
-            val imageRef = storage.reference.child("users/companies/{sanitizedCompany}/departments/{sanitizedDepartment}/roles/{role}/users/{userId}/profile.jpg")
+            val sanitizedCompany = DataUtils.sanitizeDocumentId(profileData.companyName)
+            val sanitizedDepartment = DataUtils.sanitizeDocumentId(profileData.department)
+
+            // Construct the storage path
+            val imagePath = "users/$sanitizedCompany/$sanitizedDepartment/${profileData.role}/users/$userId/profile_image.jpg"
+
+            val imageRef = storage.reference.child(imagePath)
+
+            // Upload the image
             imageRef.putFile(imageUri).await()
-            imageRef.downloadUrl.await().toString()
+
+            // Get download URL
+            val downloadUrl = imageRef.downloadUrl.await().toString()
+
+            Log.d("ProfileCompletion", "Image uploaded successfully to: $imagePath")
+            downloadUrl
+
         } catch (e: Exception) {
+            Log.e("ProfileCompletion", "Failed to upload image", e)
             throw Exception("Failed to upload image: ${e.message}")
         }
     }
