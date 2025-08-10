@@ -8,742 +8,651 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
-import com.example.ritik_2.authentication.AuthManager
-import com.example.ritik_2.authentication.AuthState
-import com.example.ritik_2.login.LoginActivity
-import com.example.ritik_2.main.MainActivity
-import com.example.ritik_2.theme.Ritik_2Theme
+import com.example.ritik_2.data.*
+import com.example.ritik_2.theme.AppTheme
+import com.example.ritik_2.profile.profilecompletion.components.ProfileCompletionViewModel
+import com.example.ritik_2.profile.profilecompletion.components.ProfileData
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.firestore.WriteBatch
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.*
 
 class ProfileCompletionActivity : ComponentActivity() {
 
-    companion object {
-        const val TAG = "ProfileCompletion"
-        const val EXTRA_USER_ID = "extra_user_id"
+    private lateinit var viewModel: ProfileCompletionViewModel
+    private val auth = FirebaseAuth.getInstance()
+    private val firestore = FirebaseFirestore.getInstance()
+    private val storage = FirebaseStorage.getInstance()
 
-        fun createIntent(context: Context, userId: String): Intent {
+    // Image picker launcher
+    private val imagePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.setSelectedImageUri(it) }
+    }
+
+    companion object {
+        const val EXTRA_USER_ID = "user_id"
+        const val EXTRA_IS_EDIT_MODE = "is_edit_mode"
+
+        fun createIntent(context: Context, userId: String, isEditMode: Boolean = false): Intent {
             return Intent(context, ProfileCompletionActivity::class.java).apply {
                 putExtra(EXTRA_USER_ID, userId)
+                putExtra(EXTRA_IS_EDIT_MODE, isEditMode)
             }
         }
     }
-
-    private val firestore = FirebaseFirestore.getInstance()
-    private val firebaseAuth = FirebaseAuth.getInstance()
-    private val storage = FirebaseStorage.getInstance()
-    private val authManager = AuthManager.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        try {
-            var userId = intent.getStringExtra(EXTRA_USER_ID) ?: ""
+        // Initialize ViewModel
+        viewModel = ViewModelProvider(this)[ProfileCompletionViewModel::class.java]
 
-            if (userId.isEmpty()) {
-                userId = authManager.currentUser?.uid ?: ""
-                Log.w(TAG, "No userId in intent, using AuthManager: $userId")
-            }
+        val userId = intent.getStringExtra(EXTRA_USER_ID) ?: auth.currentUser?.uid ?: ""
+        val isEditMode = intent.getBooleanExtra(EXTRA_IS_EDIT_MODE, false)
 
-            if (userId.isEmpty()) {
-                Log.e(TAG, "❌ No valid user ID found")
-                handleAuthError("Session expired. Please log in again.")
-                return
-            }
-
-            Log.d(TAG, "✅ ProfileCompletionActivity started for user: $userId")
-            verifyAuthentication(userId)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error in onCreate", e)
-            Toast.makeText(this, "Error starting profile completion: ${e.message}", Toast.LENGTH_LONG).show()
-            finish()
+        if (userId.isNotEmpty()) {
+            loadUserData(userId)
+        } else {
+            viewModel.setError("User ID not found")
         }
-    }
-
-    private fun verifyAuthentication(userId: String) {
-        lifecycleScope.launch {
-            val authState = authManager.checkAuthenticationState()
-            when (authState) {
-                is AuthState.Authenticated -> {
-                    initializeUI(userId, authState.user.role)  // ✅ Uses database role
-                }
-
-                is AuthState.InvalidRole -> {
-                    initializeUI(userId, authState.role ?: "Employee")  // ⚠️ Problem here
-                }
-
-                is AuthState.UserNotFound -> {
-                    initializeUI(userId, "Employee")  // ❌ HARDCODED Employee!
-                }
-
-                is AuthState.Error -> TODO()
-                AuthState.Loading -> TODO()
-                AuthState.NotAuthenticated -> TODO()
-            }
-        }
-    }
-
-    private fun initializeUI(userId: String, userRole: String) {
-        Log.d(TAG, "🎨 Initializing UI for user: $userId with role: $userRole")
 
         setContent {
-            Ritik_2Theme {
-                val isDarkTheme = isSystemInDarkTheme()
-
+            AppTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = if (isDarkTheme) Color(0xFF121212) else Color(0xFFFAFAFA)
+                    color = MaterialTheme.colorScheme.background
                 ) {
                     ProfileCompletionScreen(
-                        userId = userId,
-                        userRole = userRole,
-                        isDarkTheme = isDarkTheme,
-                        onProfileUpdateClick = { updatedData, newPassword, imageUri ->
-                            handleProfileUpdate(updatedData, newPassword, imageUri, userId)
-                        },
-                        onSkipClick = {
-                            handleSkip(userId)
-                        },
-                        onLogoutClick = {
-                            handleLogout()
-                        }
+                        viewModel = viewModel,
+                        onImagePickClick = { imagePickerLauncher.launch("image/*") },
+                        onSaveProfile = { profileData -> saveProfile(profileData) },
+                        onNavigateBack = { finish() },
+                        isEditMode = isEditMode,
+                        userId = userId
                     )
                 }
             }
         }
     }
 
-    private fun handleProfileUpdate(
-        updatedData: Map<String, Any>,
-        newPassword: String?,
-        imageUri: Uri?,
-        userId: String
-    ) {
-        Log.d(TAG, "🔄 Starting profile update for user: $userId")
-
+    private fun loadUserData(userId: String) {
         lifecycleScope.launch {
             try {
-                if (imageUri != null) {
-                    uploadImageAndUpdateProfile(imageUri, updatedData, newPassword, userId)
-                } else {
-                    updateProfileData(updatedData, newPassword, userId)
+                viewModel.setLoading(true)
+                viewModel.setError(null)
+
+                var userFound = false
+
+                // First try to get user from access control (fastest lookup)
+                try {
+                    val accessDoc = firestore.collection("user_access_control")
+                        .document(userId)
+                        .get()
+                        .await()
+
+                    if (accessDoc.exists()) {
+                        val userData = accessDoc.data!!
+                        val documentPath = userData["documentPath"] as? String
+
+                        if (!documentPath.isNullOrEmpty() && documentPath.contains("/users/")) {
+                            // User was created with hierarchical structure
+                            if (loadFromHierarchicalStructure(userId, documentPath)) {
+                                userFound = true
+                            }
+                        } else {
+                            // Create user from access control data
+                            val user = User(
+                                userId = userId,
+                                email = auth.currentUser?.email ?: "",
+                                name = userData["name"] as? String ?: "",
+                                role = userData["role"] as? String ?: "Employee",
+                                companyName = userData["companyName"] as? String ?: "",
+                                sanitizedCompanyName = userData["sanitizedCompanyName"] as? String ?: "",
+                                department = userData["department"] as? String ?: "",
+                                sanitizedDepartment = userData["sanitizedDepartment"] as? String ?: "",
+                                designation = userData["designation"] as? String ?: "",
+                                documentPath = userData["documentPath"] as? String ?: ""
+                            )
+                            viewModel.setCurrentUser(user)
+                            userFound = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("ProfileCompletion", "Error loading from access control", e)
                 }
+
+                // Fallback approaches if access control failed
+                if (!userFound) {
+                    // Try search index
+                    try {
+                        val userSearchDoc = firestore.collection("user_search_index")
+                            .document(userId)
+                            .get()
+                            .await()
+
+                        if (userSearchDoc.exists()) {
+                            val userPath = userSearchDoc.getString("documentPath")
+                            if (!userPath.isNullOrEmpty()) {
+                                try {
+                                    val userDoc = firestore.document(userPath).get().await()
+                                    if (userDoc.exists()) {
+                                        if (userPath.contains("/users/")) {
+                                            loadFromHierarchicalStructure(userId, userPath)
+                                        } else {
+                                            val user = User.fromMap(userDoc.data ?: mapOf())
+                                            viewModel.setCurrentUser(user)
+                                        }
+                                        userFound = true
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("ProfileCompletion", "Failed to load user from path: $userPath", e)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ProfileCompletion", "Search index approach failed", e)
+                    }
+                }
+
+                // Try direct user collection
+                if (!userFound) {
+                    try {
+                        val userDoc = firestore.collection("users").document(userId).get().await()
+                        if (userDoc.exists()) {
+                            val user = User.fromMap(userDoc.data ?: mapOf())
+                            viewModel.setCurrentUser(user)
+                            userFound = true
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ProfileCompletion", "Direct user collection approach failed", e)
+                    }
+                }
+
+                // Try to load additional profile data from flat collections
+                if (userFound) {
+                    loadAdditionalProfileData(userId)
+                }
+
+                // Handle case where no user data exists
+                if (!userFound) {
+                    val currentUser = auth.currentUser
+                    if (currentUser != null) {
+                        viewModel.initializeNewUser(
+                            userId = userId,
+                            email = currentUser.email ?: "",
+                            displayName = currentUser.displayName
+                        )
+                        Log.d("ProfileCompletion", "Initialized new user with basic data")
+                    } else {
+                        throw Exception("No authenticated user found")
+                    }
+                } else {
+                    viewModel.setDataExists(true)
+                }
+
+                viewModel.setLoading(false)
+
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Error in profile update process", e)
-                Toast.makeText(this@ProfileCompletionActivity, "Update failed: ${e.message}", Toast.LENGTH_LONG).show()
+                viewModel.setLoading(false)
+                viewModel.setError("Error loading profile: ${e.message}")
+                Log.e("ProfileCompletion", "Error loading user data", e)
+
+                // Try to initialize with minimal data as fallback
+                val currentUser = auth.currentUser
+                if (currentUser != null) {
+                    viewModel.initializeNewUser(
+                        userId = userId,
+                        email = currentUser.email ?: "",
+                        displayName = currentUser.displayName
+                    )
+                }
+
+                Toast.makeText(this@ProfileCompletionActivity,
+                    "Profile not found. You can create a new one.", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    private suspend fun uploadImageAndUpdateProfile(
-        imageUri: Uri,
-        updatedData: Map<String, Any>,
-        newPassword: String?,
-        userId: String
-    ) {
-        Log.d(TAG, "📷 Uploading image for user: $userId")
+    private suspend fun loadFromHierarchicalStructure(userId: String, documentPath: String): Boolean {
+        return try {
+            val userDoc = firestore.document(documentPath).get().await()
+            if (userDoc.exists()) {
+                val userDocData = userDoc.data!!
 
-        try {
-            // Get user info for storage path
-            val accessControlDoc = firestore.collection("user_access_control").document(userId).get().await()
-            val companyName = sanitizeDocumentId(accessControlDoc.getString("sanitizedCompany") ?: "default_company")
-            val department = sanitizeDocumentId(accessControlDoc.getString("sanitizedDepartment") ?: "default_department")
-            val role = accessControlDoc.getString("role") ?: "Employee"
+                // Create User object from hierarchical data
+                val user = User(
+                    userId = userDocData["userId"] as? String ?: userId,
+                    name = userDocData["name"] as? String ?: "",
+                    email = userDocData["email"] as? String ?: "",
+                    role = userDocData["role"] as? String ?: "Employee",
+                    companyName = userDocData["companyName"] as? String ?: "",
+                    sanitizedCompanyName = userDocData["sanitizedCompanyName"] as? String ?: "",
+                    department = userDocData["department"] as? String ?: "",
+                    sanitizedDepartment = userDocData["sanitizedDepartment"] as? String ?: "",
+                    designation = userDocData["designation"] as? String ?: "",
+                    documentPath = documentPath,
+                    isActive = userDocData["isActive"] as? Boolean ?: true,
+                    createdAt = (userDocData["createdAt"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
+                    lastUpdated = (userDocData["lastUpdated"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
+                    createdBy = userDocData["createdBy"] as? String ?: userId
+                )
 
-            val imageRef = storage.reference.child("users/$companyName/$department/$role/$userId/profile.jpg")
+                viewModel.setCurrentUser(user)
 
-            val uploadTask = imageRef.putFile(imageUri).await()
-            val downloadUrl = imageRef.downloadUrl.await()
+                // Extract profile data from nested structure
+                val profileData = userDocData["profile"] as? Map<String, Any>
+                if (profileData != null) {
+                    val emergencyContact = profileData["emergencyContact"] as? Map<String, Any> ?: mapOf()
 
-            Log.d(TAG, "✅ Image uploaded successfully: $downloadUrl")
+                    val profile = UserProfile(
+                        userId = userId,
+                        imageUrl = profileData["imageUrl"] as? String ?: "",
+                        phoneNumber = profileData["phoneNumber"] as? String ?: "",
+                        address = profileData["address"] as? String ?: "",
+                        dateOfBirth = (profileData["dateOfBirth"] as? Timestamp)?.toDate()?.time,
+                        joiningDate = (profileData["joiningDate"] as? Timestamp)?.toDate()?.time ?: System.currentTimeMillis(),
+                        employeeId = profileData["employeeId"] as? String ?: "",
+                        reportingTo = profileData["reportingTo"] as? String ?: "",
+                        salary = (profileData["salary"] as? Number)?.toDouble() ?: 0.0,
+                        emergencyContactName = emergencyContact["name"] as? String ?: "",
+                        emergencyContactPhone = emergencyContact["phone"] as? String ?: "",
+                        emergencyContactRelation = emergencyContact["relation"] as? String ?: ""
+                    )
 
-            val dataWithImage = updatedData.toMutableMap()
-            dataWithImage["imageUrl"] = downloadUrl.toString()
-            updateProfileData(dataWithImage, newPassword, userId)
+                    viewModel.setCurrentProfile(profile)
+                }
 
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Image upload failed", e)
-            Toast.makeText(this, "Image upload failed: ${e.message}", Toast.LENGTH_LONG).show()
-            throw e
-        }
-    }
+                // Extract work stats from nested structure
+                val workStatsData = userDocData["workStats"] as? Map<String, Any>
+                if (workStatsData != null) {
+                    val workStats = WorkStats(
+                        userId = userId,
+                        experience = (workStatsData["experience"] as? Number)?.toInt() ?: 0,
+                        completedProjects = (workStatsData["completedProjects"] as? Number)?.toInt() ?: 0,
+                        activeProjects = (workStatsData["activeProjects"] as? Number)?.toInt() ?: 0,
+                        pendingTasks = (workStatsData["pendingTasks"] as? Number)?.toInt() ?: 0,
+                        completedTasks = (workStatsData["completedTasks"] as? Number)?.toInt() ?: 0,
+                        totalWorkingHours = (workStatsData["totalWorkingHours"] as? Number)?.toInt() ?: 0,
+                        avgPerformanceRating = (workStatsData["avgPerformanceRating"] as? Number)?.toDouble() ?: 0.0
+                    )
 
-    private suspend fun updateProfileData(
-        updatedData: Map<String, Any>,
-        newPassword: String?,
-        userId: String
-    ) {
-        Log.d(TAG, "💾 Updating profile data for user: $userId")
+                    viewModel.setCurrentWorkStats(workStats)
+                }
 
-        try {
-            // Get current user access control data
-            val accessControlDoc = firestore.collection("user_access_control").document(userId).get().await()
-
-            if (!accessControlDoc.exists()) {
-                // User doesn't exist in system, create new hierarchical structure
-                createNewUserHierarchy(userId, updatedData, newPassword)
-                return
-            }
-
-            val currentDocumentPath = accessControlDoc.getString("documentPath")
-            val currentRole = accessControlDoc.getString("role")
-            val currentCompanyName = accessControlDoc.getString("companyName")
-            val currentDepartment = accessControlDoc.getString("department")
-
-            // Check if core data is being changed
-            val newRole = updatedData["role"]?.toString() ?: currentRole
-            val newCompanyName = updatedData["companyName"]?.toString() ?: currentCompanyName
-            val newDepartment = updatedData["department"]?.toString() ?: currentDepartment
-
-            val coreDataChanged = (newRole != currentRole) ||
-                    (newCompanyName != currentCompanyName) ||
-                    (newDepartment != currentDepartment)
-
-            if (coreDataChanged) {
-                // Need to create new hierarchical structure
-                createOrUpdateHierarchicalStructure(userId, updatedData, newPassword)
+                true
             } else {
-                // Simple update to existing document
-                updateExistingDocument(userId, currentDocumentPath, updatedData, newPassword)
+                false
             }
-
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Profile update failed", e)
-            Toast.makeText(this, "Profile update failed: ${e.message}", Toast.LENGTH_LONG).show()
-            throw e
+            Log.e("ProfileCompletion", "Error loading from hierarchical path: $documentPath", e)
+            false
         }
     }
 
-    private suspend fun createNewUserHierarchy(
+    private suspend fun loadAdditionalProfileData(userId: String) {
+        // Try to load profile data from flat collection
+        try {
+            val profileDoc = firestore.collection("user_profiles")
+                .document(userId)
+                .get()
+                .await()
+
+            if (profileDoc.exists()) {
+                val profile = UserProfile.fromMap(userId, profileDoc.data ?: mapOf())
+                viewModel.setCurrentProfile(profile)
+            }
+        } catch (e: Exception) {
+            Log.d("ProfileCompletion", "Profile loading from flat collection failed: ${e.message}")
+        }
+
+        // Try to load work stats from flat collection
+        try {
+            val statsDoc = firestore.collection("work_stats")
+                .document(userId)
+                .get()
+                .await()
+
+            if (statsDoc.exists()) {
+                val stats = WorkStats.fromMap(userId, statsDoc.data ?: mapOf())
+                viewModel.setCurrentWorkStats(stats)
+            }
+        } catch (e: Exception) {
+            Log.d("ProfileCompletion", "Work stats loading from flat collection failed: ${e.message}")
+        }
+    }
+
+    private fun saveProfile(profileData: ProfileData) {
+        lifecycleScope.launch {
+            try {
+                viewModel.setLoading(true)
+                viewModel.setError(null)
+
+                val currentUser = auth.currentUser
+                if (currentUser == null) {
+                    Toast.makeText(this@ProfileCompletionActivity,
+                        "User not authenticated", Toast.LENGTH_SHORT).show()
+                    viewModel.setLoading(false)
+                    return@launch
+                }
+
+                val userId = currentUser.uid
+                var imageUrl = profileData.imageUrl
+
+                // Upload image if new image is selected
+                profileData.imageUri?.let { uri ->
+                    try {
+                        imageUrl = uploadProfileImage(userId, uri)
+                    } catch (e: Exception) {
+                        Toast.makeText(this@ProfileCompletionActivity,
+                            "Failed to upload image: ${e.message}", Toast.LENGTH_SHORT).show()
+                        // Continue without image update
+                    }
+                }
+
+                // Validate required fields
+                if (profileData.companyName.isBlank()) {
+                    viewModel.setError("Company name is required")
+                    viewModel.setLoading(false)
+                    return@launch
+                }
+
+                if (profileData.department.isBlank()) {
+                    viewModel.setError("Department is required")
+                    viewModel.setLoading(false)
+                    return@launch
+                }
+
+                // Get current user's document path to determine structure
+                val accessDoc = firestore.collection("user_access_control").document(userId).get().await()
+                val documentPath = accessDoc.getString("documentPath")
+
+                if (!documentPath.isNullOrEmpty() && documentPath.contains("/users/") &&
+                    documentPath.split("/").size >= 6) {
+                    // User was created with hierarchical structure
+                    updateHierarchicalStructure(userId, documentPath, profileData, imageUrl)
+                } else {
+                    // User was created with flat structure or needs migration, use flat collections
+                    saveToFlatCollections(userId, profileData, imageUrl)
+                }
+
+            } catch (e: Exception) {
+                viewModel.setLoading(false)
+                viewModel.setError("Error saving profile: ${e.message}")
+                Toast.makeText(this@ProfileCompletionActivity,
+                    "Error saving profile: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e("ProfileCompletion", "Error saving profile", e)
+            }
+        }
+    }
+
+    private suspend fun updateHierarchicalStructure(
         userId: String,
-        updatedData: Map<String, Any>,
-        newPassword: String?
+        documentPath: String,
+        profileData: ProfileData,
+        imageUrl: String
     ) {
-        Log.d(TAG, "🆕 Creating new user hierarchy for: $userId")
-
-        val timestamp = Timestamp.now()
-        val role = updatedData["role"]?.toString() ?: "Employee"
-        val companyName = updatedData["companyName"]?.toString() ?: "Default Company"
-        val department = updatedData["department"]?.toString() ?: "General"
-        val name = updatedData["name"]?.toString() ?: "Unknown User"
-        val email = updatedData["email"]?.toString() ?: ""
-
-        val sanitizedCompanyName = sanitizeDocumentId(companyName)
-        val sanitizedDepartment = sanitizeDocumentId(department)
-        val documentPath = "users/$sanitizedCompanyName/$sanitizedDepartment/$role/users/$userId"
-
         val batch = firestore.batch()
 
-        // Create hierarchical user document
+        // Update the hierarchical document
         val userDocRef = firestore.document(documentPath)
-        val hierarchicalUserData = createHierarchicalUserData(userId, updatedData, timestamp, documentPath)
-        batch.set(userDocRef, hierarchicalUserData)
 
-        // Create metadata documents
-        createMetadataDocuments(batch, sanitizedCompanyName, companyName, sanitizedDepartment, department, role, timestamp)
-
-        // Create access control
-        val accessControlRef = firestore.collection("user_access_control").document(userId)
-        val accessControlData = mapOf(
-            "userId" to userId,
-            "name" to name,
-            "email" to email,
-            "companyName" to companyName,
-            "sanitizedCompany" to sanitizedCompanyName,
-            "department" to department,
-            "sanitizedDepartment" to sanitizedDepartment,
-            "role" to role,
-            "permissions" to getRolePermissions(role),
-            "isActive" to true,
-            "documentPath" to documentPath,
-            "lastAccess" to timestamp
+        val updateData = mutableMapOf<String, Any?>(
+            "name" to profileData.name,
+            "designation" to profileData.designation,
+            "lastUpdated" to Timestamp.now(),
+            "profile.imageUrl" to imageUrl,
+            "profile.phoneNumber" to profileData.phoneNumber,
+            "profile.address" to profileData.address,
+            "profile.employeeId" to profileData.employeeId,
+            "profile.reportingTo" to profileData.reportingTo,
+            "profile.salary" to profileData.salary,
+            "profile.emergencyContact.name" to profileData.emergencyContactName,
+            "profile.emergencyContact.phone" to profileData.emergencyContactPhone,
+            "profile.emergencyContact.relation" to profileData.emergencyContactRelation,
+            "workStats.experience" to profileData.experience
         )
-        batch.set(accessControlRef, accessControlData)
 
-        // Create search index
-        val searchIndexRef = firestore.collection("user_search_index").document(userId)
-        val searchIndexData = mapOf(
-            "userId" to userId,
-            "name" to name.lowercase(),
-            "email" to email.lowercase(),
-            "companyName" to companyName,
-            "sanitizedCompany" to sanitizedCompanyName,
-            "department" to department,
-            "sanitizedDepartment" to sanitizedDepartment,
-            "role" to role,
-            "designation" to (updatedData["designation"] ?: ""),
-            "isActive" to true,
-            "documentPath" to documentPath,
-            "searchTerms" to listOf(
-                name.lowercase(),
-                email.lowercase(),
-                companyName.lowercase(),
-                department.lowercase(),
-                role.lowercase()
-            ).filter { it.isNotEmpty() }
-        )
-        batch.set(searchIndexRef, searchIndexData)
+        // Handle nullable date fields
+        profileData.dateOfBirth?.let {
+            updateData["profile.dateOfBirth"] = Timestamp(Date(it))
+        }
+        profileData.joiningDate?.let {
+            updateData["profile.joiningDate"] = Timestamp(Date(it))
+        }
+
+        batch.update(userDocRef, updateData)
+
+        // Also update access control and search index
+        updateAccessControlAndSearchIndex(batch, userId, profileData)
 
         batch.commit().await()
-        Log.d(TAG, "✅ New user hierarchy created at: $documentPath")
 
-        if (newPassword != null && newPassword.isNotEmpty()) {
-            updatePassword(newPassword)
-        } else {
-            handleProfileUpdateSuccess()
-        }
+        viewModel.setLoading(false)
+        Toast.makeText(this@ProfileCompletionActivity, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
+        setResult(RESULT_OK)
+        finish()
     }
 
-    private suspend fun updateExistingDocument(
-        userId: String,
-        documentPath: String?,
-        updatedData: Map<String, Any>,
-        newPassword: String?
-    ) {
-        Log.d(TAG, "📝 Updating existing document at path: $documentPath")
+    private suspend fun saveToFlatCollections(userId: String, profileData: ProfileData, imageUrl: String) {
+        // Create sanitized names
+        val sanitizedCompany = DataUtils.sanitizeDocumentId(profileData.companyName)
+        val sanitizedDepartment = DataUtils.sanitizeDocumentId(profileData.department)
 
-        val timestamp = Timestamp.now()
-        val finalData = updatedData.toMutableMap().apply {
-            put("lastUpdated", timestamp)
-            put("isProfileComplete", true)
-        }
-
-        // Update main user document
-        if (!documentPath.isNullOrEmpty()) {
-            firestore.document(documentPath).update(finalData).await()
-        } else {
-            // Fallback to users collection
-            firestore.collection("users").document(userId).update(finalData).await()
-        }
-
-        // Update access control
-        val accessControlUpdate = mutableMapOf<String, Any>(
-            "lastAccess" to timestamp
+        // Generate document path
+        val documentPath = FirestorePaths.getUserPath(
+            sanitizedCompany,
+            sanitizedDepartment,
+            profileData.role,
+            userId
         )
 
-        // Add searchable fields if they exist
-        updatedData["name"]?.let { accessControlUpdate["name"] = it }
-        updatedData["email"]?.let { accessControlUpdate["email"] = it }
+        // Create user document
+        val user = User(
+            userId = userId,
+            name = profileData.name,
+            email = profileData.email,
+            role = profileData.role,
+            companyName = profileData.companyName,
+            sanitizedCompanyName = sanitizedCompany,
+            department = profileData.department,
+            sanitizedDepartment = sanitizedDepartment,
+            designation = profileData.designation,
+            documentPath = documentPath,
+            isActive = true,
+            createdAt = viewModel.currentUser.value?.createdAt ?: System.currentTimeMillis(),
+            lastUpdated = System.currentTimeMillis(),
+            createdBy = viewModel.currentUser.value?.createdBy ?: userId
+        )
 
-        firestore.collection("user_access_control").document(userId).update(accessControlUpdate).await()
+        // Create user profile document
+        val userProfile = UserProfile(
+            userId = userId,
+            imageUrl = imageUrl,
+            phoneNumber = profileData.phoneNumber,
+            address = profileData.address,
+            dateOfBirth = profileData.dateOfBirth,
+            joiningDate = profileData.joiningDate ?: System.currentTimeMillis(),
+            employeeId = profileData.employeeId,
+            reportingTo = profileData.reportingTo,
+            salary = profileData.salary,
+            emergencyContactName = profileData.emergencyContactName,
+            emergencyContactPhone = profileData.emergencyContactPhone,
+            emergencyContactRelation = profileData.emergencyContactRelation
+        )
+
+        // Create or update work stats document
+        val existingStats = viewModel.uiState.value.currentWorkStats
+        val workStats = WorkStats(
+            userId = userId,
+            experience = profileData.experience,
+            completedProjects = existingStats?.completedProjects ?: 0,
+            activeProjects = existingStats?.activeProjects ?: 0,
+            pendingTasks = existingStats?.pendingTasks ?: 0,
+            completedTasks = existingStats?.completedTasks ?: 0,
+            totalWorkingHours = existingStats?.totalWorkingHours ?: 0,
+            avgPerformanceRating = existingStats?.avgPerformanceRating ?: 0.0
+        )
+
+        // Save to Firestore using batch write
+        val batch: WriteBatch = firestore.batch()
+
+        // Save user data in hierarchical structure
+        try {
+            val userDocRef = firestore.document(documentPath)
+            batch.set(userDocRef, user.toMap())
+        } catch (e: Exception) {
+            Log.w("ProfileCompletion", "Could not save to hierarchical path: $documentPath", e)
+            // Continue with flat collection save
+        }
+
+        // Always save in flat collection for easy access
+        val flatUserDocRef = firestore.collection("users").document(userId)
+        batch.set(flatUserDocRef, user.toMap())
+
+        // Save profile data in flat collection
+        val profileDocRef = firestore.collection("user_profiles").document(userId)
+        batch.set(profileDocRef, userProfile.toMap())
+
+        // Save work stats in flat collection
+        val statsDocRef = firestore.collection("work_stats").document(userId)
+        batch.set(statsDocRef, workStats.toMap())
+
+        // Save search index for easy user lookup
+        val searchIndexRef = firestore.collection(FirestorePaths.USER_SEARCH_INDEX).document(userId)
+        batch.set(searchIndexRef, mapOf(
+            "userId" to userId,
+            "name" to user.name,
+            "email" to user.email,
+            "role" to user.role,
+            "companyName" to user.companyName,
+            "department" to user.department,
+            "designation" to user.designation,
+            "documentPath" to documentPath,
+            "lastUpdated" to System.currentTimeMillis()
+        ))
+
+        // Save user access control
+        val accessControlRef = firestore.collection(FirestorePaths.USER_ACCESS_CONTROL).document(userId)
+        batch.set(accessControlRef, mapOf(
+            "userId" to userId,
+            "name" to user.name,
+            "email" to user.email,
+            "role" to user.role,
+            "permissions" to DataUtils.getRolePermissions(user.role),
+            "companyName" to user.companyName,
+            "sanitizedCompanyName" to user.sanitizedCompanyName,
+            "department" to user.department,
+            "sanitizedDepartment" to user.sanitizedDepartment,
+            "designation" to user.designation,
+            "documentPath" to documentPath,
+            "lastUpdated" to System.currentTimeMillis()
+        ))
+
+        // Update company and department metadata
+        updateCompanyMetadata(batch, user)
+        updateDepartmentMetadata(batch, user)
+
+        // Commit batch
+        batch.commit().await()
+
+        viewModel.setLoading(false)
+        Toast.makeText(this@ProfileCompletionActivity,
+            "Profile saved successfully!", Toast.LENGTH_SHORT).show()
+
+        setResult(RESULT_OK)
+        finish()
+    }
+
+    private fun updateAccessControlAndSearchIndex(
+        batch: WriteBatch,
+        userId: String,
+        profileData: ProfileData
+    ) {
+        // Update access control
+        val accessControlRef = firestore.collection("user_access_control").document(userId)
+        batch.update(accessControlRef, mapOf(
+            "name" to profileData.name,
+            "designation" to profileData.designation,
+            "lastAccess" to Timestamp.now()
+        ))
 
         // Update search index
-        val searchUpdate = mutableMapOf<String, Any>(
-            "lastUpdated" to timestamp
-        )
-
-        updatedData["name"]?.let { name ->
-            searchUpdate["name"] = name.toString().lowercase()
-        }
-
-        firestore.collection("user_search_index").document(userId).update(searchUpdate).await()
-
-        Log.d(TAG, "✅ Existing document updated successfully")
-
-        if (newPassword != null && newPassword.isNotEmpty()) {
-            updatePassword(newPassword)
-        } else {
-            handleProfileUpdateSuccess()
-        }
-    }
-
-    private suspend fun createOrUpdateHierarchicalStructure(
-        userId: String,
-        updatedData: Map<String, Any>,
-        newPassword: String?
-    ) {
-        Log.d(TAG, "🏗️ Creating new hierarchical structure for user: $userId")
-
-        val timestamp = Timestamp.now()
-        val batch = firestore.batch()
-
-        // Get current user data first
-        val accessControlDoc = firestore.collection("user_access_control").document(userId).get().await()
-        val currentUserData = if (accessControlDoc.exists()) {
-            accessControlDoc.data ?: emptyMap()
-        } else {
-            emptyMap()
-        }
-
-        // Merge existing data with updates
-        val finalData = currentUserData.toMutableMap().apply {
-            putAll(updatedData)
-            put("lastUpdated", timestamp)
-            put("isProfileComplete", true)
-        }
-
-        val role = finalData["role"]?.toString() ?: "Employee"
-        val companyName = finalData["companyName"]?.toString() ?: "Default Company"
-        val department = finalData["department"]?.toString() ?: "General"
-
-        val sanitizedCompanyName = sanitizeDocumentId(companyName)
-        val sanitizedDepartment = sanitizeDocumentId(department)
-
-        // Create new document path
-        val newDocumentPath = "users/$sanitizedCompanyName/$sanitizedDepartment/$role/users/$userId"
-
-        // 1. Create/Update hierarchical user document
-        val userDocRef = firestore.document(newDocumentPath)
-        val hierarchicalUserData = createHierarchicalUserData(userId, finalData, timestamp, newDocumentPath)
-        batch.set(userDocRef, hierarchicalUserData)
-
-        // 2. Create metadata documents
-        createMetadataDocuments(batch, sanitizedCompanyName, companyName, sanitizedDepartment, department, role, timestamp)
-
-        // 3. Update user access control
-        val userAccessControlRef = firestore.collection("user_access_control").document(userId)
-        val accessControlData = mapOf(
-            "userId" to userId,
-            "name" to (finalData["name"] ?: "Unknown User"),
-            "email" to (finalData["email"] ?: ""),
-            "companyName" to companyName,
-            "sanitizedCompany" to sanitizedCompanyName,
-            "department" to department,
-            "sanitizedDepartment" to sanitizedDepartment,
-            "role" to role,
-            "permissions" to getRolePermissions(role),
-            "isActive" to true,
-            "documentPath" to newDocumentPath,
-            "lastAccess" to timestamp
-        )
-        batch.set(userAccessControlRef, accessControlData)
-
-        // 4. Update user search index
-        val userSearchIndexRef = firestore.collection("user_search_index").document(userId)
-        val searchIndexData = mapOf(
-            "userId" to userId,
-            "name" to (finalData["name"]?.toString()?.lowercase() ?: ""),
-            "email" to (finalData["email"]?.toString()?.lowercase() ?: ""),
-            "companyName" to companyName,
-            "sanitizedCompany" to sanitizedCompanyName,
-            "department" to department,
-            "sanitizedDepartment" to sanitizedDepartment,
-            "role" to role,
-            "designation" to (finalData["designation"] ?: ""),
-            "isActive" to true,
-            "documentPath" to newDocumentPath,
+        val searchIndexRef = firestore.collection("user_search_index").document(userId)
+        batch.update(searchIndexRef, mapOf(
+            "name" to profileData.name.lowercase(),
+            "designation" to profileData.designation,
             "searchTerms" to listOf(
-                finalData["name"]?.toString()?.lowercase() ?: "",
-                finalData["email"]?.toString()?.lowercase() ?: "",
-                companyName.lowercase(),
-                department.lowercase(),
-                role.lowercase(),
-                finalData["designation"]?.toString()?.lowercase() ?: ""
+                profileData.name.lowercase(),
+                profileData.email.lowercase(),
+                profileData.companyName.lowercase(),
+                profileData.department.lowercase(),
+                profileData.role.lowercase(),
+                profileData.designation.lowercase()
             ).filter { it.isNotEmpty() }
-        )
-        batch.set(userSearchIndexRef, searchIndexData)
-
-        // Execute batch operation
-        batch.commit().await()
-
-        Log.d(TAG, "✅ Hierarchical structure created at: $newDocumentPath")
-
-        if (newPassword != null && newPassword.isNotEmpty()) {
-            updatePassword(newPassword)
-        } else {
-            handleProfileUpdateSuccess()
-        }
+        ))
     }
 
-    private fun createMetadataDocuments(
-        batch: com.google.firebase.firestore.WriteBatch,
-        sanitizedCompanyName: String,
-        companyName: String,
-        sanitizedDepartment: String,
-        department: String,
-        role: String,
-        timestamp: Timestamp
-    ) {
-        // Company metadata
-        val companyMetaRef = firestore.collection("companies_metadata").document(sanitizedCompanyName)
-        val companyMetaData = mapOf(
-            "originalName" to companyName,
-            "sanitizedName" to sanitizedCompanyName,
-            "lastUpdated" to timestamp,
-            "totalUsers" to FieldValue.increment(1),
-            "activeUsers" to FieldValue.increment(1),
-            "availableRoles" to FieldValue.arrayUnion(role),
-            "departments" to FieldValue.arrayUnion(department)
-        )
-        batch.set(companyMetaRef, companyMetaData, SetOptions.merge())
-
-        // Department metadata
-        val departmentMetaRef = firestore
-            .collection("companies_metadata")
-            .document(sanitizedCompanyName)
-            .collection("departments_metadata")
-            .document(sanitizedDepartment)
-
-        val departmentMetaData = mapOf(
-            "departmentName" to department,
-            "companyName" to companyName,
-            "sanitizedName" to sanitizedDepartment,
-            "userCount" to FieldValue.increment(1),
-            "activeUsers" to FieldValue.increment(1),
-            "availableRoles" to FieldValue.arrayUnion(role),
-            "lastUpdated" to timestamp
-        )
-        batch.set(departmentMetaRef, departmentMetaData, SetOptions.merge())
-
-        // Role metadata
-        val roleMetaRef = firestore
-            .collection("companies_metadata")
-            .document(sanitizedCompanyName)
-            .collection("departments_metadata")
-            .document(sanitizedDepartment)
-            .collection("roles_metadata")
-            .document(role)
-
-        val roleMetaData = mapOf(
-            "roleName" to role,
-            "companyName" to companyName,
-            "department" to department,
-            "permissions" to getRolePermissions(role),
-            "userCount" to FieldValue.increment(1),
-            "activeUsers" to FieldValue.increment(1),
-            "lastUpdated" to timestamp
-        )
-        batch.set(roleMetaRef, roleMetaData, SetOptions.merge())
-    }
-
-    private fun createHierarchicalUserData(
-        userId: String,
-        userData: Map<String, Any>,
-        timestamp: Timestamp,
-        documentPath: String
-    ): Map<String, Any> {
-        return mapOf(
-            "userId" to userId,
-            "name" to (userData["name"] ?: "Unknown User"),
-            "email" to (userData["email"] ?: ""),
-            "role" to (userData["role"] ?: "Employee"),
-            "companyName" to (userData["companyName"] ?: ""),
-            "sanitizedCompanyName" to sanitizeDocumentId(userData["companyName"]?.toString() ?: ""),
-            "department" to (userData["department"] ?: ""),
-            "sanitizedDepartment" to sanitizeDocumentId(userData["department"]?.toString() ?: ""),
-            "designation" to (userData["designation"] ?: ""),
-            "createdAt" to (userData["createdAt"] ?: timestamp),
-            "lastUpdated" to timestamp,
-            "isActive" to true,
-            "isProfileComplete" to true,
-            "lastLogin" to (userData["lastLogin"]),
-
-            // Profile section
-            "profile" to mapOf(
-                "imageUrl" to (userData["imageUrl"] ?: ""),
-                "phoneNumber" to (userData["phoneNumber"] ?: ""),
-                "address" to (userData["address"] ?: ""),
-                "dateOfBirth" to (userData["dateOfBirth"]),
-                "joiningDate" to (userData["joiningDate"] ?: timestamp),
-                "employeeId" to (userData["employeeId"] ?: ""),
-                "reportingTo" to (userData["reportingTo"] ?: ""),
-                "salary" to (userData["salary"] ?: 0),
-                "emergencyContact" to mapOf(
-                    "name" to (userData["emergencyContactName"] ?: ""),
-                    "phone" to (userData["emergencyContactPhone"] ?: ""),
-                    "relation" to (userData["emergencyContactRelation"] ?: "")
-                )
-            ),
-
-            // Work stats
-            "workStats" to mapOf(
-                "experience" to (userData["experience"] ?: 0),
-                "completedProjects" to (userData["completedProjects"] ?: 0),
-                "activeProjects" to (userData["activeProjects"] ?: 0),
-                "pendingTasks" to (userData["pendingTasks"] ?: 0),
-                "completedTasks" to (userData["completedTasks"] ?: 0),
-                "totalWorkingHours" to (userData["totalWorkingHours"] ?: 0),
-                "avgPerformanceRating" to (userData["avgPerformanceRating"] ?: 0.0)
-            ),
-
-            // Issues/Complaints
-            "issues" to mapOf(
-                "totalComplaints" to (userData["totalComplaints"] ?: 0),
-                "resolvedComplaints" to (userData["resolvedComplaints"] ?: 0),
-                "pendingComplaints" to (userData["pendingComplaints"] ?: 0),
-                "lastComplaintDate" to (userData["lastComplaintDate"])
-            ),
-
-            // Permissions
-            "permissions" to getRolePermissions(userData["role"]?.toString() ?: "Employee"),
-
-            // Skills if provided
-            "skills" to (userData["skills"] ?: emptyList<String>()),
-
-            // Document path reference
-            "documentPath" to documentPath
-        ) as Map<String, Any>
-    }
-
-    private fun getRolePermissions(role: String): List<String> {
-        return when (role) {
-            "Administrator" -> listOf(
-                "create_user", "delete_user", "modify_user", "view_all_users",
-                "manage_roles", "view_analytics", "system_settings", "manage_companies",
-                "access_all_data", "export_data", "manage_permissions", "modify_all_data"
-            )
-            "Manager" -> listOf(
-                "view_team_users", "modify_team_user", "view_team_analytics",
-                "assign_projects", "approve_requests", "view_reports", "modify_personal_data"
-            )
-            "HR" -> listOf(
-                "view_all_users", "modify_user", "view_hr_analytics", "manage_employees",
-                "access_personal_data", "generate_reports", "modify_personal_data"
-            )
-            "Team Lead" -> listOf(
-                "view_team_users", "assign_tasks", "view_team_performance", "approve_leave", "modify_personal_data"
-            )
-            "Employee" -> listOf(
-                "view_profile", "edit_profile", "view_assigned_projects", "submit_reports", "modify_personal_data"
-            )
-            "Intern" -> listOf(
-                "view_profile", "edit_basic_profile", "view_assigned_tasks", "modify_personal_data"
-            )
-            else -> listOf("view_profile", "edit_basic_profile", "modify_personal_data")
-        }
-    }
-
-    private fun updatePassword(newPassword: String) {
-        Log.d(TAG, "🔒 Updating password")
-
-        val user = firebaseAuth.currentUser
-        if (user != null) {
-            user.updatePassword(newPassword)
-                .addOnSuccessListener {
-                    Log.d(TAG, "✅ Password updated successfully")
-                    handleProfileUpdateSuccess()
-                }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "❌ Password update failed", e)
-                    Toast.makeText(this, "Password update failed: ${e.message}", Toast.LENGTH_LONG).show()
-                    handleProfileUpdateSuccess() // Still navigate even if password update fails
-                }
-        } else {
-            Log.w(TAG, "⚠️ No current user for password update")
-            handleProfileUpdateSuccess()
-        }
-    }
-
-    private fun handleProfileUpdateSuccess() {
-        Log.d(TAG, "🎉 Profile update completed successfully")
-        Toast.makeText(this, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
-
-        lifecycleScope.launch {
-            kotlinx.coroutines.delay(1000)
-            navigateToMainActivity()
-        }
-    }
-
-    private fun handleSkip(userId: String) {
-        Log.d(TAG, "⏭️ User skipped profile completion: $userId")
-
-        lifecycleScope.launch {
-            try {
-                val minimalData = mapOf(
-                    "isProfileComplete" to true,
-                    "lastUpdated" to Timestamp.now()
-                )
-
-                // Try to update existing document first
-                val accessControlDoc = firestore.collection("user_access_control").document(userId).get().await()
-                val documentPath = accessControlDoc.getString("documentPath")
-
-                if (!documentPath.isNullOrEmpty()) {
-                    firestore.document(documentPath).update(minimalData).await()
-                } else {
-                    firestore.collection("users").document(userId).update(minimalData).await()
-                }
-
-                Log.d(TAG, "✅ Minimal profile data saved")
-                Toast.makeText(this@ProfileCompletionActivity, "Profile setup skipped", Toast.LENGTH_SHORT).show()
-                navigateToMainActivity()
-
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to save minimal profile", e)
-                navigateToMainActivity() // Still navigate even if this fails
-            }
-        }
-    }
-
-    private fun handleLogout() {
-        Log.d(TAG, "🚪 User logging out from profile completion")
-        authManager.signOut()
-        navigateToLogin()
-    }
-
-    private fun handleAuthError(message: String) {
-        Log.e(TAG, "🔒 Auth error: $message")
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        navigateToLogin()
-    }
-
-    private fun navigateToLogin() {
-        Log.d(TAG, "🔐 Navigating to login")
-        try {
-            val intent = Intent(this, LoginActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            startActivity(intent)
-            finish()
+    private suspend fun uploadProfileImage(userId: String, imageUri: Uri): String {
+        return try {
+            val imageRef = storage.reference.child("users/companies/{sanitizedCompany}/departments/{sanitizedDepartment}/roles/{role}/users/{userId}/profile.jpg")
+            imageRef.putFile(imageUri).await()
+            imageRef.downloadUrl.await().toString()
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error navigating to login", e)
-            finishAffinity()
+            throw Exception("Failed to upload image: ${e.message}")
         }
     }
 
-    private fun navigateToMainActivity() {
-        Log.d(TAG, "🏠 Navigating to main activity")
+    private fun updateCompanyMetadata(batch: WriteBatch, user: User) {
         try {
-            val intent = Intent(this, MainActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            startActivity(intent)
-            finish()
+            val companyRef = firestore.collection("companies_metadata")
+                .document(user.sanitizedCompanyName)
+
+            val companyData = mapOf(
+                "sanitizedName" to user.sanitizedCompanyName,
+                "originalName" to user.companyName,
+                "lastUpdated" to System.currentTimeMillis()
+            )
+
+            batch.set(companyRef, companyData, SetOptions.merge())
+
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error navigating to main activity", e)
-            Toast.makeText(this, "Error opening main app: ${e.message}", Toast.LENGTH_LONG).show()
-            navigateToLogin()
+            Log.e("ProfileCompletion", "Error updating company metadata", e)
         }
     }
 
-    private fun sanitizeDocumentId(input: String): String {
-        return input
-            .replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            .replace(Regex("_+"), "_")
-            .trim('_')
-            .take(100)
-    }
+    private fun updateDepartmentMetadata(batch: WriteBatch, user: User) {
+        try {
+            val deptRef = firestore.collection("companies_metadata")
+                .document(user.sanitizedCompanyName)
+                .collection("departments_metadata")
+                .document(user.sanitizedDepartment)
 
-    override fun onResume() {
-        super.onResume()
-        Log.d(TAG, "📱 ProfileCompletionActivity resumed")
+            val departmentData = mapOf(
+                "departmentName" to user.department,
+                "sanitizedName" to user.sanitizedDepartment,
+                "companyName" to user.companyName,
+                "sanitizedCompanyName" to user.sanitizedCompanyName,
+                "lastUpdated" to System.currentTimeMillis()
+            )
 
-        val userId = intent.getStringExtra(EXTRA_USER_ID) ?: authManager.currentUser?.uid
-        if (userId != null) {
-            lifecycleScope.launch {
-                val authState = authManager.checkAuthenticationState()
-                if (authState is AuthState.NotAuthenticated) {
-                    Log.w(TAG, "⚠️ User no longer authenticated on resume")
-                    handleAuthError("Session expired")
-                }
-            }
+            batch.set(deptRef, departmentData, SetOptions.merge())
+
+        } catch (e: Exception) {
+            Log.e("ProfileCompletion", "Error updating department metadata", e)
         }
-    }
-
-    override fun onBackPressed() {
-        Log.d(TAG, "🔙 Back pressed - showing options")
-        super.onBackPressed()
     }
 }

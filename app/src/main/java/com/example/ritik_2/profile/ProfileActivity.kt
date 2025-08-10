@@ -15,7 +15,7 @@ import androidx.compose.runtime.setValue
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.theme.Ritik_2Theme
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.ktx.userProfileChangeRequest
+import com.google.firebase.auth.userProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 

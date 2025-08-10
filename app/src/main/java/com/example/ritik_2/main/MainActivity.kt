@@ -24,7 +24,7 @@ import com.example.ritik_2.complaint.viewcomplaint.ComplaintViewActivity
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.complaint.complaintregistration.RegisterComplain
-import com.example.ritik_2.profile.profileaccess.ProfileAccessActivity
+//import com.example.ritik_2.profile.profileaccess.ProfileAccessActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.winshare.ServerConnectActivity
 
@@ -168,7 +168,7 @@ class MainActivity : ComponentActivity() {
                 }
                 5 -> {
                     Log.d(TAG, "📢 Navigating to Notification Manager")
-                    startActivity(Intent(this, ProfileAccessActivity::class.java))
+//                    startActivity(Intent(this, ProfileAccessActivity::class.java))
                 }
                 else -> {
                     Log.w(TAG, "⚠️ Unknown card ID: $cardId")

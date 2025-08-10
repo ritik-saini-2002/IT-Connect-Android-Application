@@ -94,6 +94,10 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
+        <activity android:name=".administrator.administratorpanel.databasemanager.DatabaseManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2"/>"
+
         <activity
             android:name=".login.LoginActivity"
             android:exported="true"

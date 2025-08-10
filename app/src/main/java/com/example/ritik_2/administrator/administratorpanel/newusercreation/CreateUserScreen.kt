@@ -142,7 +142,9 @@ fun CreateUserScreen(
                         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                     ) {
                         Column(
-                            modifier = Modifier.padding(20.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
@@ -167,6 +169,7 @@ fun CreateUserScreen(
                             )
                         }
                     }
+
                 }
 
                 // Success Animation

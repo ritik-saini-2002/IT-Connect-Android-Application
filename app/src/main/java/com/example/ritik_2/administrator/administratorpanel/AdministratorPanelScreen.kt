@@ -117,12 +117,12 @@ fun AdministratorPanelScreen(
             permissions = listOf("view_all_users", "modify_user")
         ),
         AdministratorPanelActivity.AdminFunction(
-            id = "view_analytics",
-            title = "Analytics Dashboard",
-            description = "View organization analytics and insights",
+            id = "database_manager",
+            title = "Database Manager",
+            description = "Manage Your Company Database",
             icon = Icons.Default.Analytics,
             color = Color(0xFF9C27B0),
-            permissions = listOf("view_analytics")
+            permissions = listOf("database_manager")
         ),
         AdministratorPanelActivity.AdminFunction(
             id = "company_settings",

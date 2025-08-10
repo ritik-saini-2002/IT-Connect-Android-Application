@@ -2,11 +2,13 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.jetbrains.kotlin.android)
     alias(libs.plugins.google.gms.google.services)
+    alias(libs.plugins.jetbrains.kotlin.compose)
+
 }
 
 android {
     namespace = "com.example.ritik_2"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.ritik_2"
@@ -45,7 +47,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
+        kotlinCompilerExtensionVersion = "1.5.15"
     }
     packaging {
         resources {
@@ -90,6 +92,10 @@ dependencies {
     implementation(libs.firebase.messaging)
     implementation(libs.androidx.compose.material3)
     implementation(libs.firebase.functions.ktx)
+    implementation(libs.androidx.compose.ui.ui.graphics)
+    implementation(libs.androidx.room.common.jvm)
+    implementation(libs.androidx.room.ktx)
+    implementation(libs.firebase.crashlytics.buildtools)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -156,6 +162,7 @@ dependencies {
 
     implementation("androidx.compose.material3:material3-window-size-class:1.2.0")
     implementation("androidx.compose.ui:ui-graphics:1.6.1")
+    implementation("com.google.code.gson:gson:2.10.1")
 
 
 }
