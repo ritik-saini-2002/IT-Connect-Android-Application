@@ -103,6 +103,52 @@ class RegisterComplain : ComponentActivity() {
         }
     }
 
+    // Helper function to sanitize title for use as document ID
+    private fun sanitizeTitle(title: String): String {
+        return title.trim()
+            .replace(Regex("[^a-zA-Z0-9\\s-_]"), "") // Remove special characters except spaces, hyphens, underscores
+            .replace(Regex("\\s+"), "_") // Replace spaces with underscores
+            .lowercase()
+            .take(100) // Limit length to 100 characters for Firebase document ID
+            .ifEmpty { "untitled_complaint" } // Fallback if title becomes empty after sanitization
+    }
+
+    // Helper function to check if complaint title already exists
+    private suspend fun checkComplaintTitleExists(sanitizedTitle: String, sanitizedCompanyName: String): Boolean {
+        return try {
+            // Check in flat structure first
+            val flatDoc = firestore.collection("all_complaints").document(sanitizedTitle).get().await()
+            if (flatDoc.exists()) {
+                val docCompany = flatDoc.getString("sanitizedCompanyName")
+                return docCompany == sanitizedCompanyName
+            }
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking complaint title existence", e)
+            false
+        }
+    }
+
+    // Generate unique title if needed
+    private suspend fun generateUniqueTitle(originalTitle: String, sanitizedCompanyName: String): String {
+        var sanitizedTitle = sanitizeTitle(originalTitle)
+        var counter = 1
+        val baseSanitizedTitle = sanitizedTitle
+
+        while (checkComplaintTitleExists(sanitizedTitle, sanitizedCompanyName)) {
+            sanitizedTitle = "${baseSanitizedTitle}_$counter"
+            counter++
+
+            // Safety check to prevent infinite loop
+            if (counter > 1000) {
+                sanitizedTitle = "${baseSanitizedTitle}_${System.currentTimeMillis()}"
+                break
+            }
+        }
+
+        return sanitizedTitle
+    }
+
     private fun setupNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager: NotificationManager =
@@ -254,6 +300,7 @@ class RegisterComplain : ComponentActivity() {
                 // ... existing implementation
             }
     }
+
     private fun loadAvailableDepartments() {
         val currentUser = _currentUserData.value
         if (currentUser?.sanitizedCompanyName.isNullOrEmpty()) {
@@ -340,9 +387,11 @@ class RegisterComplain : ComponentActivity() {
 
         lifecycleScope.launch {
             try {
-                val complaintId = UUID.randomUUID().toString()
-                val timestamp = Timestamp.now()
                 val sanitizedCompanyName = currentUser.sanitizedCompanyName
+
+                // Generate unique complaint ID based on title
+                val complaintId = generateUniqueTitle(complaintData.title, sanitizedCompanyName)
+                val timestamp = Timestamp.now()
 
                 // Map category to department
                 val categoryToDepartmentMapping = mapOf(
@@ -390,7 +439,7 @@ class RegisterComplain : ComponentActivity() {
                 // Create batch for atomic operations
                 val batch = firestore.batch()
 
-                // FIXED: Correct document path construction
+                // FIXED: Correct document path construction using sanitized title as ID
                 val complaintDocPath = if (complaintData.isGlobal) {
                     // Global complaints: collection/document/collection/document (even number of segments)
                     "complaints/$sanitizedCompanyName/global_complaints/$complaintId"
@@ -404,6 +453,8 @@ class RegisterComplain : ComponentActivity() {
                 // Create comprehensive complaint document
                 val complaintDataMap = hashMapOf(
                     "complaintId" to complaintId,
+                    "originalTitle" to complaintData.title, // Store original title
+                    "sanitizedTitle" to complaintId, // Store sanitized title used as ID
                     "title" to complaintData.title,
                     "description" to complaintData.description,
                     "department" to departmentName, // Store mapped department name
@@ -493,10 +544,12 @@ class RegisterComplain : ComponentActivity() {
 
                 batch.set(complaintDocRef, complaintDataMap)
 
-                // Create search index with FIXED path
+                // Create search index with sanitized title as ID
                 val searchIndexRef = firestore.collection("complaint_search_index").document(complaintId)
                 val searchIndexData = mapOf(
                     "complaintId" to complaintId,
+                    "originalTitle" to complaintData.title,
+                    "sanitizedTitle" to complaintId,
                     "title" to complaintData.title.lowercase(),
                     "department" to departmentName.lowercase(),
                     "originalCategory" to complaintData.department.lowercase(),
@@ -521,10 +574,12 @@ class RegisterComplain : ComponentActivity() {
                 )
                 batch.set(searchIndexRef, searchIndexData)
 
-                // Create flat structure for easier querying
+                // Create flat structure for easier querying using sanitized title as ID
                 val flatComplaintRef = firestore.collection("all_complaints").document(complaintId)
                 val flatComplaintData = mapOf(
                     "complaintId" to complaintId,
+                    "originalTitle" to complaintData.title,
+                    "sanitizedTitle" to complaintId,
                     "title" to complaintData.title,
                     "department" to departmentName,
                     "originalCategory" to complaintData.department,
@@ -608,16 +663,16 @@ class RegisterComplain : ComponentActivity() {
                 runOnUiThread {
                     val assignmentMessage = if (assignedDepartment != null) {
                         if (complaintData.isGlobal) {
-                            "Global complaint submitted successfully! Visible to all company users."
+                            "Global complaint '$complaintId' submitted successfully! Visible to all company users."
                         } else {
-                            "Complaint submitted and assigned to ${assignedDepartment.departmentName} department"
+                            "Complaint '$complaintId' submitted and assigned to ${assignedDepartment.departmentName} department"
                         }
                     } else {
-                        "Complaint submitted to $departmentName department successfully!"
+                        "Complaint '$complaintId' submitted to $departmentName department successfully!"
                     }
                     Toast.makeText(this@RegisterComplain, assignmentMessage, Toast.LENGTH_LONG).show()
 
-                    Log.d(TAG, "Complaint saved successfully with path: $complaintDocPath")
+                    Log.d(TAG, "Complaint saved successfully with ID: $complaintId and path: $complaintDocPath")
                 }
 
             } catch (e: Exception) {
@@ -811,11 +866,14 @@ class RegisterComplain : ComponentActivity() {
                 // Delete from search index
                 batch.delete(firestore.collection("complaint_search_index").document(complaintId))
 
+                // Delete from flat structure (using sanitized title as ID)
+                batch.delete(firestore.collection("all_complaints").document(complaintId))
+
                 // Execute batch operation
                 batch.commit().await()
 
                 runOnUiThread {
-                    Toast.makeText(this@RegisterComplain, "Complaint deleted", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@RegisterComplain, "Complaint '$complaintId' deleted", Toast.LENGTH_SHORT).show()
                 }
 
             } catch (e: Exception) {
