@@ -34,7 +34,6 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.WriteBatch
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -391,21 +390,16 @@ class RegisterComplain : ComponentActivity() {
                 // Create batch for atomic operations
                 val batch = firestore.batch()
 
-                // ENHANCED: Determine and create complaint path structure
-                val (complaintDocPath, complaintDocRef) = if (complaintData.isGlobal) {
-                    // Global complaints path
-                    val path = "complaints/$sanitizedCompanyName/global_complaints/$complaintId"
-                    val docRef = firestore.document(path)
-                    Pair(path, docRef)
+                // FIXED: Correct document path construction
+                val complaintDocPath = if (complaintData.isGlobal) {
+                    // Global complaints: collection/document/collection/document (even number of segments)
+                    "complaints/$sanitizedCompanyName/global_complaints/$complaintId"
                 } else {
-                    // Department complaints path
-                    val path = "complaints/$sanitizedCompanyName/department_complaints/$complaintId"
-                    val docRef = firestore.document(path)
-                    Pair(path, docRef)
+                    // Department complaints: collection/document/collection/document (even number of segments)
+                    "complaints/$sanitizedCompanyName/department_complaints/$complaintId"
                 }
 
-                // ENHANCED: Ensure parent collections exist by creating placeholder documents if needed
-                ensureComplaintPathExists(sanitizedCompanyName, complaintData.isGlobal, batch, timestamp)
+                val complaintDocRef = firestore.document(complaintDocPath)
 
                 // Create comprehensive complaint document
                 val complaintDataMap = hashMapOf(
@@ -499,7 +493,7 @@ class RegisterComplain : ComponentActivity() {
 
                 batch.set(complaintDocRef, complaintDataMap)
 
-                // Create search index
+                // Create search index with FIXED path
                 val searchIndexRef = firestore.collection("complaint_search_index").document(complaintId)
                 val searchIndexData = mapOf(
                     "complaintId" to complaintId,
@@ -632,172 +626,6 @@ class RegisterComplain : ComponentActivity() {
                 runOnUiThread {
                     Toast.makeText(this@RegisterComplain, "Error saving complaint: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
-            }
-        }
-    }
-
-    /**
-     * ENHANCED: Ensures the complaint path structure exists in Firestore
-     * Creates necessary parent documents and collections if they don't exist
-     */
-    private suspend fun ensureComplaintPathExists(
-        sanitizedCompanyName: String,
-        isGlobal: Boolean,
-        batch: WriteBatch,
-        timestamp: Timestamp
-    ) {
-        try {
-            // Check if company document exists in complaints collection
-            val companyDocRef = firestore.collection("complaints").document(sanitizedCompanyName)
-            val companyDocSnapshot = companyDocRef.get().await()
-
-            if (!companyDocSnapshot.exists()) {
-                Log.d(TAG, "Creating company document in complaints collection: $sanitizedCompanyName")
-
-                // Create company document with metadata
-                val companyData = mapOf(
-                    "companyName" to sanitizedCompanyName,
-                    "createdAt" to timestamp,
-                    "lastUpdated" to timestamp,
-                    "hasGlobalComplaints" to isGlobal,
-                    "hasDepartmentComplaints" to !isGlobal,
-                    "totalComplaintsCount" to 0,
-                    "metadata" to mapOf(
-                        "createdBy" to "system",
-                        "createdAt" to timestamp,
-                        "purpose" to "Auto-created for complaint path structure"
-                    )
-                )
-                batch.set(companyDocRef, companyData)
-            } else {
-                // Update existing company document to reflect complaint types
-                val updateData = mutableMapOf<String, Any>(
-                    "lastUpdated" to timestamp
-                )
-
-                if (isGlobal) {
-                    updateData["hasGlobalComplaints"] = true
-                } else {
-                    updateData["hasDepartmentComplaints"] = true
-                }
-
-                batch.update(companyDocRef, updateData)
-            }
-
-            // Create subcollection initialization documents
-            if (isGlobal) {
-                // Ensure global_complaints subcollection exists
-                val globalInitRef = firestore
-                    .collection("complaints")
-                    .document(sanitizedCompanyName)
-                    .collection("global_complaints")
-                    .document("_init")
-
-                val globalInitSnapshot = globalInitRef.get().await()
-                if (!globalInitSnapshot.exists()) {
-                    Log.d(TAG, "Creating global_complaints subcollection initializer")
-
-                    val globalInitData = mapOf(
-                        "collectionType" to "global_complaints",
-                        "createdAt" to timestamp,
-                        "lastUpdated" to timestamp,
-                        "totalComplaints" to 0,
-                        "description" to "Global complaints visible to all company users",
-                        "metadata" to mapOf(
-                            "autoCreated" to true,
-                            "purpose" to "Subcollection initializer"
-                        )
-                    )
-                    batch.set(globalInitRef, globalInitData)
-                }
-            } else {
-                // Ensure department_complaints subcollection exists
-                val deptInitRef = firestore
-                    .collection("complaints")
-                    .document(sanitizedCompanyName)
-                    .collection("department_complaints")
-                    .document("_init")
-
-                val deptInitSnapshot = deptInitRef.get().await()
-                if (!deptInitSnapshot.exists()) {
-                    Log.d(TAG, "Creating department_complaints subcollection initializer")
-
-                    val deptInitData = mapOf(
-                        "collectionType" to "department_complaints",
-                        "createdAt" to timestamp,
-                        "lastUpdated" to timestamp,
-                        "totalComplaints" to 0,
-                        "description" to "Department-specific complaints",
-                        "metadata" to mapOf(
-                            "autoCreated" to true,
-                            "purpose" to "Subcollection initializer"
-                        )
-                    )
-                    batch.set(deptInitRef, deptInitData)
-                }
-            }
-
-            Log.d(TAG, "Complaint path structure ensured for company: $sanitizedCompanyName, isGlobal: $isGlobal")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error ensuring complaint path exists", e)
-            // Don't throw exception here - let the complaint creation continue
-            // The batch operation will create the path automatically when setting the document
-        }
-    }
-
-    /**
-     * ENHANCED: Cleanup function to remove empty initializer documents
-     * Call this periodically or after complaint operations
-     */
-    private fun cleanupInitializerDocuments(sanitizedCompanyName: String) {
-        lifecycleScope.launch {
-            try {
-                val batch = firestore.batch()
-
-                // Check and remove global_complaints initializer if there are actual complaints
-                val globalComplaintsQuery = firestore
-                    .collection("complaints")
-                    .document(sanitizedCompanyName)
-                    .collection("global_complaints")
-                    .whereNotEqualTo("complaintId", "_init")
-                    .limit(1)
-                    .get()
-                    .await()
-
-                if (!globalComplaintsQuery.isEmpty) {
-                    val globalInitRef = firestore
-                        .collection("complaints")
-                        .document(sanitizedCompanyName)
-                        .collection("global_complaints")
-                        .document("_init")
-                    batch.delete(globalInitRef)
-                }
-
-                // Check and remove department_complaints initializer if there are actual complaints
-                val deptComplaintsQuery = firestore
-                    .collection("complaints")
-                    .document(sanitizedCompanyName)
-                    .collection("department_complaints")
-                    .whereNotEqualTo("complaintId", "_init")
-                    .limit(1)
-                    .get()
-                    .await()
-
-                if (!deptComplaintsQuery.isEmpty) {
-                    val deptInitRef = firestore
-                        .collection("complaints")
-                        .document(sanitizedCompanyName)
-                        .collection("department_complaints")
-                        .document("_init")
-                    batch.delete(deptInitRef)
-                }
-
-                batch.commit().await()
-                Log.d(TAG, "Cleanup completed for initializer documents")
-
-            } catch (e: Exception) {
-                Log.w(TAG, "Error during cleanup of initializer documents", e)
             }
         }
     }

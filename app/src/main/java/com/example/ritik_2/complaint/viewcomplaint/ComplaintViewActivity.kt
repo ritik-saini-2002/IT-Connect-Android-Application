@@ -232,7 +232,7 @@ class ComplaintViewActivity : ComponentActivity() {
             try {
                 val userData = userRepository.getUserData(userId)
                 if (userData == null) {
-                    _errorMessage.value = "User profile not found. Please contact administrator."
+                    _errorMessage.value = "User profile not found. Please complete your profile or contact administrator."
                     _isLoading.value = false
                     return@launch
                 }
