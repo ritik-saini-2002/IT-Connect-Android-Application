@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.ritik_2.theme.Ritik_2Theme
 import kotlinx.coroutines.delay
 import kotlin.math.cos
@@ -41,7 +42,8 @@ import kotlin.math.sin
 fun LoginScreen(
     onLoginClick: (String, String) -> Unit = { _, _ -> },
     onRegisterClick: () -> Unit = {},
-    onForgotPasswordClick: (String, (Boolean) -> Unit) -> Unit = { _, _ -> }
+    onForgotPasswordClick: (String, (Boolean) -> Unit) -> Unit = { _, _ -> },
+    onInfoClick: () -> Unit = {} // Add this parameter
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -63,9 +65,36 @@ fun LoginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White) // Match RegistrationScreen background
+            .background(Color.White)
             .clickable { focusManager.clearFocus() }
     ) {
+        // Info Button in top-right corner
+        Card(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 60.dp, end = 30.dp)
+                .size(48.dp)
+                .zIndex(1000f)
+                .clickable { onInfoClick() },
+            shape = CircleShape,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = "App Info",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier

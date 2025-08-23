@@ -12,6 +12,7 @@ import com.example.ritik_2.authentication.AuthState
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.registration.RegistrationActivity
 import com.example.ritik_2.theme.Ritik_2Theme
+import com.example.ritik_2.contact.ContactActivity
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -68,9 +69,24 @@ class LoginActivity : ComponentActivity() {
                     },
                     onForgotPasswordClick = { email, callback ->
                         sendPasswordResetEmail(email, callback)
+                    },
+                    onInfoClick = {
+                        Log.d(TAG, "ℹ️ Opening Contact/About page")
+                        navigateToContactActivity()
                     }
                 )
             }
+        }
+    }
+
+    private fun navigateToContactActivity() {
+        try {
+            val intent = Intent(this, ContactActivity::class.java)
+            startActivity(intent)
+            Log.d(TAG, "✅ Successfully opened ContactActivity")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error opening ContactActivity", e)
+            Toast.makeText(this, "Unable to open contact page", Toast.LENGTH_SHORT).show()
         }
     }
 

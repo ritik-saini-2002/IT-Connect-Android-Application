@@ -7,8 +7,12 @@
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CALL_PHONE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -22,6 +26,30 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- MOVE QUERIES HERE - OUTSIDE APPLICATION TAG -->
+    <queries>
+        <!-- Email -->
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+
+        <!-- Phone -->
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+
+        <!-- Maps -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+
+        <!-- Google Maps specifically -->
+        <package android:name="com.google.android.apps.maps" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -32,16 +60,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Ritik_2"
         tools:targetApi="35">
-
-<!--        <activity-->
-<!--            android:name=".splash.SplashActivity"-->
-<!--            android:exported="true"-->
-<!--            android:theme="@style/Theme.Ritik_2">-->
-<!--            <intent-filter>-->
-<!--                <action android:name="android.intent.action.MAIN" />-->
-<!--                <category android:name="android.intent.category.LAUNCHER" />-->
-<!--            </intent-filter>-->
-<!--        </activity>-->
 
         <activity
             android:name=".main.MainActivity"
@@ -72,10 +90,6 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
-<!--        <activity android:name=".profile.profileaccess.ProfileAccessActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2"/>-->
-
         <activity android:name=".administrator.administratorpanel.usermanagement.ManageUserActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
@@ -96,7 +110,7 @@
 
         <activity android:name=".administrator.administratorpanel.databasemanager.DatabaseManagerActivity"
             android:exported="false"
-            android:theme="@style/Theme.Ritik_2"/>"
+            android:theme="@style/Theme.Ritik_2"/>
 
         <activity
             android:name=".login.LoginActivity"
@@ -107,7 +121,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        
+
+        <activity android:name=".contact.ContactActivity"
+            android:exported="false"
+            android:theme="@style/Base.Theme.Ritik_2"/>
+
         <activity android:name=".winshare.ServerConnectActivity"
             android:theme="@style/Theme.Ritik_2"
             android:exported="false"/>
