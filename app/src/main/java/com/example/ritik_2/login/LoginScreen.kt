@@ -43,7 +43,7 @@ fun LoginScreen(
     onLoginClick: (String, String) -> Unit = { _, _ -> },
     onRegisterClick: () -> Unit = {},
     onForgotPasswordClick: (String, (Boolean) -> Unit) -> Unit = { _, _ -> },
-    onInfoClick: () -> Unit = {} // Add this parameter
+    onInfoClick: () -> Unit = {}
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -65,7 +65,7 @@ fun LoginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.background)
             .clickable { focusManager.clearFocus() }
     ) {
         // Info Button in top-right corner
@@ -89,7 +89,7 @@ fun LoginScreen(
                 Icon(
                     imageVector = Icons.Default.Info,
                     contentDescription = "App Info",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -111,7 +111,6 @@ fun LoginScreen(
                 modifier = Modifier.padding(24.dp, 0.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
                 elevation = CardDefaults.cardElevation(defaultElevation = 28.dp)
-
             ) {
                 Column(
                     modifier = Modifier
@@ -128,7 +127,7 @@ fun LoginScreen(
                         text = "Welcome Back!",
                         fontSize = 26.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         textAlign = TextAlign.Center
                     )
 
@@ -137,7 +136,7 @@ fun LoginScreen(
                     Text(
                         text = "Sign in to access your account and continue your work",
                         fontSize = 15.sp,
-                        color = Color.White.copy(alpha = 0.9f),
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f),
                         textAlign = TextAlign.Center,
                         lineHeight = 20.sp
                     )
@@ -146,14 +145,14 @@ fun LoginScreen(
 
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = Color.White.copy(alpha = 0.1f)
+                            containerColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = "🔐 Secure access to your workspace",
                             fontSize = 13.sp,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onPrimary,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(12.dp)
                         )
@@ -168,8 +167,8 @@ fun LoginScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .animateContentSize(),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                //elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
@@ -229,7 +228,7 @@ fun LoginScreen(
                                     horizontalArrangement = Arrangement.Center
                                 ) {
                                     CircularProgressIndicator(
-                                        color = Color.White,
+                                        color = MaterialTheme.colorScheme.onPrimary,
                                         modifier = Modifier.size(20.dp),
                                         strokeWidth = 2.dp
                                     )
@@ -238,7 +237,7 @@ fun LoginScreen(
                                         text = "Signing In...",
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = Color.White
+                                        color = MaterialTheme.colorScheme.onPrimary
                                     )
                                 }
                             } else {
@@ -249,7 +248,7 @@ fun LoginScreen(
                                     Icon(
                                         Icons.Default.Login,
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -257,7 +256,7 @@ fun LoginScreen(
                                         text = "Sign In",
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = Color.White
+                                        color = MaterialTheme.colorScheme.onPrimary
                                     )
                                 }
                             }
@@ -383,10 +382,10 @@ fun AnimatedUserLogo() {
                     width = 3.dp,
                     brush = Brush.sweepGradient(
                         colors = listOf(
-                            Color.White,
-                            Color.White.copy(alpha = 0.7f),
-                            Color.White.copy(alpha = 0.3f),
-                            Color.White.copy(alpha = 0.8f)
+                            MaterialTheme.colorScheme.onPrimary,
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.3f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                         )
                     ),
                     shape = CircleShape
@@ -401,8 +400,8 @@ fun AnimatedUserLogo() {
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.3f),
-                            Color.White.copy(alpha = 0.1f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.3f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f),
                             Color.Transparent
                         )
                     ),
@@ -418,38 +417,12 @@ fun AnimatedUserLogo() {
             },
             label = "genderIcon"
         ) { showFemale ->
-            if (showFemale) {
-                // Female user icon
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(50.dp)
-                ) {
-//                    Icon(
-//                        Icons.Default.Person,
-//                        contentDescription = "Female User",
-//                        modifier = Modifier.size(35.dp),
-//                        tint = Color.White
-//                    )
-//                    // Add a small indicator for female (like hair or accessories)
-//                    Box(
-//                        modifier = Modifier
-//                            .size(12.dp)
-//                            .offset(x = 8.dp, y = (-12).dp)
-//                            .background(
-//                                Color.White.copy(alpha = 0.8f),
-//                                CircleShape
-//                            )
-//                    )
-                }
-            } else {
-                // Male user icon
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = "Male User",
-                    modifier = Modifier.size(40.dp),
-                    tint = Color.White
-                )
-            }
+            Icon(
+                Icons.Default.Person,
+                contentDescription = if (showFemale) "Female User" else "Male User",
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.onPrimary
+            )
         }
 
         // Decorative dots around the logo
@@ -466,7 +439,7 @@ fun AnimatedUserLogo() {
                     )
                     .scale(dotScale)
                     .background(
-                        Color.White.copy(alpha = 0.6f),
+                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
                         CircleShape
                     )
             )
@@ -487,7 +460,7 @@ fun EnhancedLoginTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
+        label = { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) },
         placeholder = {
             Text(
                 placeholder,
@@ -507,7 +480,9 @@ fun EnhancedLoginTextField(
         keyboardOptions = keyboardOptions,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         ),
         singleLine = true
     )
@@ -527,7 +502,7 @@ fun EnhancedLoginPasswordField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
+        label = { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) },
         placeholder = {
             Text(
                 placeholder,
@@ -558,7 +533,9 @@ fun EnhancedLoginPasswordField(
         keyboardActions = keyboardActions,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         ),
         singleLine = true
     )
@@ -575,7 +552,7 @@ fun ModernForgotPasswordDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color.White,
+        containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(20.dp),
         title = {
             Row(
@@ -633,12 +610,12 @@ fun ModernForgotPasswordDialog(
                 ) {
                     if (sending) {
                         CircularProgressIndicator(
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp
                         )
                     } else {
-                        Text("Send Link", color = Color.White)
+                        Text("Send Link", color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
@@ -659,6 +636,14 @@ fun ModernForgotPasswordDialog(
 @Preview(showBackground = true)
 @Composable
 fun PreviewLoginScreen() {
+    Ritik_2Theme {
+        LoginScreen()
+    }
+}
+
+@Preview(showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun PreviewLoginScreenDark() {
     Ritik_2Theme {
         LoginScreen()
     }

@@ -22,12 +22,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
-import kotlin.compareTo
+import com.example.ritik_2.theme.Ritik_2Theme
 
 @Composable
 fun ProfileScreen(
@@ -65,7 +66,7 @@ fun ProfileScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF5F5F5))
+            .background(MaterialTheme.colorScheme.background)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -82,7 +83,7 @@ fun ProfileScreen(
                 .clickable { isFlipped = !isFlipped },
             shape = RoundedCornerShape(16.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 // Front side (visible when rotation <= 90f)
@@ -131,31 +132,41 @@ fun ProfileScreen(
                     context.startActivity(intent)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Flip,
+                    imageVector = Icons.Filled.Edit,
                     contentDescription = "Update Profile",
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onPrimary
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Update Profile")
+                Text(
+                    "Update Profile",
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
             }
 
             Spacer(modifier = Modifier.width(16.dp))
 
             Button(
                 onClick = onLogoutClick,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                modifier = Modifier.weight(1f)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
                     imageVector = Icons.Filled.Logout,
                     contentDescription = "Logout",
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onError
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Logout")
+                Text(
+                    "Logout",
+                    color = MaterialTheme.colorScheme.onError
+                )
             }
         }
     }
@@ -188,10 +199,10 @@ fun ProfileFrontSide(
     complaints: Int,
     onEditClick: (String, String) -> Unit,
     onChangeProfilePic: () -> Unit,
-    modifier: Modifier = Modifier // Add this parameter
+    modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier // Apply the modifier here
+        modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -201,7 +212,7 @@ fun ProfileFrontSide(
             modifier = Modifier
                 .size(100.dp)
                 .clip(CircleShape)
-                .background(Color.Gray.copy(alpha = 0.2f))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
                 .clickable { onChangeProfilePic() },
             contentAlignment = Alignment.Center
         ) {
@@ -222,7 +233,7 @@ fun ProfileFrontSide(
                     imageVector = Icons.Filled.Person,
                     contentDescription = "Default Profile",
                     modifier = Modifier.size(50.dp),
-                    tint = Color.Gray
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -234,12 +245,13 @@ fun ProfileFrontSide(
             text = name,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface
         )
         Text(
             text = designation,
             style = MaterialTheme.typography.bodyMedium,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
 
@@ -278,12 +290,12 @@ fun ProfileFrontSide(
                 StatCard(
                     title = "Experience",
                     value = "$experience years",
-                    color = Color.Blue
+                    color = MaterialTheme.colorScheme.primary
                 )
                 StatCard(
                     title = "Completed",
                     value = "$completedProjects",
-                    color = Color.Green
+                    color = Color(0xFF4CAF50) // Green
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -294,12 +306,12 @@ fun ProfileFrontSide(
                 StatCard(
                     title = "Active",
                     value = "$activeProjects",
-                    color = Color.Blue
+                    color = Color(0xFF2196F3) // Blue
                 )
                 StatCard(
                     title = "Complaints",
                     value = "$complaints",
-                    color = Color.Red
+                    color = MaterialTheme.colorScheme.error
                 )
             }
         }
@@ -325,7 +337,7 @@ fun ProfileBackSide(
             modifier = Modifier
                 .size(200.dp)
                 .clip(CircleShape)
-                .background(Color.Gray.copy(alpha = 0.2f)),
+                .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             if (profileImageUrl != null) {
@@ -345,7 +357,7 @@ fun ProfileBackSide(
                     imageVector = Icons.Filled.Person,
                     contentDescription = "Default Profile",
                     modifier = Modifier.size(100.dp),
-                    tint = Color.Gray
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -363,7 +375,7 @@ fun ProfileBackSide(
         Text(
             text = designation,
             style = MaterialTheme.typography.bodyLarge,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
     }
@@ -411,18 +423,19 @@ fun ProfileInfoItem(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 text = value,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
         Icon(
             imageVector = Icons.Filled.Edit,
             contentDescription = "Edit",
-            tint = Color.Gray,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(16.dp)
         )
     }
@@ -466,6 +479,7 @@ fun StatCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditDialog(
     field: String,
@@ -477,18 +491,32 @@ fun EditDialog(
 
     AlertDialog(
         onDismissRequest = { onClose() },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp),
         title = {
             Text(
                 text = "Edit $field",
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
             OutlinedTextField(
                 value = newValue,
                 onValueChange = { newValue = it },
-                label = { Text("Enter new $field") },
-                modifier = Modifier.fillMaxWidth()
+                label = {
+                    Text(
+                        "Enter new $field",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                )
             )
         },
         confirmButton = {
@@ -496,15 +524,76 @@ fun EditDialog(
                 onClick = { onSave(newValue) },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
-                )
+                ),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Save")
+                Text(
+                    "Save",
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = { onClose() }) {
+            TextButton(
+                onClick = { onClose() },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
                 Text("Cancel")
             }
         }
     )
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewProfileScreen() {
+    Ritik_2Theme {
+        ProfileScreen(
+            profileImageUrl = null,
+            name = "John Doe",
+            email = "john.doe@company.com",
+            phoneNumber = "+1234567890",
+            designation = "Senior Developer",
+            companyName = "Tech Corp",
+            role = "Administrator",
+            userId = "user123",
+            complaints = 2,
+            experience = 5,
+            completedProjects = 15,
+            activeProjects = 3,
+            isLoading = false,
+            onLogoutClick = { },
+            onEditClick = { _, _ -> },
+            onChangeProfilePic = { },
+            onBackClick = { }
+        )
+    }
+}
+
+@Preview(showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun PreviewProfileScreenDark() {
+    Ritik_2Theme {
+        ProfileScreen(
+            profileImageUrl = null,
+            name = "John Doe",
+            email = "john.doe@company.com",
+            phoneNumber = "+1234567890",
+            designation = "Senior Developer",
+            companyName = "Tech Corp",
+            role = "Administrator",
+            userId = "user123",
+            complaints = 2,
+            experience = 5,
+            completedProjects = 15,
+            activeProjects = 3,
+            isLoading = false,
+            onLogoutClick = { },
+            onEditClick = { _, _ -> },
+            onChangeProfilePic = { },
+            onBackClick = { }
+        )
+    }
 }
