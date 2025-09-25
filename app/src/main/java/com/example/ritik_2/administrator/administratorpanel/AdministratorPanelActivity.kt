@@ -1,6 +1,7 @@
 package com.example.ritik_2.administrator.administratorpanel
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -40,7 +41,8 @@ class AdministratorPanelActivity : ComponentActivity() {
         val companyName: String,
         val role: String,
         val department: String,
-        val permissions: List<String>
+        val permissions: List<String>,
+        val imageUrl: Uri? = null  // Add this field
     )
 
     data class DepartmentData(
@@ -137,8 +139,67 @@ class AdministratorPanelActivity : ComponentActivity() {
                     val department = doc.getString("department") ?: "Administration"
                     val permissions = doc.get("permissions") as? List<String> ?: ArrayList()
                     val sanitizedCompany = doc.getString("sanitizedCompanyName") ?: ""
+                    val documentPath = doc.getString("documentPath") ?: ""
 
-                    adminData.value = AdminData(name, email, companyName, role, department, permissions)
+                    // Fetch image URL from the actual user document
+                    if (documentPath.isNotEmpty()) {
+                        firestore.document(documentPath).get()
+                            .addOnSuccessListener { userDoc ->
+                                val imageUrlString = if (userDoc.exists()) {
+                                    // Try to get from profile map first
+                                    val profile = userDoc.get("profile") as? Map<String, Any>
+                                    profile?.get("imageUrl")?.toString()
+                                        ?: userDoc.getString("imageUrl") // Fallback to direct field
+                                } else {
+                                    null
+                                }
+
+                                val imageUri = if (!imageUrlString.isNullOrEmpty()) {
+                                    try {
+                                        Uri.parse(imageUrlString)
+                                    } catch (e: Exception) {
+                                        Log.e("AdminPanel", "Error parsing image URL", e)
+                                        null
+                                    }
+                                } else null
+
+                                adminData.value = AdminData(
+                                    name = name,
+                                    email = email,
+                                    companyName = companyName,
+                                    role = role,
+                                    department = department,
+                                    permissions = permissions,
+                                    imageUrl = imageUri
+                                )
+
+                                Log.d("AdminPanel", "Admin data updated with image: $imageUrlString")
+                            }
+                            .addOnFailureListener { e ->
+                                Log.e("AdminPanel", "Error fetching user document for image", e)
+                                // Set admin data without image
+                                adminData.value = AdminData(
+                                    name = name,
+                                    email = email,
+                                    companyName = companyName,
+                                    role = role,
+                                    department = department,
+                                    permissions = permissions,
+                                    imageUrl = null
+                                )
+                            }
+                    } else {
+                        // No document path, set admin data without image
+                        adminData.value = AdminData(
+                            name = name,
+                            email = email,
+                            companyName = companyName,
+                            role = role,
+                            department = department,
+                            permissions = permissions,
+                            imageUrl = null
+                        )
+                    }
 
                     if (sanitizedCompany.isNotEmpty()) {
                         setupCompanyDataListeners(sanitizedCompany)

@@ -4,11 +4,14 @@ import android.net.Uri
 import android.util.Patterns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -28,11 +31,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.ritik_2.theme.Ritik_2Theme
+import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 fun RegistrationScreen(
     onRegisterClick: (String, String, String, String, String, String, Int, Int, Int, Int, Uri?, String?, String?) -> Unit,
@@ -84,10 +90,17 @@ fun RegistrationScreen(
             companyName.isNotBlank() &&
             companyName.length >= 2
 
+    // Button animation
+    val buttonScale by animateFloatAsState(
+        targetValue = if (isLoading) 0.95f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "buttonScale"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(scrollState)
             .padding(16.dp)
     ) {
@@ -108,7 +121,7 @@ fun RegistrationScreen(
                 Icon(
                     imageVector = Icons.Filled.AdminPanelSettings,
                     contentDescription = "Admin Registration",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(40.dp)
                 )
 
@@ -118,7 +131,7 @@ fun RegistrationScreen(
                     text = "Create Admin Account",
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     textAlign = TextAlign.Center
                 )
 
@@ -127,7 +140,7 @@ fun RegistrationScreen(
                 Text(
                     text = "Register as the first Administrator for your organization",
                     fontSize = 15.sp,
-                    color = Color.White.copy(alpha = 0.9f),
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f),
                     textAlign = TextAlign.Center,
                     lineHeight = 20.sp
                 )
@@ -136,14 +149,14 @@ fun RegistrationScreen(
 
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = Color.White.copy(alpha = 0.1f)
+                        containerColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = "⭐ Full system access with administrative privileges",
                         fontSize = 13.sp,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(12.dp)
                     )
@@ -156,7 +169,7 @@ fun RegistrationScreen(
         // Main Registration Form
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(
@@ -248,6 +261,11 @@ fun RegistrationScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Department: Administrative",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
                                 text = "Full system access and management privileges",
@@ -342,69 +360,85 @@ fun RegistrationScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // Enhanced Registration Button
-                // In RegistrationScreen composable, update the onRegisterClick call:
-
-                onRegisterClick(
-                    email.trim(),
-                    password,
-                    name.trim(),
-                    phoneNumber.trim(),
-                    designation.trim(),
-                    companyName.trim(),
-                    experience.toIntOrNull() ?: 0,
-                    completedProjects.toIntOrNull() ?: 0,
-                    activeProjects.toIntOrNull() ?: 0,
-                    complaints.toIntOrNull() ?: 0,
-                    imageUri,
-                    selectedRole,  // This should be "Administrator" (the role)
-                    department     // This should be "Administrative" (the department)
-                )
-
-// Also update the state variables in RegistrationScreen to be clearer:
-                var department by remember { mutableStateOf("Administrative") }  // Department name
-                val selectedRole = "Administrator"  // User role
-
-// And update the role display card to show correct information:
-                Card(
+                // Registration Button
+                Button(
+                    onClick = {
+                        if (isFormValid) {
+                            isLoading = true
+                            onRegisterClick(
+                                email.trim(),
+                                password,
+                                name.trim(),
+                                phoneNumber.trim(),
+                                designation.trim(),
+                                companyName.trim(),
+                                experience.toIntOrNull() ?: 0,
+                                completedProjects.toIntOrNull() ?: 0,
+                                activeProjects.toIntOrNull() ?: 0,
+                                complaints.toIntOrNull() ?: 0,
+                                imageUri,
+                                selectedRole,
+                                department
+                            )
+                        } else {
+                            showErrors = true
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                        .height(56.dp),
+                    enabled = !isLoading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.AdminPanelSettings,
-                            contentDescription = "Administrator Role",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Role: Administrator",
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 16.sp
-                            )
-                            Text(
-                                text = "Department: Administrative",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "Full system access and management privileges",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    AnimatedContent(
+                        targetState = isLoading,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(300)) with fadeOut(animationSpec = tween(300))
+                        },
+                        label = "buttonContent"
+                    ) { loading ->
+                        if (loading) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Creating Account...",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.PersonAdd,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Create Administrator Account",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
                         }
                     }
                 }
@@ -457,6 +491,14 @@ fun RegistrationScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    // Reset loading state after animation
+    LaunchedEffect(isLoading) {
+        if (isLoading) {
+            delay(2000)
+            isLoading = false
+        }
     }
 }
 
@@ -588,7 +630,7 @@ fun EnhancedTextField(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text(label) },
+            label = { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) },
             placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
             leadingIcon = {
                 Icon(
@@ -608,7 +650,9 @@ fun EnhancedTextField(
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                errorBorderColor = MaterialTheme.colorScheme.error
+                errorBorderColor = MaterialTheme.colorScheme.error,
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             ),
             singleLine = true
         )
@@ -650,7 +694,7 @@ fun EnhancedPasswordField(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text(label) },
+            label = { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) },
             placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
             leadingIcon = {
                 Icon(
@@ -680,7 +724,9 @@ fun EnhancedPasswordField(
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                errorBorderColor = MaterialTheme.colorScheme.error
+                errorBorderColor = MaterialTheme.colorScheme.error,
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             ),
             singleLine = true
         )
@@ -722,7 +768,7 @@ fun NumberField(
                 onValueChange(newValue)
             }
         },
-        label = { Text(label, fontSize = 13.sp) },
+        label = { Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
         leadingIcon = {
             Icon(
                 icon,
@@ -738,8 +784,32 @@ fun NumberField(
         ),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         ),
         singleLine = true
     )
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewRegistrationScreen() {
+    Ritik_2Theme {
+        RegistrationScreen(
+            onRegisterClick = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+            onLoginClick = { }
+        )
+    }
+}
+
+@Preview(showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun PreviewRegistrationScreenDark() {
+    Ritik_2Theme {
+        RegistrationScreen(
+            onRegisterClick = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
+            onLoginClick = { }
+        )
+    }
 }

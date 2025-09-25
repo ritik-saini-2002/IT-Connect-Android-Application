@@ -1,7 +1,7 @@
 [versions]
 accompanistCoil = "0.15.0"
 activityComposeVersion = "1.10.1"
-agp = "8.12.1"
+agp = "8.13.0"
 androidxActivityCompose = "1.10.1"
 androidxLifecycleRuntimeCompose = "2.9.2"
 androidxNavigationCompose = "2.9.3"

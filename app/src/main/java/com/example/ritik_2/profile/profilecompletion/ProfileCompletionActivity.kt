@@ -16,9 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.data.*
-import com.example.ritik_2.theme.AppTheme
 import com.example.ritik_2.profile.profilecompletion.components.ProfileCompletionViewModel
 import com.example.ritik_2.profile.profilecompletion.components.ProfileData
+import com.example.ritik_2.theme.Ritik_2Theme
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -71,7 +71,7 @@ class ProfileCompletionActivity : ComponentActivity() {
         }
 
         setContent {
-            AppTheme {
+            Ritik_2Theme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

@@ -1,5 +1,6 @@
 package com.example.ritik_2.administrator.administratorpanel
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -29,6 +30,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
@@ -37,14 +39,16 @@ import androidx.compose.material.icons.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.outlined.AccountTree
+import androidx.compose.material.icons.outlined.BusinessCenter
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,14 +61,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.ritik_2.administrator.administratorpanel.newusercreation.CreateUserActivity
 import kotlinx.coroutines.delay
 
@@ -93,7 +100,7 @@ fun AdministratorPanelScreen(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            CircularProgressIndicator(color = Color(0xFF6C757D))
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         }
         return
     }
@@ -104,7 +111,7 @@ fun AdministratorPanelScreen(
             title = "Create User",
             description = "Add new users to the organization",
             icon = Icons.Default.PersonAdd,
-            color = Color(0xFF4CAF50),
+            color = Color(0xFF4CAF50), // Green
             activityClass = CreateUserActivity::class.java,
             permissions = listOf("create_user")
         ),
@@ -113,7 +120,7 @@ fun AdministratorPanelScreen(
             title = "Manage Users",
             description = "View, edit, and manage existing users",
             icon = Icons.Default.People,
-            color = Color(0xFF2196F3),
+            color = Color(0xFF2196F3), // Blue
             permissions = listOf("view_all_users", "modify_user")
         ),
         AdministratorPanelActivity.AdminFunction(
@@ -121,7 +128,7 @@ fun AdministratorPanelScreen(
             title = "Database Manager",
             description = "Manage Your Company Database",
             icon = Icons.Default.Analytics,
-            color = Color(0xFF9C27B0),
+            color = Color(0xFF9C27B0), // Purple
             permissions = listOf("database_manager")
         ),
         AdministratorPanelActivity.AdminFunction(
@@ -129,7 +136,7 @@ fun AdministratorPanelScreen(
             title = "Company Settings",
             description = "Manage company information and settings",
             icon = Icons.Default.Business,
-            color = Color(0xFFFF9800),
+            color = Color(0xFFFF9800), // Orange
             permissions = listOf("manage_companies")
         ),
         AdministratorPanelActivity.AdminFunction(
@@ -137,7 +144,7 @@ fun AdministratorPanelScreen(
             title = "Role Management",
             description = "Create and manage user roles and permissions",
             icon = Icons.Default.AdminPanelSettings,
-            color = Color(0xFFF44336),
+            color = Color(0xFFF44336), // Red
             permissions = listOf("manage_roles", "manage_permissions")
         ),
         AdministratorPanelActivity.AdminFunction(
@@ -145,7 +152,7 @@ fun AdministratorPanelScreen(
             title = "Reports & Export",
             description = "Generate reports and export data",
             icon = Icons.Default.Assessment,
-            color = Color(0xFF607D8B),
+            color = Color(0xFF607D8B), // Blue Grey
             permissions = listOf("export_data", "generate_reports")
         )
     )
@@ -153,20 +160,11 @@ fun AdministratorPanelScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 60.dp, bottom = 16.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFFAFAFA),
-                        Color(0xFFF5F5F5)
-                    )
-                )
-            ),
+            .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Header Section
+        // Admin Profile Card (Similar to MainScreen)
         item {
             AnimatedVisibility(
                 visible = isVisible,
@@ -175,25 +173,27 @@ fun AdministratorPanelScreen(
                     animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
                 )
             ) {
-                AdminHeaderSection(
+                AdminProfileCard(
                     adminData = adminData,
+                    organizationStats = organizationStats,
                     isLoading = isLoading
                 )
             }
         }
 
-        // Organization Statistics
+        // Dashboard Title
         item {
             AnimatedVisibility(
-                visible = isVisible && organizationStats != null,
-                enter = slideInHorizontally(
-                    initialOffsetX = { -it },
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
-                )
+                visible = isVisible,
+                enter = fadeIn(animationSpec = tween(durationMillis = 400))
             ) {
-                organizationStats?.let { stats ->
-                    OrganizationStatsSection(stats = stats)
-                }
+                Text(
+                    text = "Admin Dashboard",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+                )
             }
         }
 
@@ -212,29 +212,23 @@ fun AdministratorPanelScreen(
             }
         }
 
-        // Admin Functions
+        // Admin Functions Title
         item {
             AnimatedVisibility(
                 visible = isVisible,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(
-                        durationMillis = 600,
-                        delayMillis = 200,
-                        easing = FastOutSlowInEasing
-                    )
-                )
+                enter = fadeIn(animationSpec = tween(durationMillis = 400))
             ) {
                 Text(
                     text = "Quick Actions",
-                    fontSize = 20.sp,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50),
+                    color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             }
         }
 
+        // Admin Functions
         itemsIndexed(adminFunctions) { index, function ->
             var isPressed by remember { mutableStateOf(false) }
             val scale by animateFloatAsState(
@@ -259,75 +253,125 @@ fun AdministratorPanelScreen(
 }
 
 @Composable
-fun AdminHeaderSection(
+fun AdminProfileCard(
     adminData: AdministratorPanelActivity.AdminData?,
+    organizationStats: AdministratorPanelActivity.OrganizationStats?,
     isLoading: Boolean
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(top = 50.dp)
             .shadow(8.dp, RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
         shape = RoundedCornerShape(16.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp)
-        ) {
-            // Header Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Administrator Panel",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2C3E50)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Content based on loading state
+        Column(modifier = Modifier.padding(16.dp)) {
             if (isLoading && adminData == null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center
                 ) {
                     CircularProgressIndicator(
-                        color = Color(0xFF6C757D),
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                 }
             } else {
                 adminData?.let { data ->
-                    // Admin Info
-                    Column {
-                        Text(
-                            text = "Welcome, ${data.name}",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF34495E)
-                        )
-                        Text(
-                            text = data.email,
-                            fontSize = 14.sp,
-                            color = Color(0xFF6C757D)
-                        )
-                        Text(
-                            text = "${data.companyName} • ${data.department}",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF2C3E50)
-                        )
-                        Text(
-                            text = "Role: ${data.role}",
-                            fontSize = 12.sp,
-                            color = Color(0xFF6C757D)
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Profile Image with AsyncImage support
+                        Box(
+                            modifier = Modifier
+                                .size(70.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (data.imageUrl != null) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(data.imageUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "Admin Profile Picture",
+                                    modifier = Modifier
+                                        .size(70.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = "Admin Profile Picture",
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = data.name,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = data.role,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = data.email,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${data.companyName} • ${data.department}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Stats Row with colored icons
+                    organizationStats?.let { stats ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            AdminStatItem(
+                                value = stats.totalUsers,
+                                label = "Users",
+                                icon = Icons.Outlined.Groups,
+                                color = Color(0xFF2196F3) // Blue
+                            )
+                            AdminStatItem(
+                                value = stats.totalDepartments,
+                                label = "Departments",
+                                icon = Icons.Outlined.BusinessCenter,
+                                color = Color(0xFF4CAF50) // Green
+                            )
+                            AdminStatItem(
+                                value = stats.totalRoles,
+                                label = "Roles",
+                                icon = Icons.Outlined.AccountTree,
+                                color = Color(0xFFFF9800) // Orange
+                            )
+                        }
                     }
                 }
             }
@@ -336,37 +380,29 @@ fun AdminHeaderSection(
 }
 
 @Composable
-fun OrganizationStatsSection(stats: AdministratorPanelActivity.OrganizationStats) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(4.dp, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(12.dp)
+fun AdminStatItem(value: Int, label: String, icon: ImageVector, color: Color) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "Organization Overview",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF2C3E50),
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-
-            // Stats row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                StatCard("Total Users", stats.totalUsers.toString(), Color(0xFF3498DB))
-                StatCard("Departments", stats.totalDepartments.toString(), Color(0xFF9B59B6))
-                StatCard("Roles", stats.totalRoles.toString(), Color(0xFFE67E22))
-            }
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(28.dp)
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value.toString(),
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
     }
 }
 
@@ -376,7 +412,9 @@ fun DepartmentOverviewSection(departmentData: List<AdministratorPanelActivity.De
         modifier = Modifier
             .fillMaxWidth()
             .shadow(4.dp, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(
@@ -386,9 +424,9 @@ fun DepartmentOverviewSection(departmentData: List<AdministratorPanelActivity.De
         ) {
             Text(
                 text = "Departments (${departmentData.size})",
-                fontSize = 18.sp,
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF2C3E50),
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
@@ -410,9 +448,11 @@ fun DepartmentCard(department: AdministratorPanelActivity.DepartmentData) {
         modifier = Modifier
             .width(140.dp)
             .height(100.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
         shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, Color(0xFFE9ECEF))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Column(
             modifier = Modifier
@@ -422,9 +462,9 @@ fun DepartmentCard(department: AdministratorPanelActivity.DepartmentData) {
         ) {
             Text(
                 text = department.name,
-                fontSize = 14.sp,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF2C3E50),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -432,49 +472,16 @@ fun DepartmentCard(department: AdministratorPanelActivity.DepartmentData) {
             Column {
                 Text(
                     text = department.userCount.toString(),
-                    fontSize = 16.sp,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2196F3)
+                    color = Color(0xFF2196F3) // Blue
                 )
                 Text(
                     text = "Total Users",
-                    fontSize = 10.sp,
-                    color = Color(0xFF6C757D)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
             }
-        }
-    }
-}
-
-@Composable
-fun StatCard(title: String, value: String, color: Color) {
-    Card(
-        modifier = Modifier
-            .size(100.dp, 60.dp),
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f)),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = value,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = color
-            )
-            Text(
-                text = title,
-                fontSize = 10.sp,
-                color = color,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }
@@ -511,7 +518,9 @@ fun AdminFunctionCard(
                 .fillMaxWidth()
                 .height(80.dp)
                 .shadow(4.dp, RoundedCornerShape(12.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
             shape = RoundedCornerShape(12.dp)
         ) {
             Row(
@@ -520,11 +529,11 @@ fun AdminFunctionCard(
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Icon
+                // Icon with colored background
                 Card(
                     modifier = Modifier.size(48.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = adminFunction.color.copy(alpha = 0.1f)
+                        containerColor = adminFunction.color.copy(alpha = 0.15f)
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -536,7 +545,7 @@ fun AdminFunctionCard(
                             imageVector = adminFunction.icon,
                             contentDescription = adminFunction.title,
                             tint = adminFunction.color,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(26.dp)
                         )
                     }
                 }
@@ -549,14 +558,14 @@ fun AdminFunctionCard(
                 ) {
                     Text(
                         text = adminFunction.title,
-                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF2C3E50)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = adminFunction.description,
-                        fontSize = 12.sp,
-                        color = Color(0xFF6C757D),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -566,87 +575,10 @@ fun AdminFunctionCard(
                 Icon(
                     Icons.Default.ArrowForwardIos,
                     contentDescription = "Navigate",
-                    tint = Color(0xFF6C757D),
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.size(16.dp)
                 )
             }
         }
     }
-}
-
-@Composable
-fun LoadingIndicator() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        CircularProgressIndicator(
-            color = Color(0xFF2196F3),
-            modifier = Modifier.size(32.dp)
-        )
-    }
-}
-
-@Composable
-fun ErrorMessage(
-    message: String,
-    onRetry: (() -> Unit)? = null
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(16.dp)
-    ) {
-        Text(
-            text = message,
-            color = Color(0xFFE74C3C),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        onRetry?.let { retry ->
-            Button(
-                onClick = retry,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
-            ) {
-                Text("Retry", color = Color.White)
-            }
-        }
-    }
-}
-
-// Color extensions for consistent theming
-object AdminPanelColors {
-    val Primary = Color(0xFF2C3E50)
-    val Secondary = Color(0xFF34495E)
-    val Accent = Color(0xFF3498DB)
-    val Success = Color(0xFF2ECC71)
-    val Warning = Color(0xFFE67E22)
-    val Danger = Color(0xFFE74C3C)
-    val Info = Color(0xFF3498DB)
-    val Light = Color(0xFFF8F9FA)
-    val Dark = Color(0xFF343A40)
-    val Muted = Color(0xFF6C757D)
-
-    // Background colors
-    val BackgroundPrimary = Color(0xFFFAFAFA)
-    val BackgroundSecondary = Color(0xFFF5F5F5)
-    val CardBackground = Color.White
-    val DividerColor = Color(0xFFE9ECEF)
-}
-
-// Extension functions for formatting
-fun Int.formatCount(): String {
-    return when {
-        this >= 1000000 -> "${(this / 1000000.0).let { "%.1f".format(it) }}M"
-        this >= 1000 -> "${(this / 1000.0).let { "%.1f".format(it) }}K"
-        else -> this.toString()
-    }
-}
-
-fun String.toInitials(): String {
-    return this.split(" ")
-        .mapNotNull { it.firstOrNull()?.toString() }
-        .take(2)
-        .joinToString("")
-        .uppercase()
 }

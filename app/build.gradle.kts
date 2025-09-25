@@ -164,5 +164,21 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics:1.6.1")
     implementation("com.google.code.gson:gson:2.10.1")
 
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+
+    // Firebase Auth
+    implementation("com.google.firebase:firebase-auth-ktx")
+
+    // Firebase Firestore
+    implementation("com.google.firebase:firebase-firestore-ktx")
+
+    // For phone authentication
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
+    implementation("com.google.android.gms:play-services-auth-api-phone:18.0.1")
+
+    // Compose dependencies (if not already added)
+    implementation("androidx.compose.material3:material3:1.1.2")
+    implementation("androidx.compose.material:material-icons-extended:1.5.4")
+
 
 }
