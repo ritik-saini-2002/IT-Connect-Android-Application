@@ -1,21 +1,19 @@
 package com.example.ritik_2.login
 
+import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -25,6 +23,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -37,13 +36,13 @@ import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
 
-@OptIn(ExperimentalComposeUiApi::class, ExperimentalAnimationApi::class)
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun LoginScreen(
     onLoginClick: (String, String) -> Unit = { _, _ -> },
     onRegisterClick: () -> Unit = {},
-    onForgotPasswordClick: (String, (Boolean) -> Unit) -> Unit = { _, _ -> },
-    onInfoClick: () -> Unit = {} // Add this parameter
+    onForgotPasswordClick: (String) -> Unit = {},
+    onInfoClick: () -> Unit = {}
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -65,34 +64,33 @@ fun LoginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
-            .clickable { focusManager.clearFocus() }
+            .background(MaterialTheme.colorScheme.background)
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            ) {
+                focusManager.clearFocus()
+            }
     ) {
         // Info Button in top-right corner
-        Card(
+        IconButton(
+            onClick = onInfoClick,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 60.dp, end = 30.dp)
+                .padding(top = 50.dp, end = 20.dp)
                 .size(48.dp)
                 .zIndex(1000f)
-                .clickable { onInfoClick() },
-            shape = CircleShape,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "App Info",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = CircleShape
                 )
-            }
+        ) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = "Contact Information",
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(24.dp)
+            )
         }
 
         Column(
@@ -106,12 +104,13 @@ fun LoginScreen(
         ) {
             Spacer(modifier = Modifier.height(40.dp))
 
-            // Header Card matching RegistrationScreen style
+            // Header Card
             Card(
                 modifier = Modifier.padding(24.dp, 0.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
                 elevation = CardDefaults.cardElevation(defaultElevation = 28.dp)
-
             ) {
                 Column(
                     modifier = Modifier
@@ -128,7 +127,7 @@ fun LoginScreen(
                         text = "Welcome Back!",
                         fontSize = 26.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onPrimary,
                         textAlign = TextAlign.Center
                     )
 
@@ -137,7 +136,7 @@ fun LoginScreen(
                     Text(
                         text = "Sign in to access your account and continue your work",
                         fontSize = 15.sp,
-                        color = Color.White.copy(alpha = 0.9f),
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f),
                         textAlign = TextAlign.Center,
                         lineHeight = 20.sp
                     )
@@ -146,14 +145,14 @@ fun LoginScreen(
 
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = Color.White.copy(alpha = 0.1f)
+                            containerColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = "🔐 Secure access to your workspace",
                             fontSize = 13.sp,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onPrimary,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(12.dp)
                         )
@@ -168,8 +167,10 @@ fun LoginScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .animateContentSize(),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                //elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
@@ -182,7 +183,10 @@ fun LoginScreen(
                         label = "Email Address",
                         icon = Icons.Default.Email,
                         placeholder = "Enter your email",
-                        keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Next)
+                        keyboardOptions = KeyboardOptions.Default.copy(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Next
+                        )
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -195,7 +199,10 @@ fun LoginScreen(
                         placeholder = "Enter your password",
                         isPasswordVisible = isPasswordVisible,
                         onPasswordVisibilityChange = { isPasswordVisible = it },
-                        keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
+                        keyboardActions = KeyboardActions(onDone = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                        })
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -203,13 +210,17 @@ fun LoginScreen(
                     // Login Button
                     Button(
                         onClick = {
-                            isLoading = true
-                            onLoginClick(email, password)
+                            if (email.isNotBlank() && password.isNotBlank()) {
+                                isLoading = true
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                                onLoginClick(email, password)
+                            }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
-                        enabled = !isLoading,
+                        enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -219,7 +230,8 @@ fun LoginScreen(
                         AnimatedContent(
                             targetState = isLoading,
                             transitionSpec = {
-                                fadeIn(animationSpec = tween(300)) with fadeOut(animationSpec = tween(300))
+                                fadeIn(animationSpec = tween(300)) with
+                                        fadeOut(animationSpec = tween(300))
                             },
                             label = "buttonContent"
                         ) { loading ->
@@ -229,7 +241,7 @@ fun LoginScreen(
                                     horizontalArrangement = Arrangement.Center
                                 ) {
                                     CircularProgressIndicator(
-                                        color = Color.White,
+                                        color = MaterialTheme.colorScheme.onPrimary,
                                         modifier = Modifier.size(20.dp),
                                         strokeWidth = 2.dp
                                     )
@@ -238,7 +250,7 @@ fun LoginScreen(
                                         text = "Signing In...",
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = Color.White
+                                        color = MaterialTheme.colorScheme.onPrimary
                                     )
                                 }
                             } else {
@@ -249,7 +261,7 @@ fun LoginScreen(
                                     Icon(
                                         Icons.Default.Login,
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -257,7 +269,7 @@ fun LoginScreen(
                                         text = "Sign In",
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = Color.White
+                                        color = MaterialTheme.colorScheme.onPrimary
                                     )
                                 }
                             }
@@ -319,25 +331,26 @@ fun LoginScreen(
     if (showForgotPasswordDialog) {
         ModernForgotPasswordDialog(
             onDismiss = { showForgotPasswordDialog = false },
-            onSendResetLink = onForgotPasswordClick
+            onSendResetLink = { resetEmail ->
+                onForgotPasswordClick(resetEmail)
+                showForgotPasswordDialog = false
+            }
         )
     }
 
-    // Reset loading state after animation
+    // Reset loading state after a delay
     LaunchedEffect(isLoading) {
         if (isLoading) {
-            delay(2000)
+            delay(1500)
             isLoading = false
         }
     }
 }
 
-@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun AnimatedUserLogo() {
     val infiniteTransition = rememberInfiniteTransition(label = "userLogo")
 
-    // Rotation animation for outer ring
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -348,7 +361,6 @@ fun AnimatedUserLogo() {
         label = "logoRotation"
     )
 
-    // Scale animation for pulsing effect
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
         targetValue = 1.1f,
@@ -357,17 +369,6 @@ fun AnimatedUserLogo() {
             repeatMode = RepeatMode.Reverse
         ),
         label = "logoScale"
-    )
-
-    // Gender switching animation (male/female icons)
-    val genderSwitch by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "genderSwitch"
     )
 
     Box(
@@ -383,10 +384,10 @@ fun AnimatedUserLogo() {
                     width = 3.dp,
                     brush = Brush.sweepGradient(
                         colors = listOf(
-                            Color.White,
-                            Color.White.copy(alpha = 0.7f),
-                            Color.White.copy(alpha = 0.3f),
-                            Color.White.copy(alpha = 0.8f)
+                            MaterialTheme.colorScheme.onPrimary,
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.3f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                         )
                     ),
                     shape = CircleShape
@@ -401,8 +402,8 @@ fun AnimatedUserLogo() {
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.3f),
-                            Color.White.copy(alpha = 0.1f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.3f),
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f),
                             Color.Transparent
                         )
                     ),
@@ -410,47 +411,13 @@ fun AnimatedUserLogo() {
                 )
         )
 
-        // Animated user icon (switching between male and female)
-        AnimatedContent(
-            targetState = genderSwitch > 0.5f,
-            transitionSpec = {
-                fadeIn(animationSpec = tween(1000)) with fadeOut(animationSpec = tween(1000))
-            },
-            label = "genderIcon"
-        ) { showFemale ->
-            if (showFemale) {
-                // Female user icon
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(50.dp)
-                ) {
-//                    Icon(
-//                        Icons.Default.Person,
-//                        contentDescription = "Female User",
-//                        modifier = Modifier.size(35.dp),
-//                        tint = Color.White
-//                    )
-//                    // Add a small indicator for female (like hair or accessories)
-//                    Box(
-//                        modifier = Modifier
-//                            .size(12.dp)
-//                            .offset(x = 8.dp, y = (-12).dp)
-//                            .background(
-//                                Color.White.copy(alpha = 0.8f),
-//                                CircleShape
-//                            )
-//                    )
-                }
-            } else {
-                // Male user icon
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = "Male User",
-                    modifier = Modifier.size(40.dp),
-                    tint = Color.White
-                )
-            }
-        }
+        // User icon
+        Icon(
+            Icons.Default.Person,
+            contentDescription = "User",
+            modifier = Modifier.size(40.dp),
+            tint = MaterialTheme.colorScheme.onPrimary
+        )
 
         // Decorative dots around the logo
         repeat(8) { index ->
@@ -466,7 +433,7 @@ fun AnimatedUserLogo() {
                     )
                     .scale(dotScale)
                     .background(
-                        Color.White.copy(alpha = 0.6f),
+                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f),
                         CircleShape
                     )
             )
@@ -507,7 +474,9 @@ fun EnhancedLoginTextField(
         keyboardOptions = keyboardOptions,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedLabelColor = MaterialTheme.colorScheme.primary,
+            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
         singleLine = true
     )
@@ -554,11 +523,16 @@ fun EnhancedLoginPasswordField(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
-        keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+        keyboardOptions = KeyboardOptions.Default.copy(
+            keyboardType = KeyboardType.Password,
+            imeAction = ImeAction.Done
+        ),
         keyboardActions = keyboardActions,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedLabelColor = MaterialTheme.colorScheme.primary,
+            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
         singleLine = true
     )
@@ -568,14 +542,14 @@ fun EnhancedLoginPasswordField(
 @Composable
 fun ModernForgotPasswordDialog(
     onDismiss: () -> Unit,
-    onSendResetLink: (String, (Boolean) -> Unit) -> Unit
+    onSendResetLink: (String) -> Unit
 ) {
     var email by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color.White,
+        containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(20.dp),
         title = {
             Row(
@@ -602,44 +576,53 @@ fun ModernForgotPasswordDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                EnhancedLoginTextField(
+                OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = "Email Address",
-                    icon = Icons.Default.Email,
-                    placeholder = "Enter your email"
+                    label = { Text("Email Address") },
+                    placeholder = { Text("Enter your email") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Email,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions.Default.copy(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Done
+                    ),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
                 )
             }
         },
         confirmButton = {
-            AnimatedContent(
-                targetState = isSending,
-                transitionSpec = { fadeIn() with fadeOut() },
-                label = "confirmButton"
-            ) { sending ->
-                Button(
-                    onClick = {
+            Button(
+                onClick = {
+                    if (email.isNotBlank()) {
                         isSending = true
-                        onSendResetLink(email) { success ->
-                            isSending = false
-                            if (success) onDismiss()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    enabled = !sending && email.isNotBlank()
-                ) {
-                    if (sending) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text("Send Link", color = Color.White)
+                        onSendResetLink(email)
                     }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(12.dp),
+                enabled = !isSending && email.isNotBlank()
+            ) {
+                if (isSending) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Send Link", color = MaterialTheme.colorScheme.onPrimary)
                 }
             }
         },
