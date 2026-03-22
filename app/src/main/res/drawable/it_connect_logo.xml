@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Outer gradient circle border -->
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:startColor="#4A90E2"
+                android:endColor="#50E3C2"
+                android:angle="135"
+                android:type="linear" />
+            <size
+                android:width="200dp"
+                android:height="200dp" />
+        </shape>
+    </item>
+
+    <!-- Inner background circle -->
+    <item
+        android:left="4dp"
+        android:top="4dp"
+        android:right="4dp"
+        android:bottom="4dp">
+        <shape android:shape="oval">
+            <solid android:color="#F8F9FA" />
+        </shape>
+    </item>
+
+    <!-- Central blue circle -->
+    <item
+        android:left="85dp"
+        android:top="85dp"
+        android:right="85dp"
+        android:bottom="85dp">
+        <shape android:shape="oval">
+            <solid android:color="#4A90E2" />
+        </shape>
+    </item>
+
+    <!-- Connection lines -->
+    <!-- Top line -->
+    <item
+        android:left="98dp"
+        android:top="30dp"
+        android:right="98dp"
+        android:bottom="100dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#B0C4DE" />
+        </shape>
+    </item>
+
+    <!-- Top-right diagonal -->
+    <item
+        android:left="120dp"
+        android:top="50dp"
+        android:right="50dp"
+        android:bottom="120dp">
+        <rotate
+            android:fromDegrees="45"
+            android:toDegrees="45"
+            android:pivotX="50%"
+            android:pivotY="50%">
+            <shape android:shape="rectangle">
+                <solid android:color="#B0C4DE" />
+                <size
+                    android:width="2dp"
+                    android:height="40dp" />
+            </shape>
+        </rotate>
+    </item>
+
+    <!-- Right line -->
+    <item
+        android:left="110dp"
+        android:top="98dp"
+        android:right="30dp"
+        android:bottom="98dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#B0C4DE" />
+        </shape>
+    </item>
+
+    <!-- Bottom-right diagonal -->
+    <item
+        android:left="120dp"
+        android:top="120dp"
+        android:right="50dp"
+        android:bottom="50dp">
+        <rotate
+            android:fromDegrees="-45"
+            android:toDegrees="-45"
+            android:pivotX="50%"
+            android:pivotY="50%">
+            <shape android:shape="rectangle">
+                <solid android:color="#B0C4DE" />
+                <size
+                    android:width="2dp"
+                    android:height="40dp" />
+            </shape>
+        </rotate>
+    </item>
+
+    <!-- Bottom line -->
+    <item
+        android:left="98dp"
+        android:top="110dp"
+        android:right="98dp"
+        android:bottom="30dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#B0C4DE" />
+        </shape>
+    </item>
+
+    <!-- Bottom-left diagonal -->
+    <item
+        android:left="50dp"
+        android:top="120dp"
+        android:right="120dp"
+        android:bottom="50dp">
+        <rotate
+            android:fromDegrees="45"
+            android:toDegrees="45"
+            android:pivotX="50%"
+            android:pivotY="50%">
+            <shape android:shape="rectangle">
+                <solid android:color="#B0C4DE" />
+                <size
+                    android:width="2dp"
+                    android:height="40dp" />
+            </shape>
+        </rotate>
+    </item>
+
+    <!-- Left line -->
+    <item
+        android:left="30dp"
+        android:top="98dp"
+        android:right="110dp"
+        android:bottom="98dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#B0C4DE" />
+        </shape>
+    </item>
+
+    <!-- Top-left diagonal -->
+    <item
+        android:left="50dp"
+        android:top="50dp"
+        android:right="120dp"
+        android:bottom="120dp">
+        <rotate
+            android:fromDegrees="-45"
+            android:toDegrees="-45"
+            android:pivotX="50%"
+            android:pivotY="50%">
+            <shape android:shape="rectangle">
+                <solid android:color="#B0C4DE" />
+                <size
+                    android:width="2dp"
+                    android:height="40dp" />
+            </shape>
+        </rotate>
+    </item>
+
+    <!-- Node circles -->
+    <!-- Top purple circle -->
+    <item
+        android:left="90dp"
+        android:top="20dp"
+        android:right="90dp"
+        android:bottom="160dp">
+        <shape android:shape="oval">
+            <solid android:color="#9B59B6" />
+        </shape>
+    </item>
+
+    <!-- Top-right cyan circle -->
+    <item
+        android:left="145dp"
+        android:top="45dp"
+        android:right="35dp"
+        android:bottom="135dp">
+        <shape android:shape="oval">
+            <solid android:color="#1ABC9C" />
+        </shape>
+    </item>
+
+    <!-- Right red circle -->
+    <item
+        android:left="170dp"
+        android:top="90dp"
+        android:right="10dp"
+        android:bottom="90dp">
+        <shape android:shape="oval">
+            <solid android:color="#E74C3C" />
+        </shape>
+    </item>
+
+    <!-- Bottom-right orange circle -->
+    <item
+        android:left="145dp"
+        android:top="135dp"
+        android:right="35dp"
+        android:bottom="45dp">
+        <shape android:shape="oval">
+            <solid android:color="#F39C12" />
+        </shape>
+    </item>
+
+    <!-- Bottom cyan circle -->
+    <item
+        android:left="90dp"
+        android:top="160dp"
+        android:right="90dp"
+        android:bottom="20dp">
+        <shape android:shape="oval">
+            <solid android:color="#3498DB" />
+        </shape>
+    </item>
+
+    <!-- Bottom-left green circle -->
+    <item
+        android:left="35dp"
+        android:top="135dp"
+        android:right="145dp"
+        android:bottom="45dp">
+        <shape android:shape="oval">
+            <solid android:color="#27AE60" />
+        </shape>
+    </item>
+
+    <!-- Left green circle -->
+    <item
+        android:left="10dp"
+        android:top="90dp"
+        android:right="170dp"
+        android:bottom="90dp">
+        <shape android:shape="oval">
+            <solid android:color="#2ECC71" />
+        </shape>
+    </item>
+
+    <!-- Top-left blue circle -->
+    <item
+        android:left="35dp"
+        android:top="45dp"
+        android:right="145dp"
+        android:bottom="135dp">
+        <shape android:shape="oval">
+            <solid android:color="#3F51B5" />
+        </shape>
+    </item>
+
+</layer-list>
