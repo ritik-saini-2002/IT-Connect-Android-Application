@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -106,12 +107,12 @@ private fun getFileIcon(ext: String): String = when (ext.lowercase()) {
 @Composable
 fun PcControlFileBrowserUI(viewModel: PcControlViewModel) {
 
-    val drives       by viewModel.drives.collectAsState()
-    val currentPath  by viewModel.currentPath.collectAsState()
-    val dirItems     by viewModel.dirItems.collectAsState()
-    val isLoading    by viewModel.browseLoading.collectAsState()
-    val recentPaths  by viewModel.recentPaths.collectAsState()
-    val uiState      by viewModel.uiState.collectAsState()
+    val drives       by viewModel.drives.collectAsStateWithLifecycle()
+    val currentPath  by viewModel.currentPath.collectAsStateWithLifecycle()
+    val dirItems     by viewModel.dirItems.collectAsStateWithLifecycle()
+    val isLoading    by viewModel.browseLoading.collectAsStateWithLifecycle()
+    val recentPaths  by viewModel.recentPaths.collectAsStateWithLifecycle()
+    val uiState      by viewModel.uiState.collectAsStateWithLifecycle()
 
     var selectedFilter  by remember { mutableStateOf(PcFileFilter.ALL) }
     var openingFile     by remember { mutableStateOf<String?>(null) }

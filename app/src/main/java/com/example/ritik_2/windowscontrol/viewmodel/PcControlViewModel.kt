@@ -43,16 +43,19 @@ enum class PcScreen { PLANS, APP_DIRECTORY, FILE_BROWSER, TOUCHPAD, KEYBOARD, SE
 
 class PcControlViewModel(private val context: Context) : ViewModel() {
 
-    private val repo = PcControlMain.repository
-        ?: throw IllegalStateException("PcControlMain.init() not called")
+    // Safe init — if PcControlMain.init() was not called, initialize it now
+    // This prevents crashes when Application class is not set up correctly
+    init {
+        if (!PcControlMain.isInitialized) {
+            android.util.Log.w("PcControl", "PcControlMain not initialized — auto-initializing now")
+            PcControlMain.init(context)
+        }
+    }
 
-    private val api = PcControlMain.apiClient
-        ?: throw IllegalStateException("PcControlMain.init() not called")
-
-    private val browse = PcControlMain.browseClient
-        ?: throw IllegalStateException("PcControlMain.init() not called")
-
-    private val input = PcControlInputClient(PcControlMain.getSettings())
+    private val repo   get() = PcControlMain.repository   ?: run { PcControlMain.init(context); PcControlMain.repository!! }
+    private val api    get() = PcControlMain.apiClient    ?: run { PcControlMain.init(context); PcControlMain.apiClient!! }
+    private val browse get() = PcControlMain.browseClient ?: run { PcControlMain.init(context); PcControlMain.browseClient!! }
+    private val input  get() = PcControlInputClient(PcControlMain.getSettings())
 
     // ── Real-time refresh job ─────────────────────────────
     private var realTimeRefreshJob: Job? = null
@@ -103,6 +106,13 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     private val _appSearchQuery = MutableStateFlow("")
     val appSearchQuery: StateFlow<String> = _appSearchQuery
 
+    // ── Live Screen ──────────────────────────────────────
+    private val _liveScreenB64 = MutableStateFlow<String?>(null)
+    val liveScreenB64: StateFlow<String?> = _liveScreenB64
+    private val _liveScreenActive = MutableStateFlow(false)
+    val liveScreenActive: StateFlow<Boolean> = _liveScreenActive
+    private var liveScreenJob: Job? = null
+
     val filteredApps: StateFlow<List<PcInstalledApp>> = combine(
         _installedApps, _appSearchQuery
     ) { apps, query ->
@@ -124,10 +134,20 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun pingPc() {
         viewModelScope.launch {
-            _connectionStatus.value = PcConnectionStatus.CHECKING
-            val r = api.ping()
-            _connectionStatus.value = if (r.success) PcConnectionStatus.ONLINE
-            else PcConnectionStatus.OFFLINE
+            try {
+                val settings = PcControlMain.getSettings()
+                if (settings.pcIpAddress.isBlank()) {
+                    _connectionStatus.value = PcConnectionStatus.UNKNOWN
+                    return@launch
+                }
+                _connectionStatus.value = PcConnectionStatus.CHECKING
+                val r = api.ping()
+                _connectionStatus.value = if (r.success) PcConnectionStatus.ONLINE
+                else PcConnectionStatus.OFFLINE
+            } catch (e: Exception) {
+                _connectionStatus.value = PcConnectionStatus.OFFLINE
+                android.util.Log.e("PcControl", "pingPc error: ${e.message}")
+            }
         }
     }
 
@@ -145,19 +165,35 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun executePlan(plan: PcPlan) {
         viewModelScope.launch {
-            _uiState.value = PcUiState.Loading
-            val r = api.executePlan(plan)
-            _uiState.value = if (r.success)
-                PcUiState.Success("✅ '${plan.planName}' sent to PC!")
-            else
-                PcUiState.Error("❌ ${r.error ?: "Execution failed"}")
+            try {
+                _uiState.value = PcUiState.Loading
+                val settings = PcControlMain.getSettings()
+                if (settings.pcIpAddress.isBlank()) {
+                    _uiState.value = PcUiState.Error("❌ No PC IP set. Go to Settings tab and enter your PC's IP address.")
+                    return@launch
+                }
+                val r = api.executePlan(plan)
+                _uiState.value = if (r.success)
+                    PcUiState.Success("✅ '${plan.planName}' sent to PC!")
+                else
+                    PcUiState.Error("❌ Cannot reach PC at ${settings.pcIpAddress}:${settings.port}\nMake sure agent is running on PC.")
+            } catch (e: Exception) {
+                _uiState.value = PcUiState.Error("❌ Error: ${e.message}")
+                android.util.Log.e("PcControl", "executePlan crashed", e)
+            }
         }
     }
 
     fun executeQuickStep(step: PcStep) {
         viewModelScope.launch {
-            val r = api.executeQuickStep(step)
-            if (!r.success) _uiState.value = PcUiState.Error("Step failed: ${r.error}")
+            try {
+                val settings = PcControlMain.getSettings()
+                if (settings.pcIpAddress.isBlank()) return@launch // silent skip if no IP
+                val r = api.executeQuickStep(step)
+                if (!r.success) _uiState.value = PcUiState.Error("Step failed: ${r.error}")
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "executeQuickStep error: ${e.message}")
+            }
         }
     }
 
@@ -199,10 +235,19 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
             return
         }
         viewModelScope.launch {
+            // REPLACE strategy — saved permanently in Room DB until manually deleted
             repo.insertPlan(plan)
             _editingPlan.value = null
             navigateTo(PcScreen.PLANS)
             _uiState.value = PcUiState.Success("✅ '${plan.planName}' saved!")
+            android.util.Log.d("PcControl", "Plan saved: ${plan.planName} (${plan.steps.size} steps)")
+        }
+    }
+
+    fun deletePlanById(planId: String) {
+        viewModelScope.launch {
+            val plan = repo.getPlanById(planId) ?: return@launch
+            repo.deletePlan(plan)
         }
     }
 
@@ -383,9 +428,32 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         realTimeRefreshJob = null
     }
 
+    // ── Live Screen capture polling ───────────────────────
+    fun startLiveScreen(intervalMs: Long = 1500L) {
+        if (_liveScreenActive.value) return
+        _liveScreenActive.value = true
+        liveScreenJob = viewModelScope.launch {
+            while (_liveScreenActive.value) {
+                try {
+                    val r = api.captureScreen(quality = 25, scale = 4)
+                    if (r.success) _liveScreenB64.value = r.data
+                } catch (_: Exception) {}
+                delay(intervalMs)
+            }
+        }
+    }
+
+    fun stopLiveScreen() {
+        _liveScreenActive.value = false
+        liveScreenJob?.cancel()
+        liveScreenJob = null
+        _liveScreenB64.value = null
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopRealTimeRefresh()
+        stopLiveScreen()
     }
 }
 

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -30,12 +31,12 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 @Composable
 fun PcControlPlanEditorUI(viewModel: PcControlViewModel) {
 
-    val plan          by viewModel.editingPlan.collectAsState()
-    val installedApps by viewModel.installedApps.collectAsState()
-    val drives        by viewModel.drives.collectAsState()
-    val dirItems      by viewModel.dirItems.collectAsState()
-    val currentPath   by viewModel.currentPath.collectAsState()
-    val isLoading     by viewModel.browseLoading.collectAsState()
+    val plan          by viewModel.editingPlan.collectAsStateWithLifecycle()
+    val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
+    val drives        by viewModel.drives.collectAsStateWithLifecycle()
+    val dirItems      by viewModel.dirItems.collectAsStateWithLifecycle()
+    val currentPath   by viewModel.currentPath.collectAsStateWithLifecycle()
+    val isLoading     by viewModel.browseLoading.collectAsStateWithLifecycle()
 
     var showAddStep      by remember { mutableStateOf(false) }
     var showAppPicker    by remember { mutableStateOf(false) }

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,8 +27,8 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
 fun PcControlPlansUI(viewModel: PcControlViewModel) {
 
     val plans            by viewModel.plans.observeAsState(emptyList())
-    val connectionStatus by viewModel.connectionStatus.collectAsState()
-    val uiState          by viewModel.uiState.collectAsState()
+    val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
+    val uiState          by viewModel.uiState.collectAsStateWithLifecycle()
     val isExecuting       = uiState is PcUiState.Loading
     val snackbarState     = remember { SnackbarHostState() }
 

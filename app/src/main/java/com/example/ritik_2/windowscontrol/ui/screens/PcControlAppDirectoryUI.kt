@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,10 +27,10 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 @Composable
 fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
 
-    val apps        by viewModel.filteredApps.collectAsState()
-    val recentPaths by viewModel.recentPaths.collectAsState()
-    val isLoading   by viewModel.browseLoading.collectAsState()
-    val searchQuery by viewModel.appSearchQuery.collectAsState()
+    val apps        by viewModel.filteredApps.collectAsStateWithLifecycle()
+    val recentPaths by viewModel.recentPaths.collectAsStateWithLifecycle()
+    val isLoading   by viewModel.browseLoading.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.appSearchQuery.collectAsStateWithLifecycle()
     var isRefreshing by remember { mutableStateOf(false) }
 
     Scaffold(

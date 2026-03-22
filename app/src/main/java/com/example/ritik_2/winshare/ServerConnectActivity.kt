@@ -18,6 +18,10 @@ class ServerConnectActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // enableEdgeToEdge lets the app draw behind status bar + navigation bar.
+        // WindowCompat.setDecorFitsSystemWindows(false) is called again inside
+        // ServerConnectScreen via SideEffect to control icon appearance per screen.
         enableEdgeToEdge()
 
         setContent {
@@ -47,6 +51,7 @@ class ServerConnectActivity : ComponentActivity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (!handleBackNavigation()) {
+            @Suppress("DEPRECATION")
             super.onBackPressed()
         }
     }

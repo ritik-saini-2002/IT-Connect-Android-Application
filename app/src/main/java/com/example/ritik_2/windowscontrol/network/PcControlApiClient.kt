@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
@@ -116,6 +117,17 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
             PcNetworkResult(true, Pair(w, h))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
+
+    /** Capture live screenshot — returns base64 JPEG */
+    suspend fun captureScreen(quality: Int = 25, scale: Int = 4): PcNetworkResult<String> {
+        val r = get("/screen/capture?q=$quality&s=$scale")
+        if (!r.success) return PcNetworkResult(false, error = r.error)
+        return try {
+            val map = gson.fromJson(r.data, Map::class.java)
+            val img = map["image"] as? String ?: return PcNetworkResult(false, error = "No image")
+            PcNetworkResult(true, img)
+        } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -203,4 +215,30 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
     /** Release held mouse button (end drag) */
     suspend fun mouseButtonUp() =
         post("/input/mouse/up", emptyMap<String, Any>())
+
+    /** Fetch compressed screenshot as base64 JPEG string */
+    suspend fun fetchScreenSnapshot(): PcNetworkResult<String> = withContext(Dispatchers.IO) {
+        try {
+            val resp = http.newCall(baseRequest("/screen/snapshot").get().build()).execute()
+            if (!resp.isSuccessful) return@withContext PcNetworkResult(false, error = "HTTP ${resp.code}")
+            val body = resp.body?.string() ?: return@withContext PcNetworkResult(false, error = "Empty")
+            val json = org.json.JSONObject(body)
+            if (!json.optBoolean("ok", false)) return@withContext PcNetworkResult(false, error = "Agent error")
+            PcNetworkResult(true, json.optString("data"))
+        } catch (e: Exception) {
+            PcNetworkResult(false, error = e.message)
+        }
+    }
+
+    /** Get cursor position and active window title */
+    suspend fun fetchScreenInfo(): PcNetworkResult<org.json.JSONObject> = withContext(Dispatchers.IO) {
+        try {
+            val resp = http.newCall(baseRequest("/screen/info").get().build()).execute()
+            if (!resp.isSuccessful) return@withContext PcNetworkResult(false, error = "HTTP ${resp.code}")
+            val body = resp.body?.string() ?: return@withContext PcNetworkResult(false, error = "Empty")
+            PcNetworkResult(true, org.json.JSONObject(body))
+        } catch (e: Exception) {
+            PcNetworkResult(false, error = e.message)
+        }
+    }
 }

@@ -7,13 +7,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcScreen
-import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
 
 // ─────────────────────────────────────────────────────────────
 //  PcControlMainScreen — Root screen with bottom nav
@@ -35,9 +37,9 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
         }
     }
 
-    val currentScreen by viewModel.currentScreen.collectAsState()
-    val editingPlan by viewModel.editingPlan.collectAsState()
-    val uiState by viewModel.uiState.collectAsState()
+    val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
+    val editingPlan by viewModel.editingPlan.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Show snackbar feedback
