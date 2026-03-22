@@ -1,16 +1,17 @@
 package com.example.ritik_2.windowscontrol
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.ritik_2.windowscontrol.data.PcControlDatabase
-import com.example.ritik_2.windowscontrol.data.PcControlRepository
 import com.example.ritik_2.windowscontrol.network.PcControlApiClient
 import com.example.ritik_2.windowscontrol.network.PcControlBrowseClient
-import com.example.ritik_2.windowscontrol.ui.screens.PcControlMainScreen
+import com.example.ritik_2.windowscontrol.data.PcControlDatabase
+import com.example.ritik_2.windowscontrol.data.PcControlRepository
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
+import com.example.ritik_2.windowscontrol.ui.screens.PcControlMainScreen
 
 // ─────────────────────────────────────────────────────────────
 //  PcControlMain — Single entry point for your major project

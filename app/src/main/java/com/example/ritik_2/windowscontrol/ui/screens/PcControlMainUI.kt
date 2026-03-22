@@ -7,7 +7,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -24,6 +23,17 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PcControlMainScreen(viewModel: PcControlViewModel) {
+    // Crash recovery wrapper — if any child crashes, return to PLANS screen
+    var crashRecovered by remember { mutableStateOf(false) }
+
+    if (crashRecovered) {
+        LaunchedEffect(Unit) {
+            viewModel.navigateTo(com.example.ritik_2.windowscontrol.viewmodel.PcScreen.PLANS)
+            viewModel.cancelEdit()
+            viewModel.resetUiState()
+            crashRecovered = false
+        }
+    }
 
     val currentScreen by viewModel.currentScreen.collectAsState()
     val editingPlan by viewModel.editingPlan.collectAsState()

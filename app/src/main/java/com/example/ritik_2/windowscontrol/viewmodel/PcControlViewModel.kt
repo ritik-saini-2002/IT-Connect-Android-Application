@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.*
 import com.example.ritik_2.windowscontrol.PcControlMain
 import com.example.ritik_2.windowscontrol.PcControlSettings
+import com.example.ritik_2.windowscontrol.data.PcControlRepository
 import com.example.ritik_2.windowscontrol.data.PcDrive
 import com.example.ritik_2.windowscontrol.data.PcFileFilter
 import com.example.ritik_2.windowscontrol.data.PcFileItem
@@ -11,7 +12,12 @@ import com.example.ritik_2.windowscontrol.data.PcInstalledApp
 import com.example.ritik_2.windowscontrol.data.PcPlan
 import com.example.ritik_2.windowscontrol.data.PcRecentPath
 import com.example.ritik_2.windowscontrol.data.PcStep
+import com.example.ritik_2.windowscontrol.data.PcStepSerializer
+import com.example.ritik_2.windowscontrol.network.PcControlApiClient
+import com.example.ritik_2.windowscontrol.network.PcControlBrowseClient
 import com.example.ritik_2.windowscontrol.network.PcControlInputClient
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -47,6 +53,9 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         ?: throw IllegalStateException("PcControlMain.init() not called")
 
     private val input = PcControlInputClient(PcControlMain.getSettings())
+
+    // ── Real-time refresh job ─────────────────────────────
+    private var realTimeRefreshJob: Job? = null
 
     // ── Plans ─────────────────────────────
     val plans: LiveData<List<PcPlan>> = repo.allPlans.asLiveData()
@@ -157,25 +166,43 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     // ─────────────────────────────────────
 
     fun startNewPlan() {
+        // Just set editingPlan — MainUI shows editor when editingPlan != null
         _editingPlan.value = PcPlan(
-            planId = UUID.randomUUID().toString(),
-            planName = "", icon = "⚡", steps = emptyList()
+            planId   = UUID.randomUUID().toString(),
+            planName = "",
+            icon     = "⚡",
+            stepsJson = "[]"
         )
-        navigateTo(PcScreen.PLANS)
+        // Do NOT navigate — editor overlay is shown by MainUI when editingPlan != null
     }
 
-    fun startEditPlan(plan: PcPlan) { _editingPlan.value = plan.copy() }
+    fun startEditPlan(plan: PcPlan) {
+        _editingPlan.value = plan.copy()
+        navigateTo(PcScreen.PLANS) // Ensure we're on plans tab so editor overlay shows
+    }
 
-    fun cancelEdit() { _editingPlan.value = null }
+    fun cancelEdit() {
+        _editingPlan.value = null
+        navigateTo(PcScreen.PLANS)
+    }
 
     fun updateEditingPlan(plan: PcPlan) { _editingPlan.value = plan }
 
     fun savePlan() {
         val plan = _editingPlan.value ?: return
+        if (plan.planName.isBlank()) {
+            _uiState.value = PcUiState.Error("Please enter a plan name")
+            return
+        }
+        if (plan.steps.isEmpty()) {
+            _uiState.value = PcUiState.Error("Add at least one step")
+            return
+        }
         viewModelScope.launch {
             repo.insertPlan(plan)
             _editingPlan.value = null
-            _uiState.value = PcUiState.Success("Plan saved!")
+            navigateTo(PcScreen.PLANS)
+            _uiState.value = PcUiState.Success("✅ '${plan.planName}' saved!")
         }
     }
 
@@ -185,13 +212,39 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun addStep(step: PcStep) {
         val current = _editingPlan.value ?: return
-        _editingPlan.value = current.copy(steps = current.steps + step)
+        val newSteps = current.steps + step
+        _editingPlan.value = current.copy(
+            stepsJson = PcStepSerializer.toJson(newSteps)
+        )
     }
 
     fun removeStep(index: Int) {
         val current = _editingPlan.value ?: return
+        if (index < 0 || index >= current.steps.size) return
+        val newSteps = current.steps.toMutableList().also { it.removeAt(index) }
         _editingPlan.value = current.copy(
-            steps = current.steps.toMutableList().also { it.removeAt(index) }
+            stepsJson = PcStepSerializer.toJson(newSteps)
+        )
+    }
+
+    fun reorderSteps(fromIndex: Int, toIndex: Int) {
+        val current = _editingPlan.value ?: return
+        val steps = current.steps.toMutableList()
+        if (fromIndex < 0 || toIndex < 0 || fromIndex >= steps.size || toIndex >= steps.size) return
+        val step = steps.removeAt(fromIndex)
+        steps.add(toIndex, step)
+        _editingPlan.value = current.copy(
+            stepsJson = PcStepSerializer.toJson(steps)
+        )
+    }
+
+    fun duplicateStep(index: Int) {
+        val current = _editingPlan.value ?: return
+        if (index < 0 || index >= current.steps.size) return
+        val steps = current.steps.toMutableList()
+        steps.add(index + 1, steps[index].copy())
+        _editingPlan.value = current.copy(
+            stepsJson = PcStepSerializer.toJson(steps)
         )
     }
 
@@ -281,6 +334,58 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun sendText(text: String) {
         viewModelScope.launch { input.typeText(text) }
+    }
+
+    fun sendMouseButtonDown(button: String = "left") {
+        viewModelScope.launch { input.mouseButtonDown(button) }
+    }
+
+    fun sendMouseButtonUp() {
+        viewModelScope.launch { input.mouseButtonUp() }
+    }
+
+    fun sendWinR(command: String = "") {
+        viewModelScope.launch {
+            if (command.isEmpty()) input.pressKey("WIN+R")
+            else api.executeQuickStep(
+                com.example.ritik_2.windowscontrol.data.PcStep("SYSTEM_CMD", "WIN_R", args = listOf(command))
+            )
+        }
+    }
+
+    // ─────────────────────────────────────
+    //  REAL-TIME REFRESH
+    // ─────────────────────────────────────
+
+    fun startRealTimeRefresh(intervalMs: Long = 3000L) {
+        realTimeRefreshJob?.cancel()
+        realTimeRefreshJob = viewModelScope.launch {
+            while (true) {
+                delay(intervalMs)
+                if (_connectionStatus.value == PcConnectionStatus.ONLINE) {
+                    // Silently refresh running process state in app list
+                    try {
+                        val procs = api.getProcesses()
+                        if (procs.success) {
+                            val running = procs.data?.map { it.lowercase() }?.toSet() ?: emptySet()
+                            _installedApps.value = _installedApps.value.map { app ->
+                                app.copy(isRunning = running.any { r -> r in app.exePath.lowercase() })
+                            }
+                        }
+                    } catch (_: Exception) { /* ignore silent refresh errors */ }
+                }
+            }
+        }
+    }
+
+    fun stopRealTimeRefresh() {
+        realTimeRefreshJob?.cancel()
+        realTimeRefreshJob = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopRealTimeRefresh()
     }
 }
 

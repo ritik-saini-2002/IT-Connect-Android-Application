@@ -158,7 +158,7 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                     Text("ℹ️ About pccontrol Package",
                         fontWeight = FontWeight.Bold)
                     Text("Version: 1.0.0", style = MaterialTheme.typography.bodySmall)
-                    Text("Package: com.yourapp.pccontrol",
+                    Text("Package: com.example.ritik_2.windowscontrol",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Embed: PcControlMain.init(ctx, ip) → PcControlEntry()",

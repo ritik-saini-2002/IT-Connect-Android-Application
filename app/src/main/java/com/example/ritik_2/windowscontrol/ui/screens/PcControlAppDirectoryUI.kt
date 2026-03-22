@@ -1,7 +1,6 @@
 package com.example.ritik_2.windowscontrol.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -23,27 +22,25 @@ import com.example.ritik_2.windowscontrol.data.PcRecentPath
 import com.example.ritik_2.windowscontrol.data.PcStep
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 
-// ─────────────────────────────────────────────────────────────
-//  PcControlAppDirectoryUI — Browse all installed PC apps
-// ─────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
 
-    val apps by viewModel.filteredApps.collectAsState()
+    val apps        by viewModel.filteredApps.collectAsState()
     val recentPaths by viewModel.recentPaths.collectAsState()
-    val isLoading by viewModel.browseLoading.collectAsState()
+    val isLoading   by viewModel.browseLoading.collectAsState()
     val searchQuery by viewModel.appSearchQuery.collectAsState()
-
-    // Callback for when an app is picked (for plan builder use)
+    var isRefreshing by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("📦 App Directory", fontWeight = FontWeight.Bold) },
                 actions = {
-                    IconButton(onClick = { viewModel.loadInstalledApps() }) {
+                    IconButton(onClick = {
+                        isRefreshing = true
+                        viewModel.loadInstalledApps()
+                    }) {
                         Icon(Icons.Default.Refresh, "Refresh")
                     }
                 },
@@ -54,9 +51,7 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
         }
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+            modifier = Modifier.fillMaxSize().padding(padding)
         ) {
             // Search bar
             OutlinedTextField(
@@ -66,7 +61,7 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 placeholder = { Text("Search installed apps...") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
+                leadingIcon  = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { viewModel.setAppSearchQuery("") }) {
@@ -78,11 +73,34 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                 singleLine = true
             )
 
+            // Loading indicator
             if (isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        CircularProgressIndicator()
-                        Text("Loading apps from PC...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LaunchedEffect(Unit) { isRefreshing = false }
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            // Empty state
+            if (apps.isEmpty() && !isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("📭", fontSize = 48.sp)
+                        Text(
+                            if (searchQuery.isNotEmpty()) "No apps match \"$searchQuery\""
+                            else "No apps found.\nMake sure agent_v3.py is running.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        if (searchQuery.isEmpty()) {
+                            Button(onClick = { viewModel.loadInstalledApps() }) {
+                                Text("Retry")
+                            }
+                        }
                     }
                 }
                 return@Scaffold
@@ -92,25 +110,22 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-
-                // Recently used section
-                if (recentPaths.isNotEmpty() && searchQuery.isEmpty()) {
+                // Recently used
+                val recentApps = recentPaths.filter { it.isApp }
+                if (recentApps.isNotEmpty() && searchQuery.isEmpty()) {
                     item {
                         Text(
                             "🕐 RECENTLY USED",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                            modifier = Modifier.padding(bottom = 4.dp)
                         )
                     }
                     item {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        ) {
-                            items(recentPaths.filter { it.isApp }) { recent ->
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(recentApps) { recent ->
                                 PcRecentChip(
-                                    recent = recent,
+                                    recent  = recent,
                                     onClick = {
                                         viewModel.executeQuickStep(
                                             PcStep("LAUNCH_APP", recent.path)
@@ -120,10 +135,11 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                             }
                         }
                     }
+                    item { Spacer(Modifier.height(4.dp)) }
                 }
 
-                // Running apps first
-                val running = apps.filter { it.isRunning }
+                // Running apps section
+                val running    = apps.filter { it.isRunning }
                 val notRunning = apps.filter { !it.isRunning }
 
                 if (running.isNotEmpty() && searchQuery.isEmpty()) {
@@ -137,7 +153,7 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                     }
                     items(running, key = { "run_${it.exePath}" }) { app ->
                         PcAppItemCard(
-                            app = app,
+                            app      = app,
                             onLaunch = {
                                 viewModel.executeQuickStep(PcStep("LAUNCH_APP", app.exePath))
                             },
@@ -156,32 +172,14 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                     }
                 }
 
-                if (apps.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(48.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("📭", fontSize = 48.sp)
-                                Spacer(Modifier.height(8.dp))
-                                Text("No apps found", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text("Make sure agent.py is running on your PC",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                } else {
-                    items(notRunning, key = { it.exePath }) { app ->
-                        PcAppItemCard(
-                            app = app,
-                            onLaunch = {
-                                viewModel.executeQuickStep(PcStep("LAUNCH_APP", app.exePath))
-                            },
-                            onKill = null
-                        )
-                    }
+                items(notRunning, key = { it.exePath }) { app ->
+                    PcAppItemCard(
+                        app      = app,
+                        onLaunch = {
+                            viewModel.executeQuickStep(PcStep("LAUNCH_APP", app.exePath))
+                        },
+                        onKill = null
+                    )
                 }
 
                 item { Spacer(Modifier.height(80.dp)) }
@@ -211,7 +209,7 @@ fun PcAppItemCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // App icon bubble
+            // Icon with running indicator
             Box(
                 modifier = Modifier
                     .size(52.dp)
@@ -267,7 +265,9 @@ fun PcAppItemCard(
                 ) {
                     Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Run", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text("Run",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -282,9 +282,8 @@ fun PcAppItemCard(
 fun PcRecentChip(recent: PcRecentPath, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = Modifier
+        shape   = RoundedCornerShape(12.dp),
+        color   = MaterialTheme.colorScheme.secondaryContainer
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),

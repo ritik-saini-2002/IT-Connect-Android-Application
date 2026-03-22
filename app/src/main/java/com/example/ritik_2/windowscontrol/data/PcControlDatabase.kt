@@ -30,11 +30,11 @@ interface PcPlanDao {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  DATABASE
+//  DATABASE — No @TypeConverters needed (stepsJson is plain String)
 // ─────────────────────────────────────────────────────────────
 
-@Database(entities = [PcPlan::class], version = 1, exportSchema = false)
-@TypeConverters(PcStepListConverter::class)
+@Database(entities = [PcPlan::class], version = 2, exportSchema = false)
+// ✅ No @TypeConverters annotation — PcPlan.stepsJson is a plain String column
 abstract class PcControlDatabase : RoomDatabase() {
     abstract fun planDao(): PcPlanDao
 
@@ -47,7 +47,10 @@ abstract class PcControlDatabase : RoomDatabase() {
                     context.applicationContext,
                     PcControlDatabase::class.java,
                     "pccontrol_database"
-                ).build().also { INSTANCE = it }
+                )
+                    .fallbackToDestructiveMigration() // version 1→2: old steps column gone
+                    .build()
+                    .also { INSTANCE = it }
             }
         }
     }
@@ -64,36 +67,37 @@ class PcControlRepository(private val dao: PcPlanDao) {
     suspend fun insertPlan(plan: PcPlan) = dao.insert(plan)
     suspend fun deletePlan(plan: PcPlan) = dao.delete(plan)
     suspend fun updatePlan(plan: PcPlan) = dao.update(plan)
-    suspend fun getPlanById(id: String) = dao.getById(id)
+    suspend fun getPlanById(id: String)  = dao.getById(id)
 
     suspend fun seedIfEmpty() {
         if (dao.count() > 0) return
+        // ✅ Use PcPlan.create() — not the constructor with steps = listOf(...)
         val samples = listOf(
-            PcPlan(
-                planId = "pc_sample_01",
+            PcPlan.create(
+                planId   = "pc_sample_01",
                 planName = "Play Movie",
-                icon = "🎬",
-                steps = listOf(
+                icon     = "🎬",
+                steps    = listOf(
                     PcStep("LAUNCH_APP", "vlc.exe", listOf("D:/Movies/movie.mp4")),
                     PcStep("WAIT", ms = 3000),
                     PcStep("KEY_PRESS", "F11")
                 )
             ),
-            PcPlan(
-                planId = "pc_sample_02",
+            PcPlan.create(
+                planId   = "pc_sample_02",
                 planName = "Start Presentation",
-                icon = "📊",
-                steps = listOf(
+                icon     = "📊",
+                steps    = listOf(
                     PcStep("LAUNCH_APP", "powerpnt.exe", listOf("D:/slides.pptx")),
                     PcStep("WAIT", ms = 4000),
                     PcStep("KEY_PRESS", "F5")
                 )
             ),
-            PcPlan(
-                planId = "pc_sample_03",
+            PcPlan.create(
+                planId   = "pc_sample_03",
                 planName = "Lock PC",
-                icon = "🔒",
-                steps = listOf(PcStep("SYSTEM_CMD", "LOCK"))
+                icon     = "🔒",
+                steps    = listOf(PcStep("SYSTEM_CMD", "LOCK"))
             )
         )
         samples.forEach { dao.insert(it) }

@@ -13,10 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ritik_2.windowscontrol.data.PcDrive
-import com.example.ritik_2.windowscontrol.data.PcFileFilter
-import com.example.ritik_2.windowscontrol.data.PcFileItem
-import com.example.ritik_2.windowscontrol.data.PcInstalledApp
+import com.example.ritik_2.windowscontrol.data.*
 
 // ─────────────────────────────────────────────────────────────
 //  PcAppPickerDialog — Search & pick installed PC app

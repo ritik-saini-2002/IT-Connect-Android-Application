@@ -1,17 +1,9 @@
 package com.example.ritik_2.windowscontrol.network
 
-import com.example.ritik_2.windowscontrol.PcControlSettings
-import com.example.ritik_2.windowscontrol.data.PcDrive
-import com.example.ritik_2.windowscontrol.data.PcExecuteResponse
-import com.example.ritik_2.windowscontrol.data.PcFileFilter
-import com.example.ritik_2.windowscontrol.data.PcFileItem
-import com.example.ritik_2.windowscontrol.data.PcInstalledApp
-import com.example.ritik_2.windowscontrol.data.PcNetworkResult
-import com.example.ritik_2.windowscontrol.data.PcPingResponse
-import com.example.ritik_2.windowscontrol.data.PcRecentPath
-import com.example.ritik_2.windowscontrol.data.PcStep
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.example.ritik_2.windowscontrol.PcControlSettings
+import com.example.ritik_2.windowscontrol.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
@@ -84,15 +76,25 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
     }
 
     suspend fun executePlan(plan: com.example.ritik_2.windowscontrol.data.PcPlan): PcNetworkResult<PcExecuteResponse> {
-        val result = post("/execute", plan)
+        // CRITICAL: Agent expects {"planName":"...", "steps":[{...},...]}
+        // PcPlan stores steps as stepsJson (String), so we must build the payload manually
+        val stepsArray = com.google.gson.JsonParser.parseString(plan.stepsJson).asJsonArray
+        val payload = com.google.gson.JsonObject().apply {
+            addProperty("planName", plan.planName)
+            add("steps", stepsArray)         // steps as real JSON array, not string
+        }
+        val result = post("/execute", payload)
         return if (result.success) {
             val r = gson.fromJson(result.data, PcExecuteResponse::class.java)
             PcNetworkResult(true, r)
         } else PcNetworkResult(false, error = result.error)
     }
 
-    suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> =
-        post("/quick", step)
+    suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> {
+        // Serialize PcStep directly — all fields map 1:1 to agent step format
+        val payload = gson.toJsonTree(step).asJsonObject
+        return post("/quick", payload)
+    }
 
     suspend fun getProcesses(): PcNetworkResult<List<String>> {
         val r = get("/processes")
@@ -193,4 +195,12 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
     /** Type a full string */
     suspend fun typeText(text: String) =
         post("/input/keyboard/type", mapOf("value" to text))
+
+    /** Hold mouse button down (start drag) */
+    suspend fun mouseButtonDown(button: String = "left") =
+        post("/input/mouse/down", mapOf("button" to button))
+
+    /** Release held mouse button (end drag) */
+    suspend fun mouseButtonUp() =
+        post("/input/mouse/up", emptyMap<String, Any>())
 }

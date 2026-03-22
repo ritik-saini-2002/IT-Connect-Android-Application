@@ -4,10 +4,6 @@ import androidx.room.*
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
-// ─────────────────────────────────────────────────────────────
-//  STEP — One action in a plan
-// ─────────────────────────────────────────────────────────────
-
 data class PcStep(
     val type: String,
     val value: String = "",
@@ -24,19 +20,18 @@ data class PcStep(
     val message: String = ""
 )
 
-// All step types with display info
 enum class PcStepType(val display: String, val icon: String, val description: String) {
-    LAUNCH_APP("Launch App",    "▶",  "Open any application"),
-    KILL_APP  ("Kill App",      "✖",  "Close a running process"),
-    KEY_PRESS ("Key Press",     "⌨",  "Press a key or shortcut"),
-    TYPE_TEXT ("Type Text",     "📝", "Type text on PC"),
-    MOUSE_CLICK("Mouse Click",  "🖱", "Click at screen position"),
-    MOUSE_MOVE ("Mouse Move",   "➡", "Move mouse to position"),
-    MOUSE_SCROLL("Scroll",      "🔄", "Scroll mouse wheel"),
-    RUN_SCRIPT("Run Script",    "📜", "Execute .py/.bat/.ps1"),
-    FILE_OP   ("File Operation","📁", "Copy/Move/Delete files"),
-    SYSTEM_CMD("System Command","⚙",  "Lock/Sleep/Volume etc"),
-    WAIT      ("Wait",          "⏱", "Pause between steps")
+    LAUNCH_APP  ("Launch App",     "▶",  "Open any application"),
+    KILL_APP    ("Kill App",       "✖",  "Close a running process"),
+    KEY_PRESS   ("Key Press",      "⌨",  "Press a key or shortcut"),
+    TYPE_TEXT   ("Type Text",      "📝", "Type text on PC"),
+    MOUSE_CLICK ("Mouse Click",    "🖱", "Click at screen position"),
+    MOUSE_MOVE  ("Mouse Move",     "➡", "Move mouse to position"),
+    MOUSE_SCROLL("Scroll",         "🔄", "Scroll mouse wheel"),
+    RUN_SCRIPT  ("Run Script",     "📜", "Execute .py/.bat/.ps1"),
+    FILE_OP     ("File Operation", "📁", "Copy/Move/Delete files"),
+    SYSTEM_CMD  ("System Command", "⚙",  "Lock/Sleep/Volume etc"),
+    WAIT        ("Wait",           "⏱", "Pause between steps")
 }
 
 val PC_COMMON_KEYS = listOf(
@@ -44,59 +39,65 @@ val PC_COMMON_KEYS = listOf(
     "ENTER","ESC","SPACE","TAB","BACKSPACE","DELETE",
     "UP","DOWN","LEFT","RIGHT","HOME","END","PAGE_UP","PAGE_DOWN",
     "CTRL+C","CTRL+V","CTRL+Z","CTRL+S","CTRL+A",
-    "ALT+F4","WIN+D","WIN+L"
+    "ALT+F4","ALT+TAB","WIN+D","WIN+L","WIN+R","WIN+E",
+    "WIN+TAB","WIN+I","WIN+A","WIN+S","CTRL+SHIFT+ESC"
 )
 
 val PC_SYSTEM_COMMANDS = listOf(
     "LOCK","SLEEP","SHUTDOWN","RESTART",
     "VOLUME_UP","VOLUME_DOWN","MUTE","VOLUME_SET",
-    "SCREENSHOT","OPEN_URL","OPEN_FOLDER"
+    "SCREENSHOT","OPEN_URL","OPEN_FOLDER","WIN_R",
+    "TASK_MANAGER","SETTINGS","CONTROL_PANEL"
 )
 
-val PC_FILE_ACTIONS = listOf("COPY","MOVE","DELETE","MKDIR")
+val PC_FILE_ACTIONS = listOf("COPY","MOVE","DELETE","MKDIR","RENAME")
 
-// ─────────────────────────────────────────────────────────────
-//  PLAN — A named sequence of steps
-// ─────────────────────────────────────────────────────────────
-
-class PcStepListConverter {
+// Plain object — no @TypeConverter, no Room annotations, zero conflict risk
+object PcStepSerializer {
     private val gson = Gson()
 
-    // Converts List<PcStep> → String (stored in DB)
-    // Named uniquely to avoid ANY conflict with StringListConverter or other converters
-    @TypeConverter
-    fun pcStepListToJsonString(steps: List<PcStep>): String =
-        gson.toJson(steps)
+    fun toJson(steps: List<PcStep>): String = gson.toJson(steps)
 
-    // Converts String → List<PcStep> (read from DB)
-    // Return type List<PcStep> is distinct from List<String> so Room treats them separately
-    @TypeConverter
-    fun jsonStringToPcStepList(json: String): List<PcStep> {
-        val type = object : com.google.gson.reflect.TypeToken<List<PcStep>>() {}.type
-        return gson.fromJson(json, type) ?: emptyList()
+    fun fromJson(json: String): List<PcStep> {
+        if (json.isBlank() || json == "[]") return emptyList()
+        return try {
+            val type = object : TypeToken<List<PcStep>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 }
 
+// PcPlan — steps stored as plain JSON String, no TypeConverter needed
 @Entity(tableName = "pc_plans")
-@TypeConverters(PcStepListConverter::class)
 data class PcPlan(
     @PrimaryKey val planId: String,
     val planName: String,
     val icon: String = "⚡",
-    val steps: List<PcStep> = emptyList(),
+    @ColumnInfo(name = "steps_json")
+    val stepsJson: String = "[]",
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    val steps: List<PcStep>
+        get() = PcStepSerializer.fromJson(stepsJson)
 
-// ─────────────────────────────────────────────────────────────
-//  BROWSE — PC file/app browser models
-// ─────────────────────────────────────────────────────────────
+    companion object {
+        fun create(
+            planId: String,
+            planName: String,
+            icon: String = "⚡",
+            steps: List<PcStep> = emptyList()
+        ) = PcPlan(
+            planId    = planId,
+            planName  = planName,
+            icon      = icon,
+            stepsJson = PcStepSerializer.toJson(steps)
+        )
+    }
+}
 
-data class PcDrive(
-    val letter: String,   // "C", "D"
-    val label: String,    // "Windows", "Data"
-    val freeGb: Float,
-    val totalGb: Float
-)
+data class PcDrive(val letter: String, val label: String, val freeGb: Float, val totalGb: Float)
 
 data class PcFileItem(
     val name: String,
@@ -113,18 +114,13 @@ data class PcInstalledApp(
     val isRunning: Boolean = false
 )
 
-// File filter types
 enum class PcFileFilter(val extensions: List<String>, val label: String) {
-    ALL(emptyList(), "All Files"),
-    MEDIA(listOf("mp4","mkv","avi","mp3","wav","flac","mov","wmv"), "Media"),
-    DOCS(listOf("pdf","docx","doc","pptx","ppt","xlsx","xls","txt"), "Documents"),
-    SCRIPTS(listOf("py","bat","ps1","sh","cmd"), "Scripts"),
-    IMAGES(listOf("jpg","jpeg","png","gif","bmp","webp"), "Images")
+    ALL    (emptyList(),                                           "All Files"),
+    MEDIA  (listOf("mp4","mkv","avi","mp3","wav","flac","mov"),   "Media"),
+    DOCS   (listOf("pdf","docx","doc","pptx","ppt","xlsx","txt"), "Documents"),
+    SCRIPTS(listOf("py","bat","ps1","sh","cmd"),                  "Scripts"),
+    IMAGES (listOf("jpg","jpeg","png","gif","bmp","webp"),        "Images")
 }
-
-// ─────────────────────────────────────────────────────────────
-//  RECENT PATH
-// ─────────────────────────────────────────────────────────────
 
 data class PcRecentPath(
     val path: String,
@@ -133,23 +129,9 @@ data class PcRecentPath(
     val icon: String = "📁"
 )
 
-// ─────────────────────────────────────────────────────────────
-//  NETWORK RESULTS
-// ─────────────────────────────────────────────────────────────
-
-data class PcNetworkResult<T>(
-    val success: Boolean,
-    val data: T? = null,
-    val error: String? = null
-)
-
+data class PcNetworkResult<T>(val success: Boolean, val data: T? = null, val error: String? = null)
 data class PcPingResponse(val status: String, val pc_name: String)
 data class PcExecuteResponse(val status: String, val plan: String? = null)
-
-// ─────────────────────────────────────────────────────────────
-//  INPUT — Mouse / Keyboard commands
-// ─────────────────────────────────────────────────────────────
-
 data class PcMouseDelta(val dx: Float, val dy: Float)
 data class PcMouseClick(val button: String = "left", val double: Boolean = false)
 data class PcMouseScroll(val amount: Int)
