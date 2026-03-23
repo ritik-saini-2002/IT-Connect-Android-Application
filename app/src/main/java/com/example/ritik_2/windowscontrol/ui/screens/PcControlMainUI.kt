@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcScreen
@@ -98,6 +99,7 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
 
 // ─────────────────────────────────────────────────────────────
 //  BOTTOM NAVIGATION
+//  Double-tap TOUCHPAD icon → opens KEYBOARD screen
 // ─────────────────────────────────────────────────────────────
 
 data class PcNavItem(
@@ -120,19 +122,44 @@ fun PcControlBottomNav(
     currentScreen: PcScreen,
     onNavigate: (PcScreen) -> Unit
 ) {
-    NavigationBar(
-        tonalElevation = 8.dp
-    ) {
+    // Track last tap time for double-tap detection on touchpad icon
+    var lastTouchpadTap by remember { mutableLongStateOf(0L) }
+
+    NavigationBar(tonalElevation = 8.dp) {
         navItems.forEach { item ->
             val selected = currentScreen == item.screen
             NavigationBarItem(
                 selected = selected,
-                onClick = { onNavigate(item.screen) },
+                onClick = {
+                    if (item.screen == PcScreen.TOUCHPAD) {
+                        val now = System.currentTimeMillis()
+                        if (selected && now - lastTouchpadTap < 400L) {
+                            // Double-tap on Touchpad icon → go to Keyboard
+                            onNavigate(PcScreen.KEYBOARD)
+                        } else {
+                            onNavigate(item.screen)
+                        }
+                        lastTouchpadTap = now
+                    } else {
+                        onNavigate(item.screen)
+                    }
+                },
                 icon = {
-                    Icon(
-                        imageVector = if (selected) item.selectedIcon else item.icon,
-                        contentDescription = item.label
-                    )
+                    // Touchpad icon shows keyboard hint when already selected
+                    if (item.screen == PcScreen.TOUCHPAD && selected) {
+                        BadgedBox(badge = {
+                            Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                Text("⌨", fontSize = 7.sp)
+                            }
+                        }) {
+                            Icon(item.selectedIcon, item.label)
+                        }
+                    } else {
+                        Icon(
+                            if (selected) item.selectedIcon else item.icon,
+                            item.label
+                        )
+                    }
                 },
                 label = {
                     Text(

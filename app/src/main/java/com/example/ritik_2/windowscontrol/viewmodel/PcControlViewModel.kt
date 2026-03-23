@@ -310,6 +310,55 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun setAppSearchQuery(q: String) { _appSearchQuery.value = q }
 
+    /**
+     * Load ONLY currently running processes from PC taskbar.
+     * Shows what is open right now — not installed apps.
+     */
+    fun loadRunningApps() {
+        viewModelScope.launch {
+            _browseLoading.value = true
+            try {
+                val r = api.getProcesses()
+                if (r.success) {
+                    val running = r.data ?: emptyList()
+                    _installedApps.value = running
+                        .filter { it.isNotBlank() && !it.startsWith("[") }
+                        .map { procName ->
+                            val n = procName.lowercase()
+                            val icon = when {
+                                "chrome"   in n -> "🌐"
+                                "firefox"  in n -> "🦊"
+                                "vlc"      in n -> "🎬"
+                                "spotify"  in n -> "🎵"
+                                "code"     in n -> "💻"
+                                "word"     in n -> "📝"
+                                "excel"    in n -> "📗"
+                                "powerpnt" in n -> "📊"
+                                "teams"    in n -> "💬"
+                                "zoom"     in n -> "📹"
+                                "notepad"  in n -> "📄"
+                                "explorer" in n -> "📁"
+                                "studio"   in n -> "🤖"
+                                else            -> "⚙️"
+                            }
+                            PcInstalledApp(
+                                name      = procName.replace(".exe", "", ignoreCase = true),
+                                exePath   = procName, // process name used for kill
+                                icon      = icon,
+                                isRunning = true
+                            )
+                        }
+                        .distinctBy { it.name.lowercase() }
+                        .sortedBy   { it.name.lowercase() }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "loadRunningApps: ${e.message}")
+            } finally {
+                _browseLoading.value = false
+            }
+        }
+    }
+
     // ─────────────────────────────────────
     //  BROWSE — FILES
     // ─────────────────────────────────────
@@ -327,13 +376,37 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun browseDir(path: String, filter: PcFileFilter = PcFileFilter.ALL) {
         viewModelScope.launch {
-            _browseLoading.value = true
-            if (_currentPath.value.isNotEmpty()) pathStack.addLast(_currentPath.value)
-            _currentPath.value = path
-            val r = browse.browseDir(path, filter)
-            if (r.success) _dirItems.value = r.data ?: emptyList()
-            else _uiState.value = PcUiState.Error("Cannot open: ${r.error}")
-            _browseLoading.value = false
+            try {
+                _browseLoading.value = true
+                // If navigating to a drive root (e.g. C:/ D:/) reset the stack
+                val isDriveRoot = path.matches(Regex("[A-Za-z]:[/\\\\]?"))
+                if (isDriveRoot) {
+                    pathStack.clear()
+                } else if (_currentPath.value.isNotEmpty()) {
+                    pathStack.addLast(_currentPath.value)
+                }
+                _currentPath.value = path
+                _dirItems.value = emptyList() // clear immediately so UI doesn't show stale
+                val r = browse.browseDir(path, filter)
+                if (r.success) {
+                    _dirItems.value = r.data ?: emptyList()
+                } else {
+                    _uiState.value = PcUiState.Error("Cannot open: ${r.error}")
+                    // Go back if error
+                    if (pathStack.isNotEmpty()) {
+                        _currentPath.value = pathStack.removeLast()
+                    } else {
+                        _currentPath.value = ""
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "browseDir crash: ${e.message}", e)
+                _uiState.value = PcUiState.Error("Error: ${e.message}")
+                _currentPath.value = ""
+                pathStack.clear()
+            } finally {
+                _browseLoading.value = false
+            }
         }
     }
 
@@ -352,8 +425,18 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun loadRecentPaths() {
         viewModelScope.launch {
-            val r = browse.getRecentPaths()
-            if (r.success) _recentPaths.value = r.data ?: emptyList()
+            try {
+                val r = browse.getRecentPaths()
+                if (r.success) {
+                    // Filter out empty or invalid paths to prevent crash
+                    _recentPaths.value = (r.data ?: emptyList())
+                        .filter { it.path.isNotBlank() && it.label.isNotBlank() }
+                        .take(15)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "loadRecentPaths error: ${e.message}")
+                _recentPaths.value = emptyList()
+            }
         }
     }
 

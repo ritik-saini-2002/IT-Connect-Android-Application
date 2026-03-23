@@ -71,33 +71,103 @@ class PcControlRepository(private val dao: PcPlanDao) {
 
     suspend fun seedIfEmpty() {
         if (dao.count() > 0) return
-        // ✅ Use PcPlan.create() — not the constructor with steps = listOf(...)
         val samples = listOf(
+
+            // ── Default System Plans ────────────────────────
+
             PcPlan.create(
-                planId   = "pc_sample_01",
-                planName = "Play Movie",
-                icon     = "🎬",
-                steps    = listOf(
-                    PcStep("LAUNCH_APP", "vlc.exe", listOf("D:/Movies/movie.mp4")),
-                    PcStep("WAIT", ms = 3000),
-                    PcStep("KEY_PRESS", "F11")
-                )
-            ),
-            PcPlan.create(
-                planId   = "pc_sample_02",
-                planName = "Start Presentation",
-                icon     = "📊",
-                steps    = listOf(
-                    PcStep("LAUNCH_APP", "powerpnt.exe", listOf("D:/slides.pptx")),
-                    PcStep("WAIT", ms = 4000),
-                    PcStep("KEY_PRESS", "F5")
-                )
-            ),
-            PcPlan.create(
-                planId   = "pc_sample_03",
+                planId   = "sys_lock",
                 planName = "Lock PC",
                 icon     = "🔒",
                 steps    = listOf(PcStep("SYSTEM_CMD", "LOCK"))
+            ),
+            PcPlan.create(
+                planId   = "sys_sleep",
+                planName = "Sleep PC",
+                icon     = "😴",
+                steps    = listOf(PcStep("SYSTEM_CMD", "SLEEP"))
+            ),
+            PcPlan.create(
+                planId   = "sys_shutdown",
+                planName = "Shutdown",
+                icon     = "⏻",
+                steps    = listOf(PcStep("SYSTEM_CMD", "SHUTDOWN"))
+            ),
+            PcPlan.create(
+                planId   = "sys_restart",
+                planName = "Restart",
+                icon     = "🔄",
+                steps    = listOf(PcStep("SYSTEM_CMD", "RESTART"))
+            ),
+
+            // ── Wake + Login ────────────────────────────────
+
+            PcPlan.create(
+                planId   = "sys_wake",
+                planName = "Wake Screen",
+                icon     = "☀️",
+                steps    = listOf(
+                    PcStep("SYSTEM_CMD", "WAKE_SCREEN"),  // wakes from sleep
+                    PcStep("WAIT", ms = 1000),
+                    PcStep("KEY_PRESS", "ENTER")           // dismiss lock screen
+                )
+            ),
+            PcPlan.create(
+                planId   = "sys_unlock",
+                planName = "Wake + Enter Password",
+                icon     = "🔑",
+                steps    = listOf(
+                    PcStep("SYSTEM_CMD", "WAKE_SCREEN"),
+                    PcStep("WAIT", ms = 1500),
+                    PcStep("MOUSE_CLICK", x = 0, y = 0),  // click center to focus
+                    PcStep("WAIT", ms = 300),
+                    PcStep("TYPE_TEXT", value = ""),       // ← user edits this: enter password
+                    PcStep("KEY_PRESS", "ENTER")
+                )
+            ),
+
+            // ── Media Plans ─────────────────────────────────
+
+            PcPlan.create(
+                planId   = "media_movie",
+                planName = "Movie Night (VLC)",
+                icon     = "🎬",
+                steps    = listOf(
+                    PcStep("LAUNCH_APP", "vlc.exe"),
+                    PcStep("WAIT", ms = 2000),
+                    PcStep("KEY_PRESS", "F11")             // fullscreen
+                )
+            ),
+            PcPlan.create(
+                planId   = "media_ppt",
+                planName = "Start Presentation",
+                icon     = "📊",
+                steps    = listOf(
+                    PcStep("LAUNCH_APP", "powerpnt.exe"),
+                    PcStep("WAIT", ms = 4000),
+                    PcStep("KEY_PRESS", "F5")              // slideshow
+                )
+            ),
+
+            // ── Productivity ─────────────────────────────────
+
+            PcPlan.create(
+                planId   = "prod_screenshot",
+                planName = "Screenshot",
+                icon     = "📸",
+                steps    = listOf(PcStep("SYSTEM_CMD", "SCREENSHOT"))
+            ),
+            PcPlan.create(
+                planId   = "prod_mute",
+                planName = "Toggle Mute",
+                icon     = "🔇",
+                steps    = listOf(PcStep("SYSTEM_CMD", "MUTE"))
+            ),
+            PcPlan.create(
+                planId   = "prod_desktop",
+                planName = "Show Desktop",
+                icon     = "🖥️",
+                steps    = listOf(PcStep("KEY_PRESS", "WIN+D"))
             )
         )
         samples.forEach { dao.insert(it) }

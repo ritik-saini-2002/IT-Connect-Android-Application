@@ -31,16 +31,30 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
     val recentPaths by viewModel.recentPaths.collectAsStateWithLifecycle()
     val isLoading   by viewModel.browseLoading.collectAsStateWithLifecycle()
     val searchQuery by viewModel.appSearchQuery.collectAsStateWithLifecycle()
-    var isRefreshing by remember { mutableStateOf(false) }
+    var showRunning  by remember { mutableStateOf(false) }
+
+    // Load running apps when tab selected
+    LaunchedEffect(showRunning) {
+        if (showRunning) viewModel.loadRunningApps()
+        else viewModel.loadInstalledApps()
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("📦 App Directory", fontWeight = FontWeight.Bold) },
+                title = { Text("📦 Apps", fontWeight = FontWeight.Bold) },
                 actions = {
+                    // Toggle: Running (taskbar) vs All installed
+                    FilterChip(
+                        selected = showRunning,
+                        onClick  = { showRunning = !showRunning },
+                        label    = { Text(if (showRunning) "● Running" else "All Apps",
+                            style = MaterialTheme.typography.labelSmall) },
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
                     IconButton(onClick = {
-                        isRefreshing = true
-                        viewModel.loadInstalledApps()
+                        if (showRunning) viewModel.loadRunningApps()
+                        else viewModel.loadInstalledApps()
                     }) {
                         Icon(Icons.Default.Refresh, "Refresh")
                     }
@@ -76,7 +90,6 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
 
             // Loading indicator
             if (isLoading) {
-                LaunchedEffect(Unit) { isRefreshing = false }
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
@@ -159,7 +172,9 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                                 viewModel.executeQuickStep(PcStep("LAUNCH_APP", app.exePath))
                             },
                             onKill = {
-                                viewModel.executeQuickStep(PcStep("KILL_APP", app.name))
+                                // For running apps, kill by process name (exePath = process name)
+                                val killName = if (showRunning) app.exePath else app.name
+                                viewModel.executeQuickStep(PcStep("KILL_APP", killName))
                             }
                         )
                     }
