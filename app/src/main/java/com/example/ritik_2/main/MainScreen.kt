@@ -261,7 +261,7 @@ fun StatItem(value: Int, label: String, icon: ImageVector) {
 fun FeatureGrid(onCardClick: (Int) -> Unit) {
     val features = listOf(
         FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem, MaterialTheme.colorScheme.error),
-        FeatureItem(2, "View Complaints", Icons.Outlined.List, MaterialTheme.colorScheme.secondary),
+        FeatureItem(2, "Manage Complaints", Icons.Outlined.List, MaterialTheme.colorScheme.secondary),
         FeatureItem(3, "Administrator Panel", Icons.Outlined.NewReleases, Color(0xFFFF6F00)),
         FeatureItem(4, "Server Connect", Icons.Outlined.Code, Color(0xFF6200EA)),
         FeatureItem(5, "Knowledge Base", Icons.Outlined.MenuBook, Color(0xFF00796B)),

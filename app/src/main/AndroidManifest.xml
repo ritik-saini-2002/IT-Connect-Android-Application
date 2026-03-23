@@ -148,6 +148,10 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
+        <activity android:name=".complaint.newcomplaintmodel.ComplaintManagementActivity"
+            android:exported="false"
+            android:theme="@style/Base.Theme.Ritik_2"/>
+
         <!-- ── Dev / Test ─────────────────────────────────── -->
         <activity
             android:name=".researchanddevelopment.Test"
