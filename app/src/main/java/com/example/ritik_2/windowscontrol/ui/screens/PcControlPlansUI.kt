@@ -30,17 +30,17 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
     val uiState          by viewModel.uiState.collectAsStateWithLifecycle()
     val isExecuting       = uiState is PcUiState.Loading
-    val snackbarState     = remember { SnackbarHostState() }
-
-    // Show feedback snackbar
+    // Simple feedback — no snackbar (MainUI already handles global snackbar)
+    // Show inline toast using Toast directly
+    val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(uiState) {
         when (val s = uiState) {
             is PcUiState.Success -> {
-                snackbarState.showSnackbar(s.message)
+                android.widget.Toast.makeText(context, s.message, android.widget.Toast.LENGTH_SHORT).show()
                 viewModel.resetUiState()
             }
             is PcUiState.Error -> {
-                snackbarState.showSnackbar(s.message)
+                android.widget.Toast.makeText(context, s.message, android.widget.Toast.LENGTH_SHORT).show()
                 viewModel.resetUiState()
             }
             else -> {}
@@ -48,7 +48,6 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarState) },
         topBar = {
             TopAppBar(
                 title = { Text("⚡ My Plans", fontWeight = FontWeight.Bold) },
@@ -60,7 +59,7 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
                     Spacer(Modifier.width(4.dp))
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
             )
         },

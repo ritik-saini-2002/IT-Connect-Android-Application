@@ -1,20 +1,25 @@
 package com.example.ritik_2.windowscontrol.ui.screens
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
+import androidx.compose.foundation.pager.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ritik_2.windowscontrol.data.PcStep
@@ -23,550 +28,348 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+enum class KeyColor { NORMAL, SPECIAL, WIN, ALT, DANGER, MEDIA }
+
 // ─────────────────────────────────────────────────────────────
-//  PcControlKeyboardUI v2
-//  - Win key section added
-//  - WIN+R, WIN+L, WIN+D, WIN+E, WIN+Tab
-//  - Multi-key combos: Ctrl+Alt+Del simulation
-//  - Alt key section (Alt+Tab, Alt+F4)
-//  - Long press on key = hold key (for combos)
-//  - Landscape layout
+//  PcControlKeyboardUI v3
+//  - Swipe left/right to switch between tabs
+//  - Large buttons (56dp height)
+//  - Win+L uses SYSTEM_CMD:LOCK (not key shortcut)
+//  - Tabs: Navigation | Windows | Shortcuts | Alt | System | F-Keys
 // ─────────────────────────────────────────────────────────────
 
-// Key data class
-data class PcKeyData(
-    val label: String,
-    val keyValue: String,
-    val subtitle: String = "",
-    val isSpecial: Boolean = false,
-    val isWide: Boolean = false,
-    val widthWeight: Float = 1f,
-    val color: KeyColor = KeyColor.NORMAL
-)
-
-enum class KeyColor { NORMAL, SPECIAL, WIN, ALT, DANGER }
-
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PcControlKeyboardUI(viewModel: PcControlViewModel) {
 
-    val configuration = LocalConfiguration.current
-    val isLandscape   = configuration.screenWidthDp > configuration.screenHeightDp
-    var typeText      by remember { mutableStateOf("") }
-    var lastAction    by remember { mutableStateOf("") }
-    var activeTab     by remember { mutableIntStateOf(0) }
+    var typeText   by remember { mutableStateOf("") }
+    var lastAction by remember { mutableStateOf("") }
+    val tabs = listOf("Navigation", "Windows", "Shortcuts", "Alt", "System", "F-Keys")
+    val pagerState = rememberPagerState(pageCount = { tabs.size })
+    val scope = rememberCoroutineScope()
 
-    val tabs = listOf("F-Keys", "Shortcuts", "Win", "Alt", "Nav", "System")
+    val topBg = MaterialTheme.colorScheme.surface
+    val tabSelected = MaterialTheme.colorScheme.primary
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("⌨️ Keyboard", fontWeight = FontWeight.Bold) },
-                actions = {
-                    TextButton(onClick = { viewModel.navigateTo(PcScreen.TOUCHPAD) }) {
-                        Icon(Icons.Default.Mouse, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Pad", style = MaterialTheme.typography.labelMedium)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            )
-        }
-    ) { padding ->
-        if (isLandscape) {
-            Row(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                horizontalArrangement = Arrangement.spacedBy(0.dp)
-            ) {
-                // Left: type bar + tab list
-                Column(
-                    modifier = Modifier.width(140.dp).fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    OutlinedTextField(
-                        value = typeText,
-                        onValueChange = { typeText = it },
-                        placeholder = { Text("Type...", style = MaterialTheme.typography.bodySmall) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall
-                    )
-                    Button(
-                        onClick = {
-                            if (typeText.isNotEmpty()) {
-                                viewModel.sendText(typeText)
-                                lastAction = "Sent: \"${typeText.take(20)}\""
-                                typeText = ""
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        enabled = typeText.isNotEmpty(),
-                        contentPadding = PaddingValues(4.dp)
-                    ) { Text("Send ↵", style = MaterialTheme.typography.labelSmall) }
-
-                    HorizontalDivider()
-
-                    tabs.forEachIndexed { i, tab ->
-                        Surface(
-                            onClick = { activeTab = i },
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (activeTab == i) MaterialTheme.colorScheme.primaryContainer
-                            else Color.Transparent,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                tab,
-                                modifier = Modifier.padding(8.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = if (activeTab == i) FontWeight.Bold else FontWeight.Normal,
-                                color = if (activeTab == i) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    if (lastAction.isNotEmpty()) {
-                        HorizontalDivider()
-                        Text(
-                            "✓ $lastAction",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
-                // Right: key grid
-                Box(modifier = Modifier.weight(1f).fillMaxHeight().padding(12.dp)) {
-                    KeyTabContent(
-                        activeTab = activeTab,
-                        viewModel = viewModel,
-                        onAction = { lastAction = it }
-                    )
-                }
-            }
-        } else {
-            // Portrait
             Column(
-                modifier = Modifier.fillMaxSize().padding(padding)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
             ) {
-                // Type bar
+                // Type + send bar
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp, 12.dp, 12.dp, 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedTextField(
-                        value = typeText,
+                        value         = typeText,
                         onValueChange = { typeText = it },
-                        placeholder = { Text("Type text to send to PC...") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        singleLine = true
+                        placeholder   = { Text("Type text to send…", style = MaterialTheme.typography.bodySmall) },
+                        modifier      = Modifier.weight(1f),
+                        shape         = RoundedCornerShape(12.dp),
+                        singleLine    = true
                     )
-                    Button(
+                    FilledTonalButton(
                         onClick = {
                             if (typeText.isNotEmpty()) {
                                 viewModel.sendText(typeText)
-                                lastAction = "Sent: \"${typeText.take(20)}\""
+                                lastAction = "Sent: ${typeText.take(20)}"
                                 typeText = ""
                             }
                         },
                         enabled = typeText.isNotEmpty(),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.height(56.dp)
-                    ) { Icon(Icons.Default.Send, null) }
+                        shape   = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Send, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Send")
+                    }
+                    IconButton(onClick = { viewModel.navigateTo(PcScreen.TOUCHPAD) }) {
+                        Icon(Icons.Default.Mouse, null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 if (lastAction.isNotEmpty()) {
                     Text(
                         "✓ $lastAction",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
+                        modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 4.dp),
+                        style    = MaterialTheme.typography.bodySmall,
+                        color    = MaterialTheme.colorScheme.primary
                     )
                 }
 
-                // Tabs
+                // Scrollable tab row
                 ScrollableTabRow(
-                    selectedTabIndex = activeTab,
-                    modifier = Modifier.fillMaxWidth(),
-                    edgePadding = 8.dp
+                    selectedTabIndex = pagerState.currentPage,
+                    edgePadding      = 8.dp,
+                    divider          = {},
+                    indicator        = { tabPositions ->
+                        if (pagerState.currentPage < tabPositions.size) {
+                            TabRowDefaults.SecondaryIndicator(
+                                Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
+                                color = tabSelected
+                            )
+                        }
+                    }
                 ) {
                     tabs.forEachIndexed { i, tab ->
                         Tab(
-                            selected = activeTab == i,
-                            onClick  = { activeTab = i },
-                            text     = { Text(tab, style = MaterialTheme.typography.labelMedium) }
+                            selected = pagerState.currentPage == i,
+                            onClick  = { scope.launch { pagerState.animateScrollToPage(i) } },
+                            text     = {
+                                Text(
+                                    tab,
+                                    fontWeight = if (pagerState.currentPage == i)
+                                        FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 13.sp
+                                )
+                            }
                         )
                     }
                 }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp)
-                ) {
-                    KeyTabContent(
-                        activeTab = activeTab,
-                        viewModel = viewModel,
-                        onAction  = { lastAction = it }
-                    )
-                }
             }
         }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  KEY TAB CONTENT — All key sections
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun KeyTabContent(
-    activeTab: Int,
-    viewModel: PcControlViewModel,
-    onAction: (String) -> Unit
-) {
-    val configuration = LocalConfiguration.current
-    val isLandscape   = configuration.screenWidthDp > configuration.screenHeightDp
-
-    val scrollState = rememberScrollState()
-
-    Column(
-        modifier = Modifier.verticalScroll(scrollState),
-        verticalArrangement = Arrangement.spacedBy(if (isLandscape) 8.dp else 12.dp)
-    ) {
-        when (activeTab) {
-            0 -> FunctionKeysSection(viewModel, onAction)
-            1 -> ShortcutsSection(viewModel, onAction)
-            2 -> WindowsKeySection(viewModel, onAction)
-            3 -> AltKeySection(viewModel, onAction)
-            4 -> NavigationSection(viewModel, onAction)
-            5 -> SystemCommandsSection(viewModel, onAction)
-        }
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  SECTION: FUNCTION KEYS
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun FunctionKeysSection(viewModel: PcControlViewModel, onAction: (String) -> Unit) {
-    KeySectionLabel("Function Keys")
-
-    // ESC row
-    KeyRow {
-        PcKeyButton("ESC", "ESC", viewModel, onAction, color = KeyColor.DANGER, widthMod = Modifier.weight(1.5f))
-        Spacer(Modifier.width(12.dp))
-        listOf("F1","F2","F3","F4").forEach {
-            PcKeyButton(it, it, viewModel, onAction, color = KeyColor.SPECIAL, widthMod = Modifier.weight(1f))
-        }
-    }
-    KeyRow {
-        listOf("F5","F6","F7","F8","F9","F10","F11","F12").forEach {
-            PcKeyButton(it, it, viewModel, onAction, color = KeyColor.SPECIAL, widthMod = Modifier.weight(1f))
-        }
-    }
-
-    KeySectionLabel("Action Keys")
-    KeyRow {
-        listOf(
-            Triple("⌫", "BACKSPACE", ""),
-            Triple("↵", "ENTER", ""),
-            Triple("⇥", "TAB", ""),
-            Triple("DEL", "DELETE", ""),
-            Triple("INS", "INSERT", ""),
-        ).forEach { (label, key, _) ->
-            PcKeyButton(label, key, viewModel, onAction, widthMod = Modifier.weight(1f))
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  SECTION: SHORTCUTS
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun ShortcutsSection(viewModel: PcControlViewModel, onAction: (String) -> Unit) {
-    KeySectionLabel("Common Shortcuts")
-    KeyRow {
-        listOf(
-            Triple("Copy", "CTRL+C", "Ctrl+C"),
-            Triple("Paste", "CTRL+V", "Ctrl+V"),
-            Triple("Cut", "CTRL+X", "Ctrl+X"),
-            Triple("Undo", "CTRL+Z", "Ctrl+Z"),
-        ).forEach { (label, key, hint) ->
-            PcKeyButton(label, key, viewModel, onAction, subtitle = hint,
-                color = KeyColor.SPECIAL, widthMod = Modifier.weight(1f))
-        }
-    }
-    KeyRow {
-        listOf(
-            Triple("Redo", "CTRL+Y", "Ctrl+Y"),
-            Triple("Save", "CTRL+S", "Ctrl+S"),
-            Triple("All", "CTRL+A", "Ctrl+A"),
-            Triple("Find", "CTRL+F", "Ctrl+F"),
-        ).forEach { (label, key, hint) ->
-            PcKeyButton(label, key, viewModel, onAction, subtitle = hint,
-                color = KeyColor.SPECIAL, widthMod = Modifier.weight(1f))
-        }
-    }
-    KeyRow {
-        listOf(
-            Triple("New", "CTRL+N", "Ctrl+N"),
-            Triple("Open", "CTRL+O", "Ctrl+O"),
-            Triple("Print", "CTRL+P", "Ctrl+P"),
-            Triple("Close", "CTRL+W", "Ctrl+W"),
-        ).forEach { (label, key, hint) ->
-            PcKeyButton(label, key, viewModel, onAction, subtitle = hint,
-                color = KeyColor.SPECIAL, widthMod = Modifier.weight(1f))
-        }
-    }
-    KeySectionLabel("Close / Switch")
-    KeyRow {
-        PcKeyButton("Alt+F4", "ALT+F4", viewModel, onAction, subtitle = "Close App",
-            color = KeyColor.DANGER, widthMod = Modifier.weight(1f))
-        PcKeyButton("Prt Sc", "PRINTSCREEN", viewModel, onAction, subtitle = "Screenshot",
-            widthMod = Modifier.weight(1f))
-        PcKeyButton("Ctrl+Z", "CTRL+Z", viewModel, onAction, subtitle = "Undo",
-            color = KeyColor.SPECIAL, widthMod = Modifier.weight(1f))
-        PcKeyButton("Space", "SPACE", viewModel, onAction, widthMod = Modifier.weight(1f))
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  SECTION: WINDOWS KEY  ← NEW
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun WindowsKeySection(viewModel: PcControlViewModel, onAction: (String) -> Unit) {
-    KeySectionLabel("⊞ Windows Key Alone")
-    KeyRow {
-        PcKeyButton("⊞ Win", "WIN", viewModel, onAction, subtitle = "Start Menu",
-            color = KeyColor.WIN, widthMod = Modifier.weight(2f))
-        PcKeyButton("⊞+Tab", "WIN+TAB", viewModel, onAction, subtitle = "Task View",
-            color = KeyColor.WIN, widthMod = Modifier.weight(2f))
-    }
-
-    KeySectionLabel("⊞ Windows + Letter")
-    KeyRow {
-        listOf(
-            Triple("⊞+D", "WIN+D", "Desktop"),
-            Triple("⊞+E", "WIN+E", "Explorer"),
-            Triple("⊞+L", "WIN+L", "Lock PC"),
-            Triple("⊞+R", "WIN+R", "Run..."),
-        ).forEach { (label, key, hint) ->
-            PcKeyButton(label, key, viewModel, onAction, subtitle = hint,
-                color = KeyColor.WIN, widthMod = Modifier.weight(1f))
-        }
-    }
-    KeyRow {
-        listOf(
-            Triple("⊞+I", "WIN+I", "Settings"),
-            Triple("⊞+A", "WIN+A", "Action Ctr"),
-            Triple("⊞+S", "WIN+S", "Search"),
-            Triple("⊞+X", "WIN+X", "Power Menu"),
-        ).forEach { (label, key, hint) ->
-            PcKeyButton(label, key, viewModel, onAction, subtitle = hint,
-                color = KeyColor.WIN, widthMod = Modifier.weight(1f))
-        }
-    }
-    KeyRow {
-        listOf(
-            Triple("⊞+↑", "WIN+UP", "Maximize"),
-            Triple("⊞+↓", "WIN+DOWN", "Minimize"),
-            Triple("⊞+←", "WIN+LEFT", "Snap Left"),
-            Triple("⊞+→", "WIN+RIGHT", "Snap Right"),
-        ).forEach { (label, key, hint) ->
-            PcKeyButton(label, key, viewModel, onAction, subtitle = hint,
-                color = KeyColor.WIN, widthMod = Modifier.weight(1f))
-        }
-    }
-
-    KeySectionLabel("Run Commands (WIN+R then type)")
-    val runCommands = listOf(
-        "notepad" to "Notepad",
-        "calc" to "Calculator",
-        "cmd" to "Command Prompt",
-        "explorer" to "File Explorer",
-        "control" to "Control Panel",
-        "taskmgr" to "Task Manager",
-        "msconfig" to "System Config",
-        "regedit" to "Registry Editor",
-    )
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-        items(runCommands) { (cmd, label) ->
-            OutlinedButton(
-                onClick = {
-                    viewModel.executeQuickStep(
-                        PcStep("SYSTEM_CMD", "WIN_R", args = listOf(cmd))
-                    )
-                    onAction("⊞+R: $cmd")
-                },
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+    ) { padding ->
+        // Swipeable pages
+        HorizontalPager(
+            state    = pagerState,
+            modifier = Modifier.fillMaxSize().padding(padding)
+        ) { page ->
+            LazyColumn(
+                modifier            = Modifier.fillMaxSize(),
+                contentPadding      = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(cmd, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                    Text(label, style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                when (page) {
+                    0 -> navigationPage(viewModel) { lastAction = it }
+                    1 -> windowsPage(viewModel)    { lastAction = it }
+                    2 -> shortcutsPage(viewModel)  { lastAction = it }
+                    3 -> altPage(viewModel)         { lastAction = it }
+                    4 -> systemPage(viewModel)      { lastAction = it }
+                    5 -> fKeysPage(viewModel)       { lastAction = it }
                 }
+                item { Spacer(Modifier.height(20.dp)) }
             }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  SECTION: ALT KEY  ← NEW
+//  PAGE BUILDERS
 // ─────────────────────────────────────────────────────────────
 
-@Composable
-fun AltKeySection(viewModel: PcControlViewModel, onAction: (String) -> Unit) {
-    KeySectionLabel("Alt Key Combos")
-    KeyRow {
-        PcKeyButton("Alt", "ALT", viewModel, onAction, subtitle = "Hold Alt",
-            color = KeyColor.ALT, widthMod = Modifier.weight(1f))
-        PcKeyButton("Alt+Tab", "ALT+TAB", viewModel, onAction, subtitle = "Switch App",
-            color = KeyColor.ALT, widthMod = Modifier.weight(1.5f))
-        PcKeyButton("Alt+F4", "ALT+F4", viewModel, onAction, subtitle = "Close",
-            color = KeyColor.DANGER, widthMod = Modifier.weight(1.5f))
-    }
-    KeyRow {
-        listOf(
-            Triple("Alt+F1", "ALT+F1", ""),
-            Triple("Alt+F2", "ALT+F2", ""),
-            Triple("Alt+Enter", "ALT+ENTER", "Properties"),
-            Triple("Alt+Esc", "ALT+ESC", "Minimize"),
-        ).forEach { (label, key, hint) ->
-            PcKeyButton(label, key, viewModel, onAction, subtitle = hint,
-                color = KeyColor.ALT, widthMod = Modifier.weight(1f))
+private fun LazyListScope.navigationPage(vm: PcControlViewModel, onAction: (String) -> Unit) {
+    item { KbSectionLabel("Arrow Keys") }
+    item {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            KbBtn("↑", "UP", KeyColor.NORMAL, Modifier.width(72.dp), vm, onAction)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                KbBtn("←", "LEFT",  KeyColor.NORMAL, Modifier.width(72.dp), vm, onAction)
+                KbBtn("↓", "DOWN",  KeyColor.NORMAL, Modifier.width(72.dp), vm, onAction)
+                KbBtn("→", "RIGHT", KeyColor.NORMAL, Modifier.width(72.dp), vm, onAction)
+            }
         }
     }
+    item { KbSectionLabel("Navigation") }
+        KbGrid(
+            listOf(
+                Triple("Home",     "HOME",      KeyColor.SPECIAL),
+                Triple("End",      "END",       KeyColor.SPECIAL),
+                Triple("PgUp",     "PAGE_UP",   KeyColor.SPECIAL),
+                Triple("PgDn",     "PAGE_DOWN", KeyColor.SPECIAL),
+                Triple("Insert",   "INSERT",    KeyColor.NORMAL),
+                Triple("Delete",   "DELETE",    KeyColor.DANGER),
+                Triple("⌫ Back",  "BACKSPACE", KeyColor.NORMAL),
+                Triple("Tab →",   "TAB",       KeyColor.NORMAL),
+            ), vm, onAction
+        )
 
-    KeySectionLabel("Ctrl+Alt Combos")
-    KeyRow {
-        PcKeyButton("Ctrl+Alt+Del", "CTRL+ALT+DEL", viewModel, onAction,
-            subtitle = "Task Mgr", color = KeyColor.DANGER, widthMod = Modifier.weight(2f))
-        PcKeyButton("Ctrl+Shift+Esc", "CTRL+SHIFT+ESC", viewModel, onAction,
-            subtitle = "Task Mgr", color = KeyColor.SPECIAL, widthMod = Modifier.weight(2f))
-    }
+    item { KbSectionLabel("Common") }
+        KbGrid(
+            listOf(
+                Triple("Enter ↵", "ENTER",     KeyColor.SPECIAL),
+                Triple("Esc",     "ESC",       KeyColor.DANGER),
+                Triple("Space",   "SPACE",     KeyColor.NORMAL),
+                Triple("PrtSc",   "PRINTSCREEN", KeyColor.NORMAL),
+            ), vm, onAction
+        )
 
-    KeySectionLabel("Modifier Keys")
-    KeyRow {
-        listOf(
-            Triple("Ctrl", "CTRL", ""),
-            Triple("Shift", "SHIFT", ""),
-            Triple("Alt", "ALT", ""),
-            Triple("⊞ Win", "WIN", ""),
-        ).forEach { (label, key, _) ->
-            PcKeyButton(label, key, viewModel, onAction,
-                color = KeyColor.SPECIAL, widthMod = Modifier.weight(1f))
+}
+
+private fun LazyListScope.windowsPage(vm: PcControlViewModel, onAction: (String) -> Unit) {
+    item { KbSectionLabel("⊞ Windows Key") }
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // WIN+L uses SYSTEM_CMD:LOCK — more reliable than key combo
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KbBtn("⊞ Win", "WIN", KeyColor.WIN,
+                    Modifier.weight(1f), vm, onAction)
+                // LOCK via system command — NOT WIN+L key (more reliable)
+                SysCmdBtn("🔒 Lock", "LOCK", "Lock PC",
+                    KeyColor.DANGER, Modifier.weight(1f), vm, onAction)
+            }
         }
     }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        PcKeyButton("SPACE", "SPACE", viewModel, onAction, widthMod = Modifier.weight(3f))
-        PcKeyButton("↵", "ENTER", viewModel, onAction, widthMod = Modifier.weight(1f))
+    item { KbSectionLabel("⊞ Win + Letter") }
+        KbGrid(
+            listOf(
+                Triple("⊞+D",  "WIN+D",   KeyColor.WIN),
+                Triple("⊞+E",  "WIN+E",   KeyColor.WIN),
+                Triple("⊞+R",  "WIN+R",   KeyColor.WIN),
+                Triple("⊞+I",  "WIN+I",   KeyColor.WIN),
+                Triple("⊞+A",  "WIN+A",   KeyColor.WIN),
+                Triple("⊞+S",  "WIN+S",   KeyColor.WIN),
+                Triple("⊞+X",  "WIN+X",   KeyColor.WIN),
+                Triple("⊞+Tab","WIN+TAB", KeyColor.WIN),
+            ), vm, onAction
+        )
+
+    item { KbSectionLabel("⊞ Win + Arrow (Snap)") }
+        KbGrid(
+            listOf(
+                Triple("⊞+↑", "WIN+UP",    KeyColor.WIN),
+                Triple("⊞+↓", "WIN+DOWN",  KeyColor.WIN),
+                Triple("⊞+←", "WIN+LEFT",  KeyColor.WIN),
+                Triple("⊞+→", "WIN+RIGHT", KeyColor.WIN),
+            ), vm, onAction
+        )
+
+    item { KbSectionLabel("Run Commands (⊞+R)") }
+    item {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(listOf("notepad","calc","cmd","explorer","control","taskmgr","msconfig")) { cmd ->
+                OutlinedButton(
+                    onClick = {
+                        vm.executeQuickStep(PcStep("SYSTEM_CMD","WIN_R", args = listOf(cmd)))
+                        onAction("Run: $cmd")
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) { Text(cmd, style = MaterialTheme.typography.labelMedium) }
+            }
+        }
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  SECTION: NAVIGATION
-// ─────────────────────────────────────────────────────────────
+private fun LazyListScope.shortcutsPage(vm: PcControlViewModel, onAction: (String) -> Unit) {
+    item { KbSectionLabel("Common Shortcuts") }
+        KbGrid(
+            listOf(
+                Triple("Copy",   "CTRL+C", KeyColor.SPECIAL),
+                Triple("Paste",  "CTRL+V", KeyColor.SPECIAL),
+                Triple("Cut",    "CTRL+X", KeyColor.SPECIAL),
+                Triple("Undo",   "CTRL+Z", KeyColor.SPECIAL),
+                Triple("Redo",   "CTRL+Y", KeyColor.SPECIAL),
+                Triple("Save",   "CTRL+S", KeyColor.SPECIAL),
+                Triple("All",    "CTRL+A", KeyColor.SPECIAL),
+                Triple("Find",   "CTRL+F", KeyColor.SPECIAL),
+                Triple("New",    "CTRL+N", KeyColor.SPECIAL),
+                Triple("Open",   "CTRL+O", KeyColor.SPECIAL),
+                Triple("Print",  "CTRL+P", KeyColor.SPECIAL),
+                Triple("Close",  "CTRL+W", KeyColor.SPECIAL),
+                Triple("NewTab", "CTRL+T", KeyColor.SPECIAL),
+                Triple("Refresh","CTRL+R", KeyColor.SPECIAL),
+            ), vm, onAction
+        )
 
-@Composable
-fun NavigationSection(viewModel: PcControlViewModel, onAction: (String) -> Unit) {
-    KeySectionLabel("Arrow Keys")
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row {
-            PcKeyButton("↑", "UP", viewModel, onAction, widthMod = Modifier.size(52.dp))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            PcKeyButton("←", "LEFT", viewModel, onAction, widthMod = Modifier.size(52.dp))
-            PcKeyButton("↓", "DOWN", viewModel, onAction, widthMod = Modifier.size(52.dp))
-            PcKeyButton("→", "RIGHT", viewModel, onAction, widthMod = Modifier.size(52.dp))
-        }
-    }
+}
 
-    KeySectionLabel("Navigation")
-    KeyRow {
-        listOf(
-            Triple("Home", "HOME", ""),
-            Triple("End", "END", ""),
-            Triple("PgUp", "PAGE_UP", ""),
-            Triple("PgDn", "PAGE_DOWN", ""),
-        ).forEach { (label, key, _) ->
-            PcKeyButton(label, key, viewModel, onAction, widthMod = Modifier.weight(1f))
-        }
+private fun LazyListScope.altPage(vm: PcControlViewModel, onAction: (String) -> Unit) {
+    item { KbSectionLabel("Alt Combos") }
+        KbGrid(
+            listOf(
+                Triple("Alt+Tab",  "ALT+TAB",   KeyColor.ALT),
+                Triple("Alt+F4",   "ALT+F4",    KeyColor.DANGER),
+                Triple("Alt+Enter","ALT+ENTER", KeyColor.ALT),
+                Triple("Alt+Esc",  "ALT+ESC",   KeyColor.ALT),
+            ), vm, onAction
+        )
+
+    item { KbSectionLabel("Ctrl+Alt") }
+        KbGrid(
+            listOf(
+                Triple("Ctrl+Alt+Del","CTRL+ALT+DEL",    KeyColor.DANGER),
+                Triple("Ctrl+Sh+Esc","CTRL+SHIFT+ESC",   KeyColor.DANGER),
+            ), vm, onAction
+        )
+
+    item { KbSectionLabel("Modifier Keys") }
+        KbGrid(
+            listOf(
+                Triple("Ctrl",  "CTRL",  KeyColor.SPECIAL),
+                Triple("Shift", "SHIFT", KeyColor.SPECIAL),
+                Triple("Alt",   "ALT",   KeyColor.ALT),
+                Triple("⊞ Win", "WIN",   KeyColor.WIN),
+            ), vm, onAction
+        )
+
+    item {
+        KbBtn("Space Bar", "SPACE", KeyColor.NORMAL,
+            Modifier.fillMaxWidth(), vm, onAction)
     }
-    KeyRow {
-        listOf(
-            Triple("Del", "DELETE", ""),
-            Triple("Ins", "INSERT", ""),
-            Triple("⌫ Back", "BACKSPACE", ""),
-            Triple("Tab →", "TAB", ""),
-        ).forEach { (label, key, _) ->
-            PcKeyButton(label, key, viewModel, onAction, widthMod = Modifier.weight(1f))
+}
+
+private fun LazyListScope.systemPage(vm: PcControlViewModel, onAction: (String) -> Unit) {
+    item { KbSectionLabel("System Commands") }
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                SysCmdBtn("🔒 Lock",       "LOCK",        "Lock PC",     KeyColor.DANGER,  Modifier.weight(1f), vm, onAction)
+                SysCmdBtn("😴 Sleep",      "SLEEP",       "Sleep",       KeyColor.NORMAL,  Modifier.weight(1f), vm, onAction)
+                SysCmdBtn("⏻ Shutdown",   "SHUTDOWN",    "Shutdown",    KeyColor.DANGER,  Modifier.weight(1f), vm, onAction)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                SysCmdBtn("🔄 Restart",    "RESTART",     "Restart",     KeyColor.DANGER,  Modifier.weight(1f), vm, onAction)
+                SysCmdBtn("📸 Snip",       "SCREENSHOT",  "Screenshot",  KeyColor.NORMAL,  Modifier.weight(1f), vm, onAction)
+                SysCmdBtn("🖥 Desktop",    "OPEN_FOLDER", "Desktop",     KeyColor.NORMAL,  Modifier.weight(1f), vm, onAction)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                SysCmdBtn("🔊 Vol+",       "VOLUME_UP",   "Vol Up",      KeyColor.MEDIA,   Modifier.weight(1f), vm, onAction)
+                SysCmdBtn("🔇 Mute",       "MUTE",        "Mute",        KeyColor.MEDIA,   Modifier.weight(1f), vm, onAction)
+                SysCmdBtn("🔉 Vol-",       "VOLUME_DOWN", "Vol Down",    KeyColor.MEDIA,   Modifier.weight(1f), vm, onAction)
+            }
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  SECTION: SYSTEM COMMANDS
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun SystemCommandsSection(viewModel: PcControlViewModel, onAction: (String) -> Unit) {
-    KeySectionLabel("System Actions")
-    val sysActions: List<Triple<String, String, String>> = listOf(
-        Triple("🔒", "LOCK", "Lock PC"),
-        Triple("😴", "SLEEP", "Sleep"),
-        Triple("🔇", "MUTE", "Mute"),
-        Triple("🔊", "VOLUME_UP", "Vol Up"),
-        Triple("🔉", "VOLUME_DOWN", "Vol Dn"),
-        Triple("📸", "SCREENSHOT", "Snip"),
-        Triple("📁", "OPEN_FOLDER", "Explorer"),
-        Triple("⚙", "SETTINGS", "Settings"),
-    )
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-        items(sysActions) { (icon, cmd, label) ->
-            Surface(
-                onClick = {
-                    viewModel.executeQuickStep(PcStep("SYSTEM_CMD", cmd))
-                    onAction("$icon $label")
-                },
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(12.dp, 10.dp)
-                ) {
-                    Text(icon, fontSize = 22.sp)
-                    Text(label, style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer)
+private fun LazyListScope.fKeysPage(vm: PcControlViewModel, onAction: (String) -> Unit) {
+    item { KbSectionLabel("Function Keys") }
+    item {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (1..4).forEach { i ->
+                    KbBtn("F$i", "F$i", KeyColor.SPECIAL, Modifier.weight(1f), vm, onAction)
                 }
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (5..8).forEach { i ->
+                    KbBtn("F$i", "F$i", KeyColor.SPECIAL, Modifier.weight(1f), vm, onAction)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (9..12).forEach { i ->
+                    KbBtn("F$i", "F$i", KeyColor.SPECIAL, Modifier.weight(1f), vm, onAction)
+                }
+            }
+        }
+    }
+    item { KbSectionLabel("ESC Row") }
+    item {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KbBtn("Esc",   "ESC",   KeyColor.DANGER,  Modifier.weight(1.5f), vm, onAction)
+            KbBtn("Enter", "ENTER", KeyColor.SPECIAL, Modifier.weight(1f),   vm, onAction)
+            KbBtn("Tab",   "TAB",   KeyColor.NORMAL,  Modifier.weight(1f),   vm, onAction)
+            KbBtn("⌫",    "BACKSPACE", KeyColor.NORMAL, Modifier.weight(1f), vm, onAction)
         }
     }
 }
@@ -576,93 +379,152 @@ fun SystemCommandsSection(viewModel: PcControlViewModel, onAction: (String) -> U
 // ─────────────────────────────────────────────────────────────
 
 @Composable
-fun KeySectionLabel(text: String) {
+fun KbSectionLabel(text: String) {
     Text(
-        text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
+        text,
+        style      = MaterialTheme.typography.labelSmall,
+        color      = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.Bold,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(bottom = 2.dp)
+        letterSpacing = 0.5.sp,
+        modifier   = Modifier.padding(top = 4.dp, bottom = 2.dp)
     )
 }
 
-@Composable
-fun KeyRow(content: @Composable RowScope.() -> Unit) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) { content() }
+fun LazyListScope.KbGrid(
+    keys    : List<Triple<String, String, KeyColor>>,
+    vm      : PcControlViewModel,
+    onAction: (String) -> Unit,
+    cols    : Int = 4
+) {
+    val rows = keys.chunked(cols)
+    rows.forEach { row ->
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                row.forEach { (label, key, color) ->
+                    KbBtn(label, key, color, Modifier.weight(1f), vm, onAction)
+                }
+                // Fill empty slots
+                repeat(cols - row.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
 }
 
 @Composable
-fun PcKeyButton(
-    label: String,
+fun KbBtn(
+    label   : String,
     keyValue: String,
-    viewModel: PcControlViewModel,
-    onAction: (String) -> Unit,
-    subtitle: String = "",
-    color: KeyColor = KeyColor.NORMAL,
-    widthMod: Modifier = Modifier
+    color   : KeyColor,
+    modifier: Modifier = Modifier,
+    vm      : PcControlViewModel,
+    onAction: (String) -> Unit
 ) {
-    val haptic    = LocalHapticFeedback.current
-    val scope     = rememberCoroutineScope()
-    var isPressed by remember { mutableStateOf(false) }
+    val haptic  = LocalHapticFeedback.current
+    val scope   = rememberCoroutineScope()
+    var pressed by remember { mutableStateOf(false) }
 
-    val containerColor = when (color) {
+    val bg = when (color) {
         KeyColor.NORMAL  -> MaterialTheme.colorScheme.surfaceVariant
         KeyColor.SPECIAL -> MaterialTheme.colorScheme.secondaryContainer
         KeyColor.WIN     -> MaterialTheme.colorScheme.primaryContainer
         KeyColor.ALT     -> MaterialTheme.colorScheme.tertiaryContainer
         KeyColor.DANGER  -> MaterialTheme.colorScheme.errorContainer
+        KeyColor.MEDIA   -> MaterialTheme.colorScheme.tertiaryContainer
     }
-    val contentColor = when (color) {
+    val fg = when (color) {
         KeyColor.NORMAL  -> MaterialTheme.colorScheme.onSurfaceVariant
         KeyColor.SPECIAL -> MaterialTheme.colorScheme.onSecondaryContainer
         KeyColor.WIN     -> MaterialTheme.colorScheme.onPrimaryContainer
         KeyColor.ALT     -> MaterialTheme.colorScheme.onTertiaryContainer
-        KeyColor.DANGER  -> MaterialTheme.colorScheme.onErrorContainer
+        KeyColor.DANGER  -> MaterialTheme.colorScheme.error
+        KeyColor.MEDIA   -> MaterialTheme.colorScheme.onTertiaryContainer
     }
 
     Surface(
         onClick = {
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            scope.launch {
-                isPressed = true
-                delay(80)
-                isPressed = false
-            }
-            viewModel.sendKey(keyValue)
-            val display = if (subtitle.isNotEmpty()) "$label ($subtitle)" else label
-            onAction("⌨ $display")
+            scope.launch { pressed = true; delay(80); pressed = false }
+            vm.sendKey(keyValue)
+            onAction("⌨ $label")
         },
-        modifier = widthMod,
-        shape = RoundedCornerShape(9.dp),
-        color = if (isPressed) MaterialTheme.colorScheme.primary else containerColor,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        tonalElevation = if (isPressed) 0.dp else 2.dp
+        modifier       = modifier.height(56.dp),  // Large buttons
+        shape          = RoundedCornerShape(10.dp),
+        color          = if (pressed) fg.copy(0.2f) else bg,
+        border         = BorderStroke(
+            if (pressed) 1.5.dp else 1.dp,
+            if (pressed) fg else fg.copy(0.25f)
+        ),
+        tonalElevation = 2.dp
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 9.dp)
-        ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(4.dp)) {
             Text(
                 label,
-                style = MaterialTheme.typography.labelSmall,
+                fontSize   = if (label.length > 7) 9.sp else if (label.length > 4) 11.sp else 13.sp,
                 fontWeight = FontWeight.Bold,
-                fontSize = if (label.length > 5) 9.sp else 11.sp,
-                color = if (isPressed) MaterialTheme.colorScheme.onPrimary else contentColor
+                color      = if (pressed) fg else fg,
+                textAlign  = TextAlign.Center,
+                lineHeight = 14.sp
             )
-            if (subtitle.isNotEmpty()) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 8.sp,
-                    color = if (isPressed) MaterialTheme.colorScheme.onPrimary.copy(0.8f)
-                    else contentColor.copy(alpha = 0.7f)
-                )
-            }
+        }
+    }
+}
+
+// System command button (uses SYSTEM_CMD not key press)
+@Composable
+fun SysCmdBtn(
+    label   : String,
+    cmd     : String,
+    hint    : String,
+    color   : KeyColor,
+    modifier: Modifier = Modifier,
+    vm      : PcControlViewModel,
+    onAction: (String) -> Unit
+) {
+    val haptic  = LocalHapticFeedback.current
+    val scope   = rememberCoroutineScope()
+    var pressed by remember { mutableStateOf(false) }
+
+    val bg = when (color) {
+        KeyColor.DANGER -> MaterialTheme.colorScheme.errorContainer
+        KeyColor.MEDIA  -> MaterialTheme.colorScheme.tertiaryContainer
+        else            -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val fg = when (color) {
+        KeyColor.DANGER -> MaterialTheme.colorScheme.error
+        KeyColor.MEDIA  -> MaterialTheme.colorScheme.onTertiaryContainer
+        else            -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            scope.launch { pressed = true; delay(80); pressed = false }
+            vm.executeQuickStep(PcStep("SYSTEM_CMD", cmd))
+            onAction("⚡ $hint")
+        },
+        modifier       = modifier.height(56.dp),
+        shape          = RoundedCornerShape(10.dp),
+        color          = if (pressed) fg.copy(0.2f) else bg,
+        border         = BorderStroke(
+            if (pressed) 1.5.dp else 1.dp,
+            if (pressed) fg else fg.copy(0.25f)
+        ),
+        tonalElevation = 2.dp
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(4.dp)) {
+            Text(
+                label,
+                fontSize   = if (label.length > 7) 9.sp else 11.sp,
+                fontWeight = FontWeight.Bold,
+                color      = fg,
+                textAlign  = TextAlign.Center,
+                lineHeight = 14.sp
+            )
         }
     }
 }

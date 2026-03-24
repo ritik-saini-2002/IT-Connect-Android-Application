@@ -100,6 +100,11 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     private val _recentPaths = MutableStateFlow<List<PcRecentPath>>(emptyList())
     val recentPaths: StateFlow<List<PcRecentPath>> = _recentPaths
 
+    // Special folders: Desktop, Downloads, Documents, Pictures, Videos
+    data class SpecialFolder(val name: String, val path: String, val icon: String)
+    private val _specialFolders = MutableStateFlow<List<SpecialFolder>>(emptyList())
+    val specialFolders: StateFlow<List<SpecialFolder>> = _specialFolders
+
     private val _browseLoading = MutableStateFlow(false)
     val browseLoading: StateFlow<Boolean> = _browseLoading
 
@@ -372,6 +377,26 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
             _browseLoading.value = false
         }
         loadRecentPaths()
+        loadSpecialFolders()
+    }
+
+    fun loadSpecialFolders() {
+        viewModelScope.launch {
+            try {
+                val r = browse.getSpecialFolders()
+                if (r.success) {
+                    _specialFolders.value = r.data?.map { map ->
+                        SpecialFolder(
+                            name = map["name"] as? String ?: "",
+                            path = map["path"] as? String ?: "",
+                            icon = map["icon"] as? String ?: "📁"
+                        )
+                    }?.filter { it.name.isNotBlank() } ?: emptyList()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "loadSpecialFolders: ${e.message}")
+            }
+        }
     }
 
     fun browseDir(path: String, filter: PcFileFilter = PcFileFilter.ALL) {
@@ -539,6 +564,8 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         stopLiveScreen()
     }
 }
+
+
 
 // ─────────────────────────────────────────────────────────────
 //  FACTORY

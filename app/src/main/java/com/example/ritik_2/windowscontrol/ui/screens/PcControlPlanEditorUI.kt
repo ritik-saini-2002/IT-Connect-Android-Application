@@ -480,7 +480,7 @@ fun PcAddStepSheet(
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                                containerColor = MaterialTheme.colorScheme.surface
                             )
                         ) {
                             Row(
@@ -751,7 +751,7 @@ fun PcAddStepSheet(
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                                containerColor = MaterialTheme.colorScheme.surface
                             )
                         ) {
                             Row(
@@ -843,13 +843,89 @@ fun PcAddStepSheet(
                     }
                 }
 
+                PcStepType.FILE_OP -> {
+                    // File Operation — browse source and destination
+                    var fileOpAction by remember { mutableStateOf("COPY") }
+                    var fileOpFrom   by remember { mutableStateOf("") }
+                    var fileOpTo     by remember { mutableStateOf("") }
+
+                    Text("FILE ACTION", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("COPY","MOVE","DELETE","RENAME").forEach { act ->
+                            FilterChip(
+                                selected = fileOpAction == act,
+                                onClick  = { fileOpAction = act },
+                                label    = { Text(act, style = MaterialTheme.typography.labelSmall) }
+                            )
+                        }
+                    }
+
+                    Text("FROM (source file)", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    if (fileOpFrom.isNotEmpty()) {
+                        Surface(shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("📄", fontSize = 18.sp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(fileOpFrom.substringAfterLast("/").substringAfterLast("\\"),
+                                    Modifier.weight(1f), maxLines = 1)
+                                IconButton(onClick = { fileOpFrom = "" }, Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Close, null, Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedButton(onClick = {
+                            onPickFile(PcFileFilter.ALL) { path -> fileOpFrom = path }
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Folder, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Browse Source File")
+                        }
+                    }
+
+                    if (fileOpAction != "DELETE") {
+                        Text("TO (destination folder)", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary)
+                        OutlinedTextField(
+                            value = fileOpTo,
+                            onValueChange = { fileOpTo = it },
+                            label = { Text("Destination path") },
+                            placeholder = { Text("e.g. C:/Backup/") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+                    }
+
+                    // Override Add button for FILE_OP
+                    Button(
+                        onClick = {
+                            onAdd(PcStep(
+                                type   = "FILE_OP",
+                                action = fileOpAction,
+                                from   = fileOpFrom,
+                                to     = fileOpTo
+                            ))
+                        },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape    = RoundedCornerShape(14.dp),
+                        enabled  = fileOpFrom.isNotEmpty()
+                    ) {
+                        Icon(Icons.Default.Add, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add File Operation", fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 else -> {
-                    // MOUSE_CLICK, MOUSE_MOVE, MOUSE_SCROLL, FILE_OP
-                    Text(
-                        "${selectedType.display} — enter values:",
+                    // MOUSE_CLICK, MOUSE_MOVE, MOUSE_SCROLL
+                    Text("${selectedType.display} — enter values:",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
                         value = manualPath,
                         onValueChange = { manualPath = it },

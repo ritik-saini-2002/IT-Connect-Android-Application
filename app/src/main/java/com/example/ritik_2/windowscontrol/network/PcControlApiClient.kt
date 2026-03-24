@@ -8,7 +8,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import org.json.JSONObject
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
@@ -77,12 +76,10 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
     }
 
     suspend fun executePlan(plan: com.example.ritik_2.windowscontrol.data.PcPlan): PcNetworkResult<PcExecuteResponse> {
-        // CRITICAL: Agent expects {"planName":"...", "steps":[{...},...]}
-        // PcPlan stores steps as stepsJson (String), so we must build the payload manually
         val stepsArray = com.google.gson.JsonParser.parseString(plan.stepsJson).asJsonArray
         val payload = com.google.gson.JsonObject().apply {
             addProperty("planName", plan.planName)
-            add("steps", stepsArray)         // steps as real JSON array, not string
+            add("steps", stepsArray)
         }
         val result = post("/execute", payload)
         return if (result.success) {
@@ -92,7 +89,6 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
     }
 
     suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> {
-        // Serialize PcStep directly — all fields map 1:1 to agent step format
         val payload = gson.toJsonTree(step).asJsonObject
         return post("/quick", payload)
     }
@@ -180,6 +176,26 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
             PcNetworkResult(true, gson.fromJson(r.data, type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
+
+    // FIX: moved from PcControlInputClient → belongs here since ViewModel calls it on `browse`
+    /** Get special user folders: Desktop, Downloads, Documents, Pictures, Videos */
+    @Suppress("UNCHECKED_CAST")
+    suspend fun getSpecialFolders(): PcNetworkResult<List<Map<String, Any>>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resp = http.newCall(baseRequest("/browse/special").get().build()).execute()
+                if (!resp.isSuccessful) return@withContext PcNetworkResult(
+                    false, error = "HTTP ${resp.code}"
+                )
+                val body = resp.body?.string()
+                    ?: return@withContext PcNetworkResult(false, error = "Empty response")
+                val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+                PcNetworkResult(true, gson.fromJson(body, type))
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "getSpecialFolders error: ${e.message}")
+                PcNetworkResult(false, error = e.message)
+            }
+        }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -220,10 +236,15 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
     suspend fun fetchScreenSnapshot(): PcNetworkResult<String> = withContext(Dispatchers.IO) {
         try {
             val resp = http.newCall(baseRequest("/screen/snapshot").get().build()).execute()
-            if (!resp.isSuccessful) return@withContext PcNetworkResult(false, error = "HTTP ${resp.code}")
-            val body = resp.body?.string() ?: return@withContext PcNetworkResult(false, error = "Empty")
+            if (!resp.isSuccessful) return@withContext PcNetworkResult(
+                false, error = "HTTP ${resp.code}"
+            )
+            val body = resp.body?.string()
+                ?: return@withContext PcNetworkResult(false, error = "Empty")
             val json = org.json.JSONObject(body)
-            if (!json.optBoolean("ok", false)) return@withContext PcNetworkResult(false, error = "Agent error")
+            if (!json.optBoolean("ok", false)) return@withContext PcNetworkResult(
+                false, error = "Agent error"
+            )
             PcNetworkResult(true, json.optString("data"))
         } catch (e: Exception) {
             PcNetworkResult(false, error = e.message)
@@ -231,14 +252,18 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
     }
 
     /** Get cursor position and active window title */
-    suspend fun fetchScreenInfo(): PcNetworkResult<org.json.JSONObject> = withContext(Dispatchers.IO) {
-        try {
-            val resp = http.newCall(baseRequest("/screen/info").get().build()).execute()
-            if (!resp.isSuccessful) return@withContext PcNetworkResult(false, error = "HTTP ${resp.code}")
-            val body = resp.body?.string() ?: return@withContext PcNetworkResult(false, error = "Empty")
-            PcNetworkResult(true, org.json.JSONObject(body))
-        } catch (e: Exception) {
-            PcNetworkResult(false, error = e.message)
+    suspend fun fetchScreenInfo(): PcNetworkResult<org.json.JSONObject> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resp = http.newCall(baseRequest("/screen/info").get().build()).execute()
+                if (!resp.isSuccessful) return@withContext PcNetworkResult(
+                    false, error = "HTTP ${resp.code}"
+                )
+                val body = resp.body?.string()
+                    ?: return@withContext PcNetworkResult(false, error = "Empty")
+                PcNetworkResult(true, org.json.JSONObject(body))
+            } catch (e: Exception) {
+                PcNetworkResult(false, error = e.message)
+            }
         }
-    }
 }
