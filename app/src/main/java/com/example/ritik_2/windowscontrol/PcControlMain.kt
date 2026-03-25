@@ -1,5 +1,6 @@
 package com.example.ritik_2.windowscontrol
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
@@ -27,6 +28,7 @@ import com.example.ritik_2.windowscontrol.ui.screens.PcControlMainScreen
 //  That's it! Full PC control embedded in 2 steps.
 // ─────────────────────────────────────────────────────────────
 
+@SuppressLint("StaticFieldLeak")
 object PcControlMain {
 
     private var _context: Context? = null
@@ -41,6 +43,7 @@ object PcControlMain {
      * Initialize the PC Control package.
      * Call once — in Application.onCreate() or your main Activity.
      */
+    @SuppressLint("StaticFieldLeak")
     fun init(
         context: Context,
         pcIp: String = "",

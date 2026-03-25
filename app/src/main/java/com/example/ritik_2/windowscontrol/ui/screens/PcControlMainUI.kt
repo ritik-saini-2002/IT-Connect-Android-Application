@@ -89,10 +89,10 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
                     label = "screen"
                 ) { screen ->
                     when (screen) {
+                        PcScreen.TOUCHPAD      -> PcControlTouchpadUI(viewModel)
                         PcScreen.PLANS         -> PcControlPlansUI(viewModel)
                         PcScreen.APP_DIRECTORY -> PcControlAppDirectoryUI(viewModel)
                         PcScreen.FILE_BROWSER  -> PcControlFileBrowserUI(viewModel)
-                        PcScreen.TOUCHPAD      -> PcControlTouchpadUI(viewModel)
                         PcScreen.KEYBOARD      -> PcControlKeyboardUI(viewModel)
                         PcScreen.SETTINGS      -> PcControlSettingsUI(viewModel)
                     }
@@ -139,8 +139,8 @@ fun NavigationPanel(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
             listOf(
-                Triple(PcScreen.PLANS,         "Plans",       Icons.Default.List),
                 Triple(PcScreen.TOUCHPAD,       "Touchpad",    Icons.Default.Mouse),
+                Triple(PcScreen.PLANS,         "Plans",       Icons.Default.List),
                 Triple(PcScreen.KEYBOARD,       "Keyboard",    Icons.Default.Keyboard),
                 Triple(PcScreen.APP_DIRECTORY,  "Apps",        Icons.Default.Apps),
                 Triple(PcScreen.FILE_BROWSER,   "Files",       Icons.Default.Folder),

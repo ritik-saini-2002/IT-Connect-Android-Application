@@ -64,7 +64,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     val plans: LiveData<List<PcPlan>> = repo.allPlans.asLiveData()
 
     // ── Navigation ────────────────────────
-    private val _currentScreen = MutableStateFlow(PcScreen.PLANS)
+    private val _currentScreen = MutableStateFlow(PcScreen.TOUCHPAD)
     val currentScreen: StateFlow<PcScreen> = _currentScreen
 
     fun navigateTo(screen: PcScreen) { _currentScreen.value = screen }
