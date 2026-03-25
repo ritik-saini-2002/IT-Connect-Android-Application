@@ -56,7 +56,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@drawable/it_connect_logo"
-        android:label="@string/app_name"
+        android:label="Ritik Saini"
         android:roundIcon="@drawable/it_connect_logo"
         android:supportsRtl="true"
         android:theme="@style/Theme.Ritik_2"
@@ -85,6 +85,10 @@
             android:name=".complaint.complaintregistration.RegisterComplain"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
+
+        <activity android:name=".complaint.newcomplaintregistration.NewRegisterComplaintActivity"
+            android:exported="false"
+            android:theme="@style/Base.Theme.Ritik_2"/>
 
         <activity
             android:name=".complaint.viewcomplaint.ComplaintViewActivity"

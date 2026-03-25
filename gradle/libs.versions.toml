@@ -86,6 +86,7 @@ coilCompose                     = "2.7.0"
 accompanistCoil                 = "0.15.0"
 jcifsNg                         = "2.1.10"
 jcifsNgVersion                  = "2.1.10"
+foundation = "1.10.5"
 
 [libraries]
 # ── Core ──────────────────────────────────────────────────────
@@ -193,6 +194,7 @@ coil-compose                            = { module = "io.coil-kt:coil-compose", 
 accompanist-coil                        = { module = "com.google.accompanist:accompanist-coil",          version.ref = "accompanistCoil" }
 jcifs-ng                                = { module = "eu.agno3.jcifs:jcifs-ng",                         version.ref = "jcifsNg" }
 jcifs-ng-v219                           = { module = "eu.agno3.jcifs:jcifs-ng",                         version.ref = "jcifsNgVersion" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
 
 [plugins]
 android-application                     = { id = "com.android.application",                  version.ref = "agp" }

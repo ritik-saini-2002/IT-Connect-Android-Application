@@ -25,6 +25,7 @@ import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.complaint.complaintregistration.RegisterComplain
 import com.example.ritik_2.complaint.newcomplaintmodel.ComplaintManagementActivity
+import com.example.ritik_2.complaint.newcomplaintregistration.NewRegisterComplaintActivity
 import com.example.ritik_2.contact.ContactActivity
 //import com.example.ritik_2.profile.profileaccess.ProfileAccessActivity
 import com.example.ritik_2.theme.ITConnectTheme
@@ -150,7 +151,7 @@ class MainActivity : ComponentActivity() {
             when (cardId) {
                 1 -> {
                     Log.d(TAG, "📝 Navigating to Register Complaint")
-                    startActivity(Intent(this, RegisterComplain::class.java))
+                    startActivity(Intent(this, NewRegisterComplaintActivity::class.java))
                 }
                 2 -> {
                     Log.d(TAG, "👁️ Navigating to View Complaints")
