@@ -36,10 +36,11 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("⚙️ Settings", fontWeight = FontWeight.Bold) },
+                title = { Text("Settings", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                ),
+                expandedHeight = 21.dp
             )
         }
     ) { padding ->
@@ -48,8 +49,8 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(15.dp),
+            verticalArrangement = Arrangement.spacedBy(15.dp)
         ) {
 
             // ── STATUS CARD ──────────────────────────────────
@@ -270,7 +271,7 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(0.dp))
         }
     }
 }

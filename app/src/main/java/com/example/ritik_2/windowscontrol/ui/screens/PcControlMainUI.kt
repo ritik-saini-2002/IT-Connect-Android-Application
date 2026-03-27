@@ -126,7 +126,7 @@ fun NavigationPanel(
                     Text("IT Connect", style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Text("PC Remote Control Ritik Saini", style = MaterialTheme.typography.bodySmall,
+                    Text("PC Remote Control by Ritik Saini", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.7f))
                 }
             }
@@ -219,7 +219,7 @@ private val navItems = listOf(
     PcNavItem(PcScreen.TOUCHPAD,      "Control",  Icons.Default.Mouse),
     PcNavItem(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
     PcNavItem(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder,    Icons.Default.FolderOpen),
-    PcNavItem(PcScreen.SETTINGS,      "Settings", Icons.Default.Settings),
+    //PcNavItem(PcScreen.SETTINGS,      "Settings", Icons.Default.Settings),
 )
 
 @Composable
