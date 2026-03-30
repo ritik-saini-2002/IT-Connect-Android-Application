@@ -1,194 +1,242 @@
 package com.example.ritik_2.authentication
 
+import android.content.Context
 import android.util.Log
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
+import com.example.ritik_2.data.pocketbase.PocketBaseClient
+import com.example.ritik_2.data.pocketbase.PocketBaseSessionManager
+import com.example.ritik_2.registration.models.UserRecord
+import io.github.agrevster.pocketbaseKotlin.models.AuthRecord
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 class AuthManager private constructor() {
 
     companion object {
         private const val TAG = "AuthManager"
-        private val VALID_ROLES = setOf("Administrator", "Manager", "Employee")
 
-        @Volatile
-        private var INSTANCE: AuthManager? = null
+        @Volatile private var INSTANCE: AuthManager? = null
 
-        fun getInstance(): AuthManager {
-            return INSTANCE ?: synchronized(this) {
+        fun getInstance(): AuthManager =
+            INSTANCE ?: synchronized(this) {
                 INSTANCE ?: AuthManager().also { INSTANCE = it }
             }
+    }
+
+    private val pb = PocketBaseClient.instance
+
+    // ── Auth state exposed as StateFlow ───────────────────────
+    private val _authState = MutableStateFlow<AuthState>(AuthState.Loading)
+    val authState: StateFlow<AuthState> = _authState.asStateFlow()
+
+    // ── Current user shortcut ─────────────────────────────────
+    var currentUserId: String? = null
+        private set
+    var currentUserEmail: String? = null
+        private set
+    var currentUserName: String? = null
+        private set
+    var currentUserRole: String? = null
+        private set
+    var currentDocumentPath: String? = null
+        private set
+
+    // ── Restore session from encrypted prefs ──────────────────
+    fun restoreSession(context: Context) {
+        PocketBaseSessionManager.init(context)
+
+        if (PocketBaseSessionManager.isLoggedIn()) {
+            val token = PocketBaseSessionManager.getToken()!!
+            // Restore token into PocketBase client
+            pb.login { this.token = token }
+
+            currentUserId       = PocketBaseSessionManager.getUserId()
+            currentUserEmail    = PocketBaseSessionManager.getEmail()
+            currentUserName     = PocketBaseSessionManager.getName()
+            currentUserRole     = PocketBaseSessionManager.getRole()
+            currentDocumentPath = PocketBaseSessionManager.getDocPath()
+
+            _authState.value = AuthState.Authenticated(
+                UserData(
+                    uid          = currentUserId!!,
+                    name         = currentUserName ?: "",
+                    email        = currentUserEmail ?: "",
+                    role         = currentUserRole ?: "",
+                    documentPath = currentDocumentPath ?: ""
+                )
+            )
+            Log.d(TAG, "Session restored for: $currentUserEmail ✅")
+        } else {
+            _authState.value = AuthState.NotAuthenticated
+            Log.d(TAG, "No saved session found")
         }
     }
 
-    private val firebaseAuth: FirebaseAuth = FirebaseAuth.getInstance()
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
+    // ── Login ─────────────────────────────────────────────────
+    suspend fun login(email: String, password: String): AuthResult {
+        return try {
+            _authState.value = AuthState.Loading
 
-    // Flow to observe authentication state changes
-    // Add this to your AuthManager class
-    val authStateFlow: Flow<AuthState> = callbackFlow {
-        Log.d(TAG, "🔄 AuthStateFlow: Setting up listener")
+            // 1. Authenticate with PocketBase
+            val authResponse = pb.records
+                .authWithPassword<AuthRecord>(
+                    PocketBaseInitializer.COL_USERS,
+                    email,
+                    password
+                )
 
-        val authStateListener = FirebaseAuth.AuthStateListener { auth ->
-            val user = auth.currentUser
-            Log.d(TAG, "🔄 AuthStateFlow: Listener triggered, user = ${user?.email}")
+            val token  = authResponse.token
+                ?: return AuthResult.Error("Authentication failed — no token received")
+            val userId = authResponse.record?.id
+                ?: return AuthResult.Error("Authentication failed — no user ID")
 
-            if (user != null) {
-                Log.d(TAG, "🔄 AuthStateFlow: User authenticated, checking role...")
-                trySend(AuthState.Loading)
+            // 2. Login client with token
+            pb.login { this.token = token }
+            Log.d(TAG, "PocketBase auth successful for: $email ✅")
 
-                // Check user role in background
-                checkUserRole(user.uid) { authState ->
-                    Log.d(TAG, "🔄 AuthStateFlow: Role check result = $authState")
-                    trySend(authState)
-                }
-            } else {
-                Log.d(TAG, "🔄 AuthStateFlow: User not authenticated")
-                trySend(AuthState.NotAuthenticated)
+            // 3. Fetch user access control record for role + documentPath
+            val accessResult = pb.records.getList<UserAccessRecord>(
+                PocketBaseInitializer.COL_ACCESS_CONTROL, 1, 1,
+                "userId='$userId'"
+            )
+
+            if (accessResult.totalItems == 0) {
+                return AuthResult.Error("User profile not configured. Contact administrator.")
             }
-        }
 
-        firebaseAuth.addAuthStateListener(authStateListener)
-        Log.d(TAG, "🔄 AuthStateFlow: Listener added")
+            val access = accessResult.items.first()
 
-        awaitClose {
-            Log.d(TAG, "🔄 AuthStateFlow: Removing listener")
-            firebaseAuth.removeAuthStateListener(authStateListener)
+            if (!access.isActive) {
+                pb.logout()
+                return AuthResult.Error("Your account is deactivated. Contact administrator.")
+            }
+
+            // 4. Save session
+            currentUserId       = userId
+            currentUserEmail    = email
+            currentUserName     = access.name
+            currentUserRole     = access.role
+            currentDocumentPath = access.documentPath
+
+            PocketBaseSessionManager.saveSession(
+                token        = token,
+                userId       = userId,
+                email        = email,
+                name         = access.name,
+                role         = access.role,
+                documentPath = access.documentPath
+            )
+
+            // 5. Update auth state
+            val userData = UserData(
+                uid          = userId,
+                name         = access.name,
+                email        = email,
+                role         = access.role,
+                documentPath = access.documentPath
+            )
+            _authState.value = AuthState.Authenticated(userData)
+
+            // 6. Update last login in background (fire-and-forget)
+            try {
+                pb.records.update<UserRecord>(
+                    PocketBaseInitializer.COL_USERS,
+                    userId,
+                    """{"lastLogin":"${System.currentTimeMillis()}"}"""
+                )
+            } catch (_: Exception) { /* non-critical */ }
+
+            Log.d(TAG, "Login complete for: $email ✅")
+            AuthResult.Success(userData)
+
+        } catch (e: Exception) {
+            _authState.value = AuthState.NotAuthenticated
+            Log.e(TAG, "Login failed: ${e.message}", e)
+            AuthResult.Error(mapLoginError(e.message))
         }
     }
 
-    // Get current user
-    val currentUser: FirebaseUser?
-        get() = firebaseAuth.currentUser
+    // ── Send password reset email (PocketBase built-in) ───────
+    suspend fun sendPasswordResetEmail(email: String): AuthResult {
+        return try {
+            pb.records.requestPasswordReset(PocketBaseInitializer.COL_USERS, email)
+            Log.d(TAG, "Password reset email sent to: $email ✅")
+            AuthResult.Success(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Password reset failed: ${e.message}", e)
+            AuthResult.Error(mapLoginError(e.message))
+        }
+    }
 
-    // Check if user is logged in
-    val isUserLoggedIn: Boolean
-        get() = currentUser != null
-
-    // Sign out user
+    // ── Sign out ──────────────────────────────────────────────
     fun signOut() {
         try {
-            firebaseAuth.signOut()
-            Log.d(TAG, "User signed out successfully")
+            pb.logout()
+            PocketBaseSessionManager.clearSession()
+            currentUserId       = null
+            currentUserEmail    = null
+            currentUserName     = null
+            currentUserRole     = null
+            currentDocumentPath = null
+            _authState.value    = AuthState.NotAuthenticated
+            Log.d(TAG, "User signed out ✅")
         } catch (e: Exception) {
-            Log.e(TAG, "Error signing out user", e)
+            Log.e(TAG, "Sign out error: ${e.message}")
         }
     }
 
-    // Check user authentication and role
-    suspend fun checkAuthenticationState(): AuthState {
-        return try {
-            val user = currentUser
-            if (user != null) {
-                Log.d(TAG, "Checking user role for: ${user.uid}")
-                checkUserRoleSync(user.uid)
-            } else {
-                Log.d(TAG, "No user logged in")
-                AuthState.NotAuthenticated
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking authentication state", e)
-            AuthState.Error(e.message ?: "Authentication check failed")
-        }
-    }
+    // ── Helpers ───────────────────────────────────────────────
+    val isLoggedIn: Boolean
+        get() = PocketBaseSessionManager.isLoggedIn()
 
-    // Synchronous role check
-    private suspend fun checkUserRoleSync(userId: String): AuthState {
-        return try {
-            val document = firestore.collection("users")
-                .document(userId)
-                .get()
-                .await()
-
-            if (document.exists()) {
-                val role = document.getString("role")
-                val userName = document.getString("name") ?: "Unknown"
-                val email = document.getString("email") ?: currentUser?.email ?: ""
-
-                Log.d(TAG, "User role: $role")
-
-                when {
-                    role in VALID_ROLES -> {
-                        Log.d(TAG, "Valid role found: $role")
-                        AuthState.Authenticated(
-                            user = UserData(
-                                uid = userId,
-                                name = userName,
-                                email = email,
-                                role = role ?: ""
-                            )
-                        )
-                    }
-                    else -> {
-                        Log.w(TAG, "Invalid or missing role: $role")
-                        AuthState.InvalidRole(role)
-                    }
-                }
-            } else {
-                Log.w(TAG, "User document doesn't exist")
-                AuthState.UserNotFound
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching user data", e)
-            AuthState.Error(e.message ?: "Failed to fetch user data")
-        }
-    }
-
-    // Async role check with callback
-    private fun checkUserRole(userId: String, callback: (AuthState) -> Unit) {
-        firestore.collection("users")
-            .document(userId)
-            .get()
-            .addOnSuccessListener { document ->
-                if (document.exists()) {
-                    val role = document.getString("role")
-                    val userName = document.getString("name") ?: "Unknown"
-                    val email = document.getString("email") ?: currentUser?.email ?: ""
-
-                    when {
-                        role in VALID_ROLES -> {
-                            callback(
-                                AuthState.Authenticated(
-                                    user = UserData(
-                                        uid = userId,
-                                        name = userName,
-                                        email = email,
-                                        role = role ?: ""
-                                    )
-                                )
-                            )
-                        }
-                        else -> {
-                            callback(AuthState.InvalidRole(role))
-                        }
-                    }
-                } else {
-                    callback(AuthState.UserNotFound)
-                }
-            }
-            .addOnFailureListener { e ->
-                callback(AuthState.Error(e.message ?: "Failed to fetch user data"))
-            }
+    private fun mapLoginError(msg: String?): String = when {
+        msg == null                                         -> "Unknown error occurred"
+        msg.contains("400", ignoreCase = true)             -> "Invalid email or password"
+        msg.contains("403", ignoreCase = true)             -> "Account is not active"
+        msg.contains("network", ignoreCase = true)         -> "Network error. Check your connection"
+        msg.contains("timeout", ignoreCase = true)         -> "Connection timed out. Try again"
+        msg.contains("connect", ignoreCase = true)         -> "Cannot connect to server. Check Wi-Fi"
+        else                                               -> "Login failed: $msg"
     }
 }
 
-// Data classes for authentication state
+// ── Lightweight model for access control records ──────────────
+@kotlinx.serialization.Serializable
+data class UserAccessRecord(
+    val userId: String       = "",
+    val name: String         = "",
+    val email: String        = "",
+    val role: String         = "",
+    val isActive: Boolean    = true,
+    val documentPath: String = "",
+    val permissions: String  = "[]"
+) : io.github.agrevster.pocketbaseKotlin.models.Record()
+
+// ── Sealed auth states ────────────────────────────────────────
 sealed class AuthState {
-    object Loading : AuthState()
+    object Loading          : AuthState()
     object NotAuthenticated : AuthState()
     data class Authenticated(val user: UserData) : AuthState()
-    data class InvalidRole(val role: String?) : AuthState()
-    object UserNotFound : AuthState()
-    data class Error(val message: String) : AuthState()
+    data class Error(val message: String)        : AuthState()
 }
 
+// ── Auth operation results ────────────────────────────────────
+sealed class AuthResult {
+    data class Success(val user: UserData?) : AuthResult()
+    data class Error(val message: String)   : AuthResult()
+}
+
+// ── User data model ───────────────────────────────────────────
 data class UserData(
     val uid: String,
     val name: String,
     val email: String,
-    val role: String
+    val role: String,
+    val documentPath: String = ""
 )
+
+// ── Keep PocketBaseInitializer constants accessible ───────────
+private object PocketBaseInitializer {
+    const val COL_USERS          = "users"
+    const val COL_ACCESS_CONTROL = "user_access_control"
+}

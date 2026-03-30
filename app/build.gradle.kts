@@ -148,4 +148,84 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
+
+//    val composeBom = platform(libs.androidx.compose.bom)
+//    implementation(composeBom)
+//    androidTestImplementation(composeBom)
+
+    // ── Core ──────────────────────────────────────────────────
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.activity)
+    implementation(libs.androidx.constraintlayout)
+    implementation(libs.androidx.gridlayout)
+    implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.compose.foundation)
+
+    // ── Compose UI ────────────────────────────────────────────
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.runtime.livedata)
+    implementation(libs.androidx.animation)
+    implementation(libs.androidx.foundation.android)
+    implementation(libs.androidx.animation.core.android)
+    implementation(libs.androidx.activity.compose)
+
+    // ── Lifecycle ─────────────────────────────────────────────
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+
+    // ── Navigation ────────────────────────────────────────────
+    implementation(libs.androidx.navigation.compose)
+
+    // ── Room ──────────────────────────────────────────────────
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // ── Hilt ──────────────────────────────────────────────────
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
+
+    // ── Network ───────────────────────────────────────────────
+    implementation(libs.okhttp)
+    implementation(libs.gson)
+
+    // ── Coroutines ────────────────────────────────────────────
+    implementation(libs.kotlinx.coroutines.android)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+
+    // ── Image Loading ─────────────────────────────────────────
+    implementation(libs.coil.compose)
+    implementation(libs.accompanist.coil)
+
+    // ── Security (EncryptedSharedPreferences) ─────────────────
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // ── PocketBase SDK ────────────────────────────────────────
+    implementation("io.github.agrevster:pocketbase-kotlin:2.7.3")
+    implementation("io.ktor:ktor-client-android:2.3.7")
+    implementation("io.ktor:ktor-client-content-negotiation:2.3.7")
+    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.7")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+
+    // ── SMB / jCIFS ───────────────────────────────────────────
+    implementation(libs.jcifs.ng)
+
+    // ── Debug ─────────────────────────────────────────────────
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
+
+    // ── Testing ───────────────────────────────────────────────
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+
 }

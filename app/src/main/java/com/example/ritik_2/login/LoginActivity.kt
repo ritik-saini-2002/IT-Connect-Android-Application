@@ -7,17 +7,21 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.example.ritik_2.authentication.AuthManager
+import com.example.ritik_2.authentication.AuthResult
 import com.example.ritik_2.contact.ContactActivity
+import com.example.ritik_2.data.pocketbase.PocketBaseSessionManager
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.registration.RegistrationActivity
 import com.example.ritik_2.theme.Ritik_2Theme
-import com.google.firebase.Timestamp
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class LoginActivity : ComponentActivity() {
-    private lateinit var firebaseAuth: FirebaseAuth
-    private lateinit var firestore: FirebaseFirestore
+
+    private val authManager = AuthManager.getInstance()
 
     companion object {
         const val TAG = "LoginActivity"
@@ -27,186 +31,117 @@ class LoginActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        firebaseAuth = FirebaseAuth.getInstance()
-        firestore = FirebaseFirestore.getInstance()
+        // Init encrypted session storage
+        PocketBaseSessionManager.init(this)
 
         Log.d(TAG, "LoginActivity started")
 
-        // Check if user is already authenticated
-        checkExistingAuthentication()
-    }
+        // Restore existing session if available
+        authManager.restoreSession(this)
 
-    private fun checkExistingAuthentication() {
-        val currentUser = firebaseAuth.currentUser
-        if (currentUser != null) {
-            Log.d(TAG, "Found existing user: ${currentUser.email}")
-            updateLastLogin(currentUser.uid)
-            navigateToMainActivity()
-        } else {
-            Log.d(TAG, "No existing user found")
-            clearLoginState()
-            showLoginScreen()
+        if (authManager.isLoggedIn) {
+            Log.d(TAG, "Active session found — skipping login screen")
+            navigateToMain()
+            return
         }
+
+        showLoginScreen()
     }
 
     private fun showLoginScreen() {
-        Log.d(TAG, "Showing login screen")
-
         setContent {
             Ritik_2Theme {
                 LoginScreen(
                     onLoginClick = { email, password ->
-                        performEmailPasswordLogin(email, password)
+                        performLogin(email, password)
                     },
                     onRegisterClick = {
-                        Log.d(TAG, "Navigating to registration")
-                        val intent = Intent(this, RegistrationActivity::class.java)
-                        startActivity(intent)
+                        startActivity(Intent(this, RegistrationActivity::class.java))
                     },
                     onForgotPasswordClick = { email ->
-                        sendPasswordResetEmail(email)
+                        sendPasswordReset(email)
                     },
                     onInfoClick = {
-                        Log.d(TAG, "Info button clicked - Opening Contact Activity")
-                        val intent = Intent(this, ContactActivity::class.java)
-                        startActivity(intent)
+                        startActivity(Intent(this, ContactActivity::class.java))
                     }
                 )
             }
         }
     }
 
-    // EMAIL + PASSWORD LOGIN
-    private fun performEmailPasswordLogin(email: String, password: String) {
-        Log.d(TAG, "Attempting email/password login for: $email")
-
-        if (email.isEmpty() || password.isEmpty()) {
-            Toast.makeText(this, "Please enter both email and password!", Toast.LENGTH_SHORT).show()
+    private fun performLogin(email: String, password: String) {
+        if (email.isBlank() || password.isBlank()) {
+            toast("Please enter both email and password")
             return
         }
 
-        // Validate email format
         if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-            Toast.makeText(this, "Please enter a valid email address", Toast.LENGTH_SHORT).show()
+            toast("Please enter a valid email address")
             return
         }
 
-        firebaseAuth.signInWithEmailAndPassword(email, password)
-            .addOnCompleteListener(this) { task ->
-                if (task.isSuccessful) {
-                    Log.d(TAG, "Firebase Auth login successful")
-                    Toast.makeText(this, "Login Successful!", Toast.LENGTH_SHORT).show()
-                    saveLoginState()
+        Log.d(TAG, "Attempting PocketBase login for: $email")
 
-                    val userId = firebaseAuth.currentUser?.uid
-                    if (userId != null) {
-                        updateLastLogin(userId)
-                        navigateToMainActivity()
+        CoroutineScope(Dispatchers.IO).launch {
+            when (val result = authManager.login(email, password)) {
+                is AuthResult.Success -> {
+                    Log.d(TAG, "Login successful ✅")
+                    withContext(Dispatchers.Main) {
+                        toast("Welcome back, ${result.user?.name ?: email}!")
+                        navigateToMain()
                     }
-                } else {
-                    Log.e(TAG, "Login failed: ${task.exception?.message}")
-                    val errorMessage = when {
-                        task.exception?.message?.contains("no user record", ignoreCase = true) == true ->
-                            "No account found with this email"
-                        task.exception?.message?.contains("password is invalid", ignoreCase = true) == true ||
-                                task.exception?.message?.contains("wrong password", ignoreCase = true) == true ->
-                            "Incorrect password"
-                        task.exception?.message?.contains("network", ignoreCase = true) == true ->
-                            "Network error. Please check your connection"
-                        task.exception?.message?.contains("disabled", ignoreCase = true) == true ->
-                            "This account has been disabled"
-                        else -> "Login failed: ${task.exception?.localizedMessage}"
+                }
+                is AuthResult.Error -> {
+                    Log.e(TAG, "Login failed: ${result.message}")
+                    withContext(Dispatchers.Main) {
+                        toast(result.message)
                     }
-                    Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
                 }
             }
-    }
-
-    private fun updateLastLogin(userId: String) {
-        Log.d(TAG, "Updating last login for user: $userId")
-
-        val timestamp = Timestamp.now()
-
-        firestore.collection("users").document(userId)
-            .update("lastLogin", timestamp)
-            .addOnSuccessListener {
-                Log.d(TAG, "Last login updated successfully")
-            }
-            .addOnFailureListener { e ->
-                Log.w(TAG, "Failed to update last login", e)
-            }
-    }
-
-    private fun navigateToMainActivity() {
-        Log.d(TAG, "Navigating to main activity")
-        try {
-            val intent = Intent(this, MainActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            startActivity(intent)
-            finish()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error navigating to main activity", e)
-            Toast.makeText(this, "Error navigating to main screen", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun sendPasswordResetEmail(email: String) {
-        Log.d(TAG, "Sending password reset email to: $email")
-
-        if (email.isEmpty()) {
-            Toast.makeText(this, "Please enter your email address", Toast.LENGTH_SHORT).show()
+    private fun sendPasswordReset(email: String) {
+        if (email.isBlank()) {
+            toast("Please enter your email address")
             return
         }
-
-        // Validate email format
         if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-            Toast.makeText(this, "Please enter a valid email address", Toast.LENGTH_SHORT).show()
+            toast("Please enter a valid email address")
             return
         }
 
-        firebaseAuth.sendPasswordResetEmail(email)
-            .addOnSuccessListener {
-                Log.d(TAG, "Password reset email sent successfully")
-                Toast.makeText(
-                    this,
-                    "Password reset link sent to your email!",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            .addOnFailureListener { exception ->
-                Log.e(TAG, "Failed to send password reset email", exception)
-                val errorMessage = when {
-                    exception.message?.contains("no user record", ignoreCase = true) == true ->
-                        "No account found with this email"
-                    exception.message?.contains("network", ignoreCase = true) == true ->
-                        "Network error. Please check your connection"
-                    else -> "Error: ${exception.localizedMessage}"
+        Log.d(TAG, "Sending password reset to: $email")
+
+        CoroutineScope(Dispatchers.IO).launch {
+            when (val result = authManager.sendPasswordResetEmail(email)) {
+                is AuthResult.Success -> {
+                    withContext(Dispatchers.Main) {
+                        toast("Password reset link sent to $email — check your inbox!")
+                    }
                 }
-                Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
+                is AuthResult.Error -> {
+                    withContext(Dispatchers.Main) {
+                        toast(result.message)
+                    }
+                }
             }
+        }
     }
 
-    private fun saveLoginState() {
-        val sharedPref = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
-        with(sharedPref.edit()) {
-            putBoolean("isLoggedIn", true)
-            apply()
+    private fun navigateToMain() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
-        Log.d(TAG, "Login state saved")
+        startActivity(intent)
+        finish()
     }
 
-    private fun clearLoginState() {
-        val sharedPref = getSharedPreferences("MyAppPrefs", MODE_PRIVATE)
-        with(sharedPref.edit()) {
-            putBoolean("isLoggedIn", false)
-            apply()
-        }
-        Log.d(TAG, "Login state cleared")
-    }
+    private fun toast(msg: String) =
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        Log.d(TAG, "Back pressed - exiting app")
         finishAffinity()
         super.onBackPressed()
     }

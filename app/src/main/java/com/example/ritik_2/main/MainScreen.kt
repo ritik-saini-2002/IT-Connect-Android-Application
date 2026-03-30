@@ -36,7 +36,7 @@ import coil.request.ImageRequest
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    userProfile: UserProfiledata? = null,
+    userProfile: UserProfileData? = null,
     isLoading: Boolean = false,
     onLogout: () -> Unit,
     onCardClick: (Int) -> Unit,
