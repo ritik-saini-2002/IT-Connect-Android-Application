@@ -1,7 +1,10 @@
 [versions]
 # ── Core ──────────────────────────────────────────────────────
 agp                             = "8.13.0"
+firebaseBom = "34.11.0"
 kotlin                          = "2.2.10"
+kotlinxCoroutinesCore = "1.10.2"
+kotlinxSerializationJson = "1.10.0"
 ksp                             = "2.2.10-2.0.2"
 
 # ── AndroidX ──────────────────────────────────────────────────
@@ -22,6 +25,12 @@ composeBom                      = "2025.08.00"
 composeBomVersion               = "2025.08.00"
 composeMaterial                 = "1.4.1"
 composeMaterial3                = "1.5.0-rc02"
+ktorClientAndroid = "3.4.2"
+ktorClientContentNegotiation = "3.4.2"
+ktorSerializationKotlinxJson = "3.4.2"
+playServicesAuth = "21.5.1"
+pocketbaseKotlin = "2.7.3"
+securityCrypto = "1.1.0"
 uiToolingPreviewAndroid         = "1.9.0"
 runtimeAndroid                  = "1.9.0"
 runtimeLivedata                 = "1.9.0"
@@ -98,6 +107,14 @@ androidx-activity                       = { group = "androidx.activity",   name 
 androidx-constraintlayout               = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
 androidx-gridlayout                     = { group = "androidx.gridlayout", name = "gridlayout",         version.ref = "gridlayout" }
 androidx-documentfile                   = { module = "androidx.documentfile:documentfile",              version.ref = "documentfile" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
+firebase-crashlytics-ktx = { module = "com.google.firebase:firebase-crashlytics-ktx" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutinesCore" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+ktor-client-android = { module = "io.ktor:ktor-client-android", version.ref = "ktorClientAndroid" }
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktorClientContentNegotiation" }
+ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktorSerializationKotlinxJson" }
 material                                = { group = "com.google.android.material", name = "material",   version.ref = "material" }
 
 # ── Compose BOM + UI ──────────────────────────────────────────
@@ -113,6 +130,8 @@ androidx-ui-test-junit4                 = { group = "androidx.compose.ui", name 
 androidx-compose-ui-ui                  = { module = "androidx.compose.ui:ui" }
 androidx-compose-ui-ui-tooling-preview  = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-compose-ui-ui-graphics         = { group = "androidx.compose.ui", name = "ui-graphics",       version.ref = "uiGraphics" }
+play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuth" }
+pocketbase-kotlin = { module = "io.github.agrevster:pocketbase-kotlin", version.ref = "pocketbaseKotlin" }
 ui                                      = { module = "androidx.compose.ui:ui",                          version.ref = "uiToolingPreviewAndroid" }
 ui-graphics                             = { module = "androidx.compose.ui:ui-graphics" }
 ui-tooling                              = { module = "androidx.compose.ui:ui-tooling",                  version.ref = "uiToolingPreviewAndroid" }
@@ -200,7 +219,8 @@ androidx-compose-foundation = { group = "androidx.compose.foundation", name = "f
 android-application                     = { id = "com.android.application",                  version.ref = "agp" }
 jetbrains-kotlin-android                = { id = "org.jetbrains.kotlin.android",             version.ref = "kotlin" }
 jetbrains-kotlin-compose                = { id = "org.jetbrains.kotlin.plugin.compose",      version.ref = "kotlin" }
-google-gms-google-services             = { id = "com.google.gms.google-services",            version.ref = "googleGmsGoogleServices" }
+google-gms-google-services              = { id = "com.google.gms.google-services",            version.ref = "googleGmsGoogleServices" }
 google-devtools-ksp                     = { id = "com.google.devtools.ksp",                  version.ref = "ksp" }          # ← NEW
 hilt-android                            = { id = "com.google.dagger.hilt.android",           version.ref = "hiltAndroid" }
 google-firebase-crashlytics             = { id = "com.google.firebase.crashlytics",          version = "3.0.6" }  # ← ADD THIS
+kotlin-serialization                    = { id = "org.jetbrains.kotlin.plugin.serialization", version = "1.9.0" }

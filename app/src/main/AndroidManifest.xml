@@ -81,39 +81,39 @@
             android:label="@string/title_activity_saini"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity
-            android:name=".complaint.complaintregistration.RegisterComplain"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+<!--        <activity-->
+<!--            android:name=".complaint.complaintregistration.RegisterComplain"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Theme.Ritik_2" />-->
 
-        <activity android:name=".complaint.newcomplaintregistration.NewRegisterComplaintActivity"
-            android:exported="false"
-            android:theme="@style/Base.Theme.Ritik_2"/>
+<!--        <activity android:name=".complaint.newcomplaintregistration.NewRegisterComplaintActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Base.Theme.Ritik_2"/>-->
 
-        <activity
-            android:name=".complaint.viewcomplaint.ComplaintViewActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+<!--        <activity-->
+<!--            android:name=".complaint.viewcomplaint.ComplaintViewActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Theme.Ritik_2" />-->
 
-        <activity
-            android:name=".administrator.administratorpanel.AdministratorPanelActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+<!--        <activity-->
+<!--            android:name=".administrator.administratorpanel.AdministratorPanelActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Theme.Ritik_2" />-->
 
-        <activity
-            android:name=".administrator.administratorpanel.usermanagement.ManageUserActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+<!--        <activity-->
+<!--            android:name=".administrator.administratorpanel.usermanagement.ManageUserActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Theme.Ritik_2" />-->
 
-        <activity
-            android:name=".administrator.administratorpanel.newusercreation.CreateUserActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+<!--        <activity-->
+<!--            android:name=".administrator.administratorpanel.newusercreation.CreateUserActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Theme.Ritik_2" />-->
 
-        <activity
-            android:name=".administrator.administratorpanel.databasemanager.DatabaseManagerActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+<!--        <activity-->
+<!--            android:name=".administrator.administratorpanel.databasemanager.DatabaseManagerActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Theme.Ritik_2" />-->
 
         <activity
             android:name=".profile.ProfileActivity"
@@ -130,10 +130,10 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity
-            android:name=".contact.ContactActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+<!--        <activity-->
+<!--            android:name=".contact.ContactActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Theme.Ritik_2" />-->
 
         <!-- ── PC Control (pccontrol package) ─────────────── -->
         <activity
@@ -152,9 +152,9 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".complaint.newcomplaintmodel.ComplaintManagementActivity"
-            android:exported="false"
-            android:theme="@style/Base.Theme.Ritik_2"/>
+<!--        <activity android:name=".complaint.newcomplaintmodel.ComplaintManagementActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@style/Base.Theme.Ritik_2"/>-->
 
         <!-- ── Dev / Test ─────────────────────────────────── -->
         <activity

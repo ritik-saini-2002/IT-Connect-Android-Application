@@ -12,16 +12,16 @@ import com.example.ritik_2.authentication.AuthManager
 import com.example.ritik_2.authentication.AuthState
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.main.MainActivity
+import com.example.ritik_2.pocketbase.PocketBaseSessionManager
 import com.example.ritik_2.theme.Ritik_2Theme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.getValue
 
 @SuppressLint("CustomSplashScreen")
 class SplashActivity : ComponentActivity() {
 
     companion object {
-        private const val TAG = "SplashActivity"
+        private const val TAG                    = "SplashActivity"
         private const val MINIMUM_SPLASH_DURATION = 3000L
     }
 
@@ -29,6 +29,10 @@ class SplashActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Init session before auth check
+        PocketBaseSessionManager.init(this)
+        authManager.restoreSession(this)
 
         Log.d(TAG, "SplashActivity created")
 
@@ -43,75 +47,58 @@ class SplashActivity : ComponentActivity() {
     private fun SplashScreenContent() {
         var splashAnimationComplete by remember { mutableStateOf(false) }
         var minimumDurationComplete by remember { mutableStateOf(false) }
-        var authCheckComplete by remember { mutableStateOf(false) }
-        var authState by remember { mutableStateOf<AuthState>(AuthState.Loading) }
+        var authCheckComplete       by remember { mutableStateOf(false) }
+        var resolvedAuthState       by remember { mutableStateOf<AuthState>(AuthState.Loading) }
 
-        // Ensure minimum splash duration
+        // Minimum splash duration
         LaunchedEffect(Unit) {
-            Log.d(TAG, "Starting minimum splash duration")
             delay(MINIMUM_SPLASH_DURATION)
             minimumDurationComplete = true
-            Log.d(TAG, "Minimum splash duration completed")
+            Log.d(TAG, "Minimum duration completed")
         }
 
-        // Perform authentication check
+        // Auth check — just read restored state
         LaunchedEffect(Unit) {
-            Log.d(TAG, "Starting authentication check")
-            authState = authManager.checkAuthenticationState()
+            delay(300)
+            resolvedAuthState = authManager.checkAuthenticationState()
             authCheckComplete = true
-            Log.d(TAG, "Authentication check completed: $authState")
+            Log.d(TAG, "Auth check completed: $resolvedAuthState")
         }
 
-        // Handle navigation when all conditions are met
+        // Navigate when all conditions met
         LaunchedEffect(splashAnimationComplete, minimumDurationComplete, authCheckComplete) {
             if (splashAnimationComplete && minimumDurationComplete && authCheckComplete) {
-                Log.d(TAG, "All conditions met, handling navigation")
-                handleAuthenticationResult(authState)
+                handleNavigation(resolvedAuthState)
             }
         }
 
         ITConnectSplashScreen(
             onSplashComplete = {
-                Log.d(TAG, "Splash animation completed")
                 splashAnimationComplete = true
+                Log.d(TAG, "Splash animation completed")
             }
         )
     }
 
-    private fun handleAuthenticationResult(authState: AuthState) {
+    private fun handleNavigation(state: AuthState) {
         lifecycleScope.launch {
-            when (authState) {
+            Log.d(TAG, "Navigating based on state: $state")
+            when (state) {
                 is AuthState.Authenticated -> {
-                    Log.d(TAG, "User authenticated with role: ${authState.user.role}")
+                    Log.d(TAG, "Authenticated as: ${state.user.role}")
                     navigateToMain()
                 }
-
                 is AuthState.NotAuthenticated -> {
-                    Log.d(TAG, "User not authenticated")
+                    Log.d(TAG, "Not authenticated")
                     navigateToLogin()
                 }
-
-                is AuthState.InvalidRole -> {
-                    Log.w(TAG, "Invalid user role: ${authState.role}")
-                    authManager.signOut()
-                    navigateToLogin()
-                }
-
-                is AuthState.UserNotFound -> {
-                    Log.w(TAG, "User document not found")
-                    authManager.signOut()
-                    navigateToLogin()
-                }
-
                 is AuthState.Error -> {
-                    Log.e(TAG, "Authentication error: ${authState.message}")
+                    Log.e(TAG, "Auth error: ${state.message}")
                     authManager.signOut()
                     navigateToLogin()
                 }
-
                 is AuthState.Loading -> {
-                    Log.d(TAG, "Still loading authentication state")
-                    // This shouldn't happen as we wait for completion
+                    Log.d(TAG, "Still loading — defaulting to login")
                     navigateToLogin()
                 }
             }
@@ -119,25 +106,23 @@ class SplashActivity : ComponentActivity() {
     }
 
     private fun navigateToMain() {
-        if (!isFinishing && !isDestroyed) {
-            Log.d(TAG, "Navigating to MainActivity")
-            val intent = Intent(this, MainActivity::class.java).apply {
+        if (isFinishing || isDestroyed) return
+        startActivity(
+            Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }
-            startActivity(intent)
-            finish()
-        }
+        )
+        finish()
     }
 
     private fun navigateToLogin() {
-        if (!isFinishing && !isDestroyed) {
-            Log.d(TAG, "Navigating to LoginActivity")
-            val intent = Intent(this, LoginActivity::class.java).apply {
+        if (isFinishing || isDestroyed) return
+        startActivity(
+            Intent(this, LoginActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }
-            startActivity(intent)
-            finish()
-        }
+        )
+        finish()
     }
 
     override fun onDestroy() {

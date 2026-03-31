@@ -2,10 +2,9 @@ package com.example.ritik_2.authentication
 
 import android.content.Context
 import android.util.Log
-import com.example.ritik_2.data.pocketbase.PocketBaseClient
-import com.example.ritik_2.data.pocketbase.PocketBaseSessionManager
-import com.example.ritik_2.registration.models.UserRecord
-import io.github.agrevster.pocketbaseKotlin.models.AuthRecord
+import com.example.ritik_2.data.source.AppDataSource
+import com.example.ritik_2.data.source.PocketBaseDataSource
+import com.example.ritik_2.pocketbase.PocketBaseSessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,120 +15,81 @@ class AuthManager private constructor() {
         private const val TAG = "AuthManager"
 
         @Volatile private var INSTANCE: AuthManager? = null
-
         fun getInstance(): AuthManager =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: AuthManager().also { INSTANCE = it }
             }
     }
 
-    private val pb = PocketBaseClient.instance
+    // ── DataSource — swap here to change auth backend ─────────
+    private val dataSource: AppDataSource = PocketBaseDataSource()
 
-    // ── Auth state exposed as StateFlow ───────────────────────
     private val _authState = MutableStateFlow<AuthState>(AuthState.Loading)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
-    // ── Current user shortcut ─────────────────────────────────
-    var currentUserId: String? = null
-        private set
-    var currentUserEmail: String? = null
-        private set
-    var currentUserName: String? = null
-        private set
-    var currentUserRole: String? = null
-        private set
-    var currentDocumentPath: String? = null
-        private set
+    val isLoggedIn: Boolean
+        get() = PocketBaseSessionManager.isLoggedIn()
 
-    // ── Restore session from encrypted prefs ──────────────────
+    val currentUserId: String?
+        get() = PocketBaseSessionManager.getUserId()
+
+    // ── Restore session ───────────────────────────────────────
     fun restoreSession(context: Context) {
         PocketBaseSessionManager.init(context)
 
         if (PocketBaseSessionManager.isLoggedIn()) {
             val token = PocketBaseSessionManager.getToken()!!
-            // Restore token into PocketBase client
-            pb.login { this.token = token }
 
-            currentUserId       = PocketBaseSessionManager.getUserId()
-            currentUserEmail    = PocketBaseSessionManager.getEmail()
-            currentUserName     = PocketBaseSessionManager.getName()
-            currentUserRole     = PocketBaseSessionManager.getRole()
-            currentDocumentPath = PocketBaseSessionManager.getDocPath()
+            kotlinx.coroutines.runBlocking {
+                try { dataSource.restoreSession(token) } catch (_: Exception) {}
+            }
 
-            _authState.value = AuthState.Authenticated(
-                UserData(
-                    uid          = currentUserId!!,
-                    name         = currentUserName ?: "",
-                    email        = currentUserEmail ?: "",
-                    role         = currentUserRole ?: "",
-                    documentPath = currentDocumentPath ?: ""
-                )
+            val userData = UserData(
+                uid          = PocketBaseSessionManager.getUserId() ?: "",
+                name         = PocketBaseSessionManager.getName() ?: "",
+                email        = PocketBaseSessionManager.getEmail() ?: "",
+                role         = PocketBaseSessionManager.getRole() ?: "",
+                documentPath = PocketBaseSessionManager.getDocPath() ?: ""
             )
-            Log.d(TAG, "Session restored for: $currentUserEmail ✅")
+            _authState.value = AuthState.Authenticated(userData)
+            Log.d(TAG, "Session restored for: ${userData.email} ✅")
         } else {
             _authState.value = AuthState.NotAuthenticated
-            Log.d(TAG, "No saved session found")
         }
     }
 
     // ── Login ─────────────────────────────────────────────────
-    suspend fun login(email: String, password: String): AuthResult {
+    suspend fun login(email: String, password: String): LoginResult {
         return try {
             _authState.value = AuthState.Loading
 
-            // 1. Authenticate with PocketBase
-            val authResponse = pb.records
-                .authWithPassword<AuthRecord>(
-                    PocketBaseInitializer.COL_USERS,
-                    email,
-                    password
-                )
+            val authResult = dataSource.login(email, password)
 
-            val token  = authResponse.token
-                ?: return AuthResult.Error("Authentication failed — no token received")
-            val userId = authResponse.record?.id
-                ?: return AuthResult.Error("Authentication failed — no user ID")
-
-            // 2. Login client with token
-            pb.login { this.token = token }
-            Log.d(TAG, "PocketBase auth successful for: $email ✅")
-
-            // 3. Fetch user access control record for role + documentPath
-            val accessResult = pb.records.getList<UserAccessRecord>(
-                PocketBaseInitializer.COL_ACCESS_CONTROL, 1, 1,
-                "userId='$userId'"
-            )
-
-            if (accessResult.totalItems == 0) {
-                return AuthResult.Error("User profile not configured. Contact administrator.")
+            // Verify access control
+            val accessResult = dataSource.getUserAccessControl(authResult.userId)
+            if (accessResult.isFailure) {
+                dataSource.logout()
+                return LoginResult.Error("Profile not configured. Contact administrator.")
             }
 
-            val access = accessResult.items.first()
-
+            val access = accessResult.getOrThrow()
             if (!access.isActive) {
-                pb.logout()
-                return AuthResult.Error("Your account is deactivated. Contact administrator.")
+                dataSource.logout()
+                return LoginResult.Error("Account deactivated. Contact administrator.")
             }
 
-            // 4. Save session
-            currentUserId       = userId
-            currentUserEmail    = email
-            currentUserName     = access.name
-            currentUserRole     = access.role
-            currentDocumentPath = access.documentPath
-
+            // Save session
             PocketBaseSessionManager.saveSession(
-                token        = token,
-                userId       = userId,
+                token        = authResult.token,
+                userId       = authResult.userId,
                 email        = email,
                 name         = access.name,
                 role         = access.role,
                 documentPath = access.documentPath
             )
 
-            // 5. Update auth state
             val userData = UserData(
-                uid          = userId,
+                uid          = authResult.userId,
                 name         = access.name,
                 email        = email,
                 role         = access.role,
@@ -137,82 +97,50 @@ class AuthManager private constructor() {
             )
             _authState.value = AuthState.Authenticated(userData)
 
-            // 6. Update last login in background (fire-and-forget)
-            try {
-                pb.records.update<UserRecord>(
-                    PocketBaseInitializer.COL_USERS,
-                    userId,
-                    """{"lastLogin":"${System.currentTimeMillis()}"}"""
-                )
-            } catch (_: Exception) { /* non-critical */ }
-
-            Log.d(TAG, "Login complete for: $email ✅")
-            AuthResult.Success(userData)
+            Log.d(TAG, "Login success: $email ✅")
+            LoginResult.Success(userData)
 
         } catch (e: Exception) {
             _authState.value = AuthState.NotAuthenticated
             Log.e(TAG, "Login failed: ${e.message}", e)
-            AuthResult.Error(mapLoginError(e.message))
+            LoginResult.Error(mapError(e.message))
         }
     }
 
-    // ── Send password reset email (PocketBase built-in) ───────
-    suspend fun sendPasswordResetEmail(email: String): AuthResult {
+    // ── Password reset ────────────────────────────────────────
+    suspend fun sendPasswordResetEmail(email: String): LoginResult {
         return try {
-            pb.records.requestPasswordReset(PocketBaseInitializer.COL_USERS, email)
-            Log.d(TAG, "Password reset email sent to: $email ✅")
-            AuthResult.Success(null)
+            dataSource.sendPasswordReset(email).getOrThrow()
+            LoginResult.Success(null)
         } catch (e: Exception) {
-            Log.e(TAG, "Password reset failed: ${e.message}", e)
-            AuthResult.Error(mapLoginError(e.message))
+            LoginResult.Error(mapError(e.message))
         }
     }
 
     // ── Sign out ──────────────────────────────────────────────
     fun signOut() {
-        try {
-            pb.logout()
-            PocketBaseSessionManager.clearSession()
-            currentUserId       = null
-            currentUserEmail    = null
-            currentUserName     = null
-            currentUserRole     = null
-            currentDocumentPath = null
-            _authState.value    = AuthState.NotAuthenticated
-            Log.d(TAG, "User signed out ✅")
-        } catch (e: Exception) {
-            Log.e(TAG, "Sign out error: ${e.message}")
+        kotlinx.coroutines.runBlocking {
+            try { dataSource.logout() } catch (_: Exception) {}
         }
+        PocketBaseSessionManager.clearSession()
+        _authState.value = AuthState.NotAuthenticated
+        Log.d(TAG, "Signed out ✅")
     }
 
-    // ── Helpers ───────────────────────────────────────────────
-    val isLoggedIn: Boolean
-        get() = PocketBaseSessionManager.isLoggedIn()
+    // ── Used by SplashActivity ────────────────────────────────
+    fun checkAuthenticationState(): AuthState = _authState.value
 
-    private fun mapLoginError(msg: String?): String = when {
-        msg == null                                         -> "Unknown error occurred"
-        msg.contains("400", ignoreCase = true)             -> "Invalid email or password"
-        msg.contains("403", ignoreCase = true)             -> "Account is not active"
-        msg.contains("network", ignoreCase = true)         -> "Network error. Check your connection"
-        msg.contains("timeout", ignoreCase = true)         -> "Connection timed out. Try again"
-        msg.contains("connect", ignoreCase = true)         -> "Cannot connect to server. Check Wi-Fi"
-        else                                               -> "Login failed: $msg"
+    private fun mapError(msg: String?): String = when {
+        msg == null                                -> "Unknown error"
+        msg.contains("400")                        -> "Invalid email or password"
+        msg.contains("network", ignoreCase = true) -> "Network error — check Wi-Fi"
+        msg.contains("timeout", ignoreCase = true) -> "Connection timed out"
+        msg.contains("connect", ignoreCase = true) -> "Cannot reach server — check IP"
+        else                                       -> "Login failed: $msg"
     }
 }
 
-// ── Lightweight model for access control records ──────────────
-@kotlinx.serialization.Serializable
-data class UserAccessRecord(
-    val userId: String       = "",
-    val name: String         = "",
-    val email: String        = "",
-    val role: String         = "",
-    val isActive: Boolean    = true,
-    val documentPath: String = "",
-    val permissions: String  = "[]"
-) : io.github.agrevster.pocketbaseKotlin.models.Record()
-
-// ── Sealed auth states ────────────────────────────────────────
+// ── Sealed states ─────────────────────────────────────────────
 sealed class AuthState {
     object Loading          : AuthState()
     object NotAuthenticated : AuthState()
@@ -220,13 +148,11 @@ sealed class AuthState {
     data class Error(val message: String)        : AuthState()
 }
 
-// ── Auth operation results ────────────────────────────────────
-sealed class AuthResult {
-    data class Success(val user: UserData?) : AuthResult()
-    data class Error(val message: String)   : AuthResult()
+sealed class LoginResult {
+    data class Success(val user: UserData?) : LoginResult()
+    data class Error(val message: String)   : LoginResult()
 }
 
-// ── User data model ───────────────────────────────────────────
 data class UserData(
     val uid: String,
     val name: String,
@@ -234,9 +160,3 @@ data class UserData(
     val role: String,
     val documentPath: String = ""
 )
-
-// ── Keep PocketBaseInitializer constants accessible ───────────
-private object PocketBaseInitializer {
-    const val COL_USERS          = "users"
-    const val COL_ACCESS_CONTROL = "user_access_control"
-}

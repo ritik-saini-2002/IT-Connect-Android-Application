@@ -1,4 +1,4 @@
-package com.example.ritik_2.data.pocketbase
+package com.example.ritik_2.pocketbase
 
 import android.content.Context
 import android.content.SharedPreferences

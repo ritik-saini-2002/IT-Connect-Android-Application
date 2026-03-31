@@ -5,7 +5,8 @@ plugins {
     alias(libs.plugins.google.gms.google.services)
     alias(libs.plugins.google.devtools.ksp)
     alias(libs.plugins.hilt.android)
-    alias(libs.plugins.google.firebase.crashlytics)  // ← ADD THIS — fixes crash
+    alias(libs.plugins.google.firebase.crashlytics)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -35,123 +36,34 @@ android {
 
     buildFeatures {
         viewBinding = true
-        compose = true
+        compose     = true
     }
-
-    // ✅ With Kotlin 2.x + jetbrains.kotlin.compose plugin,
-    // DO NOT set kotlinCompilerExtensionVersion manually.
-    // The plugin handles it automatically.
-    // composeOptions block is NOT needed.
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "1.8"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "/META-INF/NOTICE.md"           // ← avoids jcifs conflicts
+            excludes += "/META-INF/NOTICE.md"
             excludes += "/META-INF/LICENSE.md"
         }
     }
 }
 
 dependencies {
-
-    implementation(libs.androidx.compose.foundation)
     // ── Compose BOM ───────────────────────────────────────────
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
     androidTestImplementation(composeBom)
-
-    // ── Core ──────────────────────────────────────────────────
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.activity)
-    implementation(libs.androidx.constraintlayout)
-    implementation(libs.androidx.gridlayout)
-    implementation(libs.androidx.documentfile)
-
-    // ── Compose UI ────────────────────────────────────────────
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.extended)
-    implementation(libs.androidx.runtime.livedata)
-    implementation(libs.androidx.animation)
-    implementation(libs.androidx.foundation.android)
-    implementation(libs.androidx.animation.core.android)
-
-    // ── Activity Compose ──────────────────────────────────────
-    implementation(libs.androidx.activity.compose)
-
-    // ── Lifecycle ─────────────────────────────────────────────
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.lifecycle.runtime.compose)
-
-    // ── Navigation ────────────────────────────────────────────
-    implementation(libs.androidx.navigation.compose)
-
-    // ── Room (KSP instead of kapt) ────────────────────────────
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)                // ← KSP (not kapt)
-
-    // ── Hilt ──────────────────────────────────────────────────
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.android.compiler)                 // ← KSP (not kapt)
-    implementation(libs.androidx.hilt.navigation.compose)
-
-    // ── OkHttp + Gson (REQUIRED for pccontrol package) ────────
-    implementation(libs.okhttp)                     // ← NEW
-    implementation(libs.gson)                       // ← NEW (already hardcoded but now in toml)
-
-    // ── Coroutines ────────────────────────────────────────────
-    implementation(libs.kotlinx.coroutines.android)
-
-    // ── Image Loading ─────────────────────────────────────────
-    implementation(libs.coil.compose)
-    implementation(libs.accompanist.coil)
-
-    // ── Firebase ──────────────────────────────────────────────
-    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
-    implementation(libs.firebase.auth)
-    implementation(libs.firebase.firestore.ktx)
-    implementation(libs.firebase.storage)
-    implementation(libs.firebase.database.ktx)
-    implementation(libs.firebase.inappmessaging.display)
-    implementation(libs.firebase.messaging)
-    implementation(libs.firebase.functions.ktx)
-    implementation("com.google.firebase:firebase-crashlytics-ktx")  // works with plugin above
-
-    // ── GMS ───────────────────────────────────────────────────
-    implementation("com.google.android.gms:play-services-auth:20.7.0")
-    implementation("com.google.android.gms:play-services-auth-api-phone:18.0.1")
-
-    // ── SMB / jCIFS ───────────────────────────────────────────
-    implementation(libs.jcifs.ng)
-
-    // ── Debug ─────────────────────────────────────────────────
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-
-    // ── Testing ───────────────────────────────────────────────
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-
-//    val composeBom = platform(libs.androidx.compose.bom)
-//    implementation(composeBom)
-//    androidTestImplementation(composeBom)
 
     // ── Core ──────────────────────────────────────────────────
     implementation(libs.androidx.core.ktx)
@@ -199,21 +111,32 @@ dependencies {
 
     // ── Coroutines ────────────────────────────────────────────
     implementation(libs.kotlinx.coroutines.android)
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    implementation(libs.kotlinx.coroutines.core)
+
+    // ── Serialization ─────────────────────────────────────────
+    implementation(libs.kotlinx.serialization.json)
 
     // ── Image Loading ─────────────────────────────────────────
     implementation(libs.coil.compose)
     implementation(libs.accompanist.coil)
 
-    // ── Security (EncryptedSharedPreferences) ─────────────────
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // ── Security ──────────────────────────────────────────────
+    implementation(libs.androidx.security.crypto)
+
+    // ── Firebase (Storage + Crashlytics only) ─────────────────
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.storage)           // kept for other activities
+    implementation(libs.firebase.messaging)         // kept for FCM if needed later
+    implementation(libs.firebase.crashlytics.ktx)
+
+    // ── GMS ───────────────────────────────────────────────────
+    implementation(libs.play.services.auth)
 
     // ── PocketBase SDK ────────────────────────────────────────
-    implementation("io.github.agrevster:pocketbase-kotlin:2.7.3")
-    implementation("io.ktor:ktor-client-android:2.3.7")
-    implementation("io.ktor:ktor-client-content-negotiation:2.3.7")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.7")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    implementation(libs.pocketbase.kotlin)
+    implementation(libs.ktor.client.android)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
 
     // ── SMB / jCIFS ───────────────────────────────────────────
     implementation(libs.jcifs.ng)
@@ -227,5 +150,4 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
-
 }
