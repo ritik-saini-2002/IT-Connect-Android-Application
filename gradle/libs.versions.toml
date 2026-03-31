@@ -1,11 +1,11 @@
 [versions]
 # ── Core ──────────────────────────────────────────────────────
-agp                             = "8.13.0"
+agp                             = "9.1.0"
 firebaseBom = "34.11.0"
 kotlin                          = "2.2.10"
 kotlinxCoroutinesCore = "1.10.2"
 kotlinxSerializationJson = "1.10.0"
-ksp                             = "2.2.10-2.0.2"
+ksp                             = "2.3.2"
 
 # ── AndroidX ──────────────────────────────────────────────────
 coreKtx                         = "1.17.0"
