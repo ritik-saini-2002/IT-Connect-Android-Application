@@ -130,10 +130,10 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-<!--        <activity-->
-<!--            android:name=".contact.ContactActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2" />-->
+        <activity
+            android:name=".contact.ContactActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── PC Control (pccontrol package) ─────────────── -->
         <activity

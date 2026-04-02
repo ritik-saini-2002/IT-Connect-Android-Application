@@ -23,7 +23,6 @@ import com.example.ritik_2.registration.models.SearchIndexRecord
 import com.example.ritik_2.registration.models.UserRecord
 import com.example.ritik_2.theme.Ritik_2Theme
 import io.github.agrevster.pocketbaseKotlin.FileUpload
-import io.github.agrevster.pocketbaseKotlin.dsl.query.Filter
 import io.github.agrevster.pocketbaseKotlin.toJsonPrimitive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,17 +35,17 @@ class ProfileActivity : ComponentActivity() {
 
     private val pb = PocketBaseClient.instance
 
-    private var profileImageUri by mutableStateOf<Uri?>(null)
-    private var name            by mutableStateOf("Loading...")
-    private var email           by mutableStateOf("")
-    private var phoneNumber     by mutableStateOf("")
-    private var designation     by mutableStateOf("")
-    private var companyName     by mutableStateOf("")
-    private var role            by mutableStateOf("")
-    private var experience      by mutableStateOf(0)
+    private var profileImageUri   by mutableStateOf<Uri?>(null)
+    private var name              by mutableStateOf("Loading...")
+    private var email             by mutableStateOf("")
+    private var phoneNumber       by mutableStateOf("")
+    private var designation       by mutableStateOf("")
+    private var companyName       by mutableStateOf("")
+    private var role              by mutableStateOf("")
+    private var experience        by mutableStateOf(0)
     private var completedProjects by mutableStateOf(0)
-    private var activeProjects  by mutableStateOf(0)
-    private var isLoading       by mutableStateOf(true)
+    private var activeProjects    by mutableStateOf(0)
+    private var isLoading         by mutableStateOf(true)
 
     private var sanitizedCompanyName by mutableStateOf<String?>(null)
 
@@ -61,13 +60,13 @@ class ProfileActivity : ComponentActivity() {
             }
     }
 
-    // Image picker
-    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let {
-            profileImageUri = it
-            uploadProfilePicture(it)
+    private val imagePicker =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            uri?.let {
+                profileImageUri = it
+                uploadProfilePicture(it)
+            }
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -107,6 +106,7 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
+    // ── Load profile ──────────────────────────────────────────
     private fun loadUserProfile() {
         val uid = userId ?: return
         Log.d(TAG, "📊 Loading user profile for: $uid")
@@ -114,23 +114,26 @@ class ProfileActivity : ComponentActivity() {
 
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                // 1. Get access control record
+                // 1. Fetch ALL access control records, then filter in-memory
+                //    This avoids any Filter DSL issues with the SDK version
                 val accessResult = withContext(Dispatchers.IO) {
                     pb.records.getList<AccessControlRecord>(
-                        COL_ACCESS_CONTROL, 1, 1,
-                        //filter = Filter("userId='$uid'")
+                        COL_ACCESS_CONTROL,
+                        page     = 1,
+                        perPage  = 200   // fetch enough to find the user
                     )
                 }
 
-                if (accessResult.totalItems == 0) {
-                    Log.e(TAG, "❌ User access control not found")
+                val access = accessResult.items.firstOrNull { it.userId == uid }
+
+                if (access == null) {
+                    Log.e(TAG, "❌ User access control not found for uid: $uid")
                     showToast("User access not found")
                     isLoading = false
                     return@launch
                 }
 
-                val access = accessResult.items.first()
-                role                 = access.role ?: ""
+                role                 = access.role
                 sanitizedCompanyName = access.sanitizedCompanyName
 
                 if (!access.isActive) {
@@ -144,13 +147,13 @@ class ProfileActivity : ComponentActivity() {
                     pb.records.getOne<UserRecord>(COL_USERS, uid)
                 }
 
-                name        = userRecord.name ?: "Unknown"
+                name        = userRecord.name.ifBlank { "Unknown" }
                 email       = PocketBaseSessionManager.getEmail() ?: ""
-                designation = userRecord.designation ?: ""
-                companyName = userRecord.companyName ?: ""
+                designation = userRecord.designation
+                companyName = userRecord.companyName
 
-                // Parse profile JSON
-                userRecord.profile.takeIf { it.isNotBlank() }?.let { profileJson ->
+                // 3. Parse profile JSON
+                userRecord.profile.takeIf { it.isNotBlank() && it != "{}" }?.let { profileJson ->
                     phoneNumber = extractString(profileJson, "phoneNumber")
                     val imageUrl = extractString(profileJson, "imageUrl")
                     if (imageUrl.isNotEmpty()) {
@@ -158,8 +161,8 @@ class ProfileActivity : ComponentActivity() {
                     }
                 }
 
-                // Parse workStats JSON
-                userRecord.workStats.takeIf { it.isNotBlank() }?.let { workJson ->
+                // 4. Parse workStats JSON
+                userRecord.workStats.takeIf { it.isNotBlank() && it != "{}" }?.let { workJson ->
                     experience        = extractInt(workJson, "experience")
                     completedProjects = extractInt(workJson, "completedProjects")
                     activeProjects    = extractInt(workJson, "activeProjects")
@@ -176,6 +179,7 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
+    // ── Update user data ──────────────────────────────────────
     private fun updateUserData(field: String, newValue: String) {
         val uid = userId ?: return
         Log.d(TAG, "📝 Updating field: $field")
@@ -189,29 +193,27 @@ class ProfileActivity : ComponentActivity() {
                                 COL_USERS, uid,
                                 body = mapOf(field to newValue.toJsonPrimitive()).toString()
                             )
-                            // Sync name to access control + search index
                             if (field == "name") {
                                 syncNameToAccessControl(uid, newValue)
                                 syncNameToSearchIndex(uid, newValue)
                             }
                         }
+
                         "phoneNumber" -> {
-                            // Update nested profile JSON by re-fetching and merging
                             val current = pb.records.getOne<UserRecord>(COL_USERS, uid)
-                            val updated = current.profile
-                                .replace(Regex(""""phoneNumber"\s*:\s*"[^"]*""""),
-                                    """"phoneNumber":"$newValue"""")
+                            val updated = mergeJsonString(
+                                current.profile, "phoneNumber", newValue
+                            )
                             pb.records.update<UserRecord>(
                                 COL_USERS, uid,
                                 body = mapOf("profile" to updated.toJsonPrimitive()).toString()
                             )
                         }
+
                         "experience", "completedProjects", "activeProjects" -> {
-                            val intVal = newValue.toIntOrNull() ?: 0
+                            val intVal  = newValue.toIntOrNull() ?: 0
                             val current = pb.records.getOne<UserRecord>(COL_USERS, uid)
-                            val updated = current.workStats
-                                .replace(Regex(""""$field"\s*:\s*\d+"""),
-                                    """"$field":$intVal""")
+                            val updated = mergeJsonInt(current.workStats, field, intVal)
                             pb.records.update<UserRecord>(
                                 COL_USERS, uid,
                                 body = mapOf("workStats" to updated.toJsonPrimitive()).toString()
@@ -240,19 +242,20 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
+    // ── Sync helpers (in-memory filter) ──────────────────────
     private suspend fun syncNameToAccessControl(uid: String, newName: String) {
         try {
             val result = pb.records.getList<AccessControlRecord>(
-                COL_ACCESS_CONTROL, 1, 1,
-                //filter = Filter("userId='$uid'")
+                COL_ACCESS_CONTROL, page = 1, perPage = 200
             )
-            if (result.totalItems > 0) {
-                val id = result.items.first().id!!
-                pb.records.update<AccessControlRecord>(
-                    COL_ACCESS_CONTROL, id,
-                    body = mapOf("name" to newName.toJsonPrimitive()).toString()
-                )
-            }
+            val record = result.items.firstOrNull { it.userId == uid } ?: return
+            val id = record.id ?: return
+
+            pb.records.update<AccessControlRecord>(
+                COL_ACCESS_CONTROL, id,
+                body = mapOf("name" to newName.toJsonPrimitive()).toString()
+            )
+            Log.d(TAG, "✅ Name synced to access control")
         } catch (e: Exception) {
             Log.w(TAG, "⚠️ Failed to sync name to access control: ${e.message}")
         }
@@ -261,21 +264,22 @@ class ProfileActivity : ComponentActivity() {
     private suspend fun syncNameToSearchIndex(uid: String, newName: String) {
         try {
             val result = pb.records.getList<SearchIndexRecord>(
-                COL_SEARCH_INDEX, 1, 1,
-                //filter = Filter("userId='$uid'")
+                COL_SEARCH_INDEX, page = 1, perPage = 200
             )
-            if (result.totalItems > 0) {
-                val id = result.items.first().id!!
-                pb.records.update<SearchIndexRecord>(
-                    COL_SEARCH_INDEX, id,
-                    body = mapOf("name" to newName.lowercase().toJsonPrimitive()).toString()
-                )
-            }
+            val record = result.items.firstOrNull { it.userId == uid } ?: return
+            val id = record.id ?: return
+
+            pb.records.update<SearchIndexRecord>(
+                COL_SEARCH_INDEX, id,
+                body = mapOf("name" to newName.lowercase().toJsonPrimitive()).toString()
+            )
+            Log.d(TAG, "✅ Name synced to search index")
         } catch (e: Exception) {
             Log.w(TAG, "⚠️ Failed to sync name to search index: ${e.message}")
         }
     }
 
+    // ── Upload profile picture ────────────────────────────────
     private fun uploadProfilePicture(imageUri: Uri) {
         val uid = userId ?: return
         Log.d(TAG, "📸 Uploading profile picture")
@@ -292,7 +296,9 @@ class ProfileActivity : ComponentActivity() {
                     pb.records.update<UserRecord>(
                         COL_USERS, uid,
                         body  = mapOf("name" to uid.toJsonPrimitive()),
-                        files = listOf(FileUpload("profileImage", tempFile.readBytes(), "profile_$uid.jpg"))
+                        files = listOf(
+                            FileUpload("profileImage", tempFile.readBytes(), "profile_$uid.jpg")
+                        )
                     )
 
                     "${PocketBaseClient.BASE_URL}/api/files/$COL_USERS/$uid/profile_$uid.jpg"
@@ -309,6 +315,7 @@ class ProfileActivity : ComponentActivity() {
         }
     }
 
+    // ── Auth ──────────────────────────────────────────────────
     private fun logoutUser() {
         Log.d(TAG, "🚪 User logging out")
         PocketBaseSessionManager.clearSession()
@@ -339,4 +346,31 @@ class ProfileActivity : ComponentActivity() {
 
     private fun extractInt(json: String, key: String): Int =
         Regex(""""$key"\s*:\s*(\d+)""").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+
+    /**
+     * Replaces or inserts a string value in a JSON string.
+     * e.g. mergeJsonString("""{"phoneNumber":"old"}""", "phoneNumber", "new")
+     *      → """{"phoneNumber":"new"}"""
+     */
+    private fun mergeJsonString(json: String, key: String, value: String): String {
+        val pattern = Regex(""""$key"\s*:\s*"[^"]*"""")
+        return if (pattern.containsMatchIn(json)) {
+            pattern.replace(json, """"$key":"$value"""")
+        } else {
+            // Insert before closing brace
+            json.trimEnd().removeSuffix("}") + """"$key":"$value"}"""
+        }
+    }
+
+    /**
+     * Replaces or inserts an int value in a JSON string.
+     */
+    private fun mergeJsonInt(json: String, key: String, value: Int): String {
+        val pattern = Regex(""""$key"\s*:\s*\d+""")
+        return if (pattern.containsMatchIn(json)) {
+            pattern.replace(json, """"$key":$value""")
+        } else {
+            json.trimEnd().removeSuffix("}") + """"$key":$value}"""
+        }
+    }
 }
