@@ -1,39 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <!--
-        FIXED 1: Removed package="com.example.ritik_2" — deprecated in AGP 8+,
-                 causes warning "Setting namespace via package attribute no longer supported"
-                 Namespace is now set in build.gradle.kts only.
 
-        FIXED 2: PcControlActivity theme changed from Base.Theme.Ritik_2
-                 to Theme.Ritik_2 (Base theme used directly can cause crashes)
-    -->
-
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="false" />
-    <uses-feature
-        android:name="android.hardware.telephony"
-        android:required="false" />
-
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Legacy storage — only up to API 32 -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Optional hardware -->
+    <uses-feature android:name="android.hardware.camera"    android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
+    <!-- App queries for external intents -->
     <queries>
         <intent>
             <action android:name="android.intent.action.SENDTO" />
@@ -47,7 +34,6 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="geo" />
         </intent>
-        <package android:name="com.google.android.apps.maps" />
     </queries>
 
     <application
@@ -56,17 +42,16 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@drawable/it_connect_logo"
-        android:label="Ritik Saini"
         android:roundIcon="@drawable/it_connect_logo"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Ritik_2"
-        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="35">
 
-        <!-- ── Main Activities ─────────────────────────────── -->
-
+        <!-- ── SPLASH — this is the entry point ───────────── -->
         <activity
-            android:name=".login.LoginActivity"
+            android:name=".splash.SplashActivity"
             android:exported="true"
             android:theme="@style/Theme.Ritik_2">
             <intent-filter>
@@ -75,46 +60,24 @@
             </intent-filter>
         </activity>
 
+        <!-- ── Auth ───────────────────────────────────────── -->
+        <activity
+            android:name=".login.LoginActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
+
+        <activity
+            android:name=".registration.RegistrationActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
+
+        <!-- ── Main ───────────────────────────────────────── -->
         <activity
             android:name=".main.MainActivity"
             android:exported="false"
-            android:label="@string/title_activity_saini"
             android:theme="@style/Theme.Ritik_2" />
 
-<!--        <activity-->
-<!--            android:name=".complaint.complaintregistration.RegisterComplain"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2" />-->
-
-<!--        <activity android:name=".complaint.newcomplaintregistration.NewRegisterComplaintActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Base.Theme.Ritik_2"/>-->
-
-<!--        <activity-->
-<!--            android:name=".complaint.viewcomplaint.ComplaintViewActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2" />-->
-
-<!--        <activity-->
-<!--            android:name=".administrator.administratorpanel.AdministratorPanelActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2" />-->
-
-<!--        <activity-->
-<!--            android:name=".administrator.administratorpanel.usermanagement.ManageUserActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2" />-->
-
-<!--        <activity-->
-<!--            android:name=".administrator.administratorpanel.newusercreation.CreateUserActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2" />-->
-
-<!--        <activity-->
-<!--            android:name=".administrator.administratorpanel.databasemanager.DatabaseManagerActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Theme.Ritik_2" />-->
-
+        <!-- ── Profile ────────────────────────────────────── -->
         <activity
             android:name=".profile.ProfileActivity"
             android:exported="false"
@@ -125,40 +88,19 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity
-            android:name=".registration.RegistrationActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
-
+        <!-- ── Features ───────────────────────────────────── -->
         <activity
             android:name=".contact.ContactActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-        <!-- ── PC Control (pccontrol package) ─────────────── -->
         <activity
             android:name=".windowscontrol.PcControlActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <!--
-            FIXED: Was using Base.Theme.Ritik_2 which is the parent theme
-            and doesn't have ActionBar configuration — can cause crashes.
-            Use Theme.Ritik_2 which is the actual complete theme.
-        -->
 
-        <!-- ── Windows Share ──────────────────────────────── -->
         <activity
             android:name=".winshare.ServerConnectActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
-
-<!--        <activity android:name=".complaint.newcomplaintmodel.ComplaintManagementActivity"-->
-<!--            android:exported="false"-->
-<!--            android:theme="@style/Base.Theme.Ritik_2"/>-->
-
-        <!-- ── Dev / Test ─────────────────────────────────── -->
-        <activity
-            android:name=".researchanddevelopment.Test"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 

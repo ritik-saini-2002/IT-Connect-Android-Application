@@ -2,108 +2,91 @@ package com.example.ritik_2.main
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.runtime.collectAsState
+import androidx.activity.viewModels
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.lifecycle.ViewModelProvider
-//import com.example.ritik_2.administrator.administratorpanel.AdministratorPanelActivity
-import com.example.ritik_2.authentication.AuthManager
-//import com.example.ritik_2.complaint.newcomplaintmodel.ComplaintManagementActivity
-//import com.example.ritik_2.complaint.newcomplaintregistration.NewRegisterComplaintActivity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope                          // ✅ correct import
+import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.login.LoginActivity
-import com.example.ritik_2.pocketbase.PocketBaseSessionManager
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.PcControlActivity
 import com.example.ritik_2.winshare.ServerConnectActivity
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    private lateinit var viewModel: MainViewModel
-    private val authManager = AuthManager.getInstance()
-
-    companion object { const val TAG = "MainActivity" }
+    private val viewModel: MainViewModel by viewModels()
+    @Inject lateinit var authRepository: AuthRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        PocketBaseSessionManager.init(this)
-        authManager.restoreSession(this)
+        if (!authRepository.isLoggedIn) { navigateToLogin(); return }
 
-        if (!authManager.isLoggedIn) { navigateToLogin(); return }
-
-        viewModel = ViewModelProvider(this)[MainViewModel::class.java]
-
-        val userId = PocketBaseSessionManager.getUserId()
-        if (userId == null) { navigateToLogin(); return }
-
-        viewModel.loadUserProfile(userId)
+        val session = authRepository.getSession()
+        session?.userId?.let { viewModel.loadUserProfile(it) }
 
         setContent {
             ITConnectTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val uiState by viewModel.uiState.collectAsState()
+                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+                LaunchedEffect(uiState.error) {
                     uiState.error?.let { error ->
                         if (error.contains("deactivated") || error.contains("not authenticated")) {
-                            authManager.signOut()
+                            authRepository.logout()
                             navigateToLogin()
-                            return@Surface
+                        } else {
+                            Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                            viewModel.clearError()
                         }
-                        Toast.makeText(this, error, Toast.LENGTH_LONG).show()
-                        viewModel.clearError()
                     }
-
-                    MainScreen(
-                        userProfile    = uiState.userProfile,
-                        isLoading      = uiState.isLoading,
-                        onLogout       = { authManager.signOut(); navigateToLogin() },
-                        onCardClick    = { cardId -> handleCardClick(cardId) },
-                        onProfileClick = { navigateToProfile() }
-                    )
                 }
+
+                MainScreen(
+                    uiState        = uiState,
+                    onLogout       = { performLogout() },        // ✅ renamed
+                    onCardClick    = { handleCardClick(it) },
+                    onProfileClick = { uiState.userProfile?.id?.let { navigateToProfile(it) } }
+                )
             }
+        }
+    }
+
+    // ✅ Renamed from lifecycleScope() — was conflicting with AndroidX property
+    private fun performLogout() {
+        lifecycleScope.launch {                                  // ✅ now resolves correctly
+            authRepository.logout()
+            navigateToLogin()
         }
     }
 
     private fun handleCardClick(cardId: Int) {
-        val profile = viewModel.uiState.value.userProfile
-        if (profile == null) { toast("Please wait for profile to load"); return }
-
-        try {
-            when (cardId) {
-//                1 -> startActivity(Intent(this, NewRegisterComplaintActivity::class.java))
-//                2 -> startActivity(Intent(this, ComplaintManagementActivity::class.java))
-//                3 -> if (profile.role in listOf("Administrator","Manager","HR")) {
-//                    startActivity(Intent(this, AdministratorPanelActivity::class.java))
-//                } else toast("Access denied. Admin privileges required.")
-                4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
-                5 -> startActivity(Intent(this, ContactActivity::class.java))
-                6 -> startActivity(Intent(this, PcControlActivity::class.java))
-                else -> toast("Feature coming soon!")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Navigation error: ${e.message}", e)
-            toast("Error opening feature: ${e.message}")
+        val intent = when (cardId) {
+            4    -> Intent(this, ServerConnectActivity::class.java)
+            6    -> Intent(this, PcControlActivity::class.java)
+            8    -> Intent(this, ContactActivity::class.java)
+            else -> null
         }
+        if (intent != null) startActivity(intent)
+        else toast("Feature coming soon!")
     }
 
-    private fun navigateToProfile() {
-        val profile = viewModel.uiState.value.userProfile ?: run { toast("Profile not loaded"); return }
-        startActivity(Intent(this, ProfileActivity::class.java).apply { putExtra("userId", profile.id) })
+    private fun navigateToProfile(userId: String) {
+        startActivity(
+            Intent(this, ProfileActivity::class.java)
+                .putExtra("userId", userId)
+        )
     }
 
     private fun navigateToLogin() {
@@ -115,9 +98,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (!authManager.isLoggedIn) navigateToLogin()
-        else viewModel.refresh()
+        if (!authRepository.isLoggedIn) navigateToLogin()
     }
 
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    private fun toast(msg: String) =
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 }

@@ -27,94 +27,89 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.ritik_2.profile.profilecompletion.components.ProfileCompletionViewModel
-import com.example.ritik_2.profile.profilecompletion.components.ProfileData
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ── Local permissions helper (replaces missing UserPermissions) ───────────────
-private data class LocalPermissions(
-    val canModifyUser: Boolean  = false,
-    val canViewAllUsers: Boolean = false
-) {
-    companion object {
-        fun fromRole(role: String) = LocalPermissions(
-            canModifyUser   = role in listOf("Administrator", "Manager"),
-            canViewAllUsers = role in listOf("Administrator", "Manager", "HR")
-        )
-    }
-}
+// ── ProfileData — local form state (replaces old ProfileData) ─
+data class ProfileData(
+    val name                    : String = "",
+    val email                   : String = "",
+    val role                    : String = "Employee",
+    val companyName             : String = "",
+    val department              : String = "",
+    val designation             : String = "",
+    val phoneNumber             : String = "",
+    val address                 : String = "",
+    val dateOfBirth             : Long?  = null,
+    val joiningDate             : Long?  = null,
+    val employeeId              : String = "",
+    val reportingTo             : String = "",
+    val salary                  : Double = 0.0,
+    val emergencyContactName    : String = "",
+    val emergencyContactPhone   : String = "",
+    val emergencyContactRelation: String = "",
+    val experience              : Int    = 0,
+    val imageUrl                : String = "",
+    val imageUri                : Uri?   = null
+)
+
+// Convert ProfileData → ProfileSaveData for ViewModel
+fun ProfileData.toSaveData() = ProfileSaveData(
+    name                    = name,
+    designation             = designation,
+    phoneNumber             = phoneNumber,
+    address                 = address,
+    employeeId              = employeeId,
+    reportingTo             = reportingTo,
+    salary                  = salary,
+    experience              = experience,
+    emergencyContactName    = emergencyContactName,
+    emergencyContactPhone   = emergencyContactPhone,
+    emergencyContactRelation = emergencyContactRelation,
+    existingImageUrl        = imageUrl
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileCompletionScreen(
-    viewModel: ProfileCompletionViewModel,
+    viewModel       : ProfileCompletionViewModel,
     onImagePickClick: () -> Unit,
-    onSaveProfile: (ProfileData) -> Unit,
-    onNavigateBack: () -> Unit,
-    isEditMode: Boolean = false,
-    userId: String = ""
+    onSaveProfile   : (ProfileSaveData) -> Unit,   // ✅ uses ProfileSaveData
+    onNavigateBack  : () -> Unit,
+    isEditMode      : Boolean = false,
+    userId          : String  = ""
 ) {
     val scrollState = rememberLazyListState()
-    LocalContext.current
-
     val uiState     by viewModel.uiState.collectAsState()
-    val currentUser by viewModel.currentUser.collectAsState()
 
-    val permissions = remember(currentUser?.role) {
-        LocalPermissions.fromRole(currentUser?.role ?: "Employee")
-    }
+    // ✅ Single local form state — no references to old ViewModel state fields
+    var profileData by remember { mutableStateOf(ProfileData()) }
+    var showDatePicker by remember { mutableStateOf<DatePickerType?>(null) }
 
-    var profileData            by remember { mutableStateOf(ProfileData()) }
-    var showDatePicker         by remember { mutableStateOf<DatePickerType?>(null) }
-    var passwordVisible        by remember { mutableStateOf(false) }
-    var confirmPasswordVisible by remember { mutableStateOf(false) }
-    var password               by remember { mutableStateOf("") }
-    var confirmPassword        by remember { mutableStateOf("") }
-
-    // Populate form from ViewModel state
-    LaunchedEffect(currentUser, uiState.currentProfile, uiState.currentWorkStats) {
-        var updated = profileData
-
-        currentUser?.let { user ->
-            updated = updated.copy(
-                name        = user.name,
-                email       = user.email,
-                role        = user.role,
-                companyName = user.companyName,
-                department  = user.department,
-                designation = user.designation
+    // Populate form when profile loads from ViewModel
+    LaunchedEffect(uiState.userProfile) {
+        uiState.userProfile?.let { profile ->
+            profileData = ProfileData(
+                name                    = profile.name,
+                email                   = profile.email,
+                role                    = profile.role,
+                companyName             = profile.companyName,
+                department              = profile.designation, // use designation as dept fallback
+                designation             = profile.designation,
+                phoneNumber             = profile.phoneNumber,
+                imageUrl                = profile.imageUrl ?: ""
             )
         }
-
-        uiState.currentProfile?.let { profile ->
-            updated = updated.copy(
-                phoneNumber              = profile.phoneNumber,
-                address                  = profile.address,
-                dateOfBirth              = profile.dateOfBirth,
-                joiningDate              = profile.joiningDate,
-                employeeId               = profile.employeeId,
-                reportingTo              = profile.reportingTo,
-                salary                   = profile.salary,
-                emergencyContactName     = profile.emergencyContactName,
-                emergencyContactPhone    = profile.emergencyContactPhone,
-                emergencyContactRelation = profile.emergencyContactRelation,
-                imageUrl                 = profile.imageUrl
-            )
-        }
-
-        uiState.currentWorkStats?.let { stats ->
-            updated = updated.copy(experience = stats.experience)
-        }
-
-        profileData = updated
     }
 
+    // Update imageUri when user picks an image
     LaunchedEffect(uiState.selectedImageUri) {
         uiState.selectedImageUri?.let { uri ->
             profileData = profileData.copy(imageUri = uri)
         }
     }
+
+    val isDataExists = uiState.userProfile != null
 
     Scaffold(
         topBar = {
@@ -122,33 +117,26 @@ fun ProfileCompletionScreen(
                 title = {
                     Column {
                         Text(
-                            text = if (isEditMode || uiState.dataExists) "Edit Profile" else "Complete Profile",
+                            text = if (isEditMode || isDataExists) "Edit Profile" else "Complete Profile",
                             fontWeight = FontWeight.Bold
                         )
-                        if (uiState.dataExists && !isEditMode) {
-                            Text(
-                                text  = "Update your information",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Default.ArrowBack, "Back")
                     }
                 },
                 actions = {
-                    if (isEditMode || uiState.dataExists) {
+                    if (isEditMode || isDataExists) {
                         IconButton(
-                            onClick  = { onSaveProfile(profileData) },
-                            enabled  = !uiState.isLoading && isFormValid(profileData, password, confirmPassword, isEditMode || uiState.dataExists)
+                            onClick  = { onSaveProfile(profileData.toSaveData()) },
+                            enabled  = !uiState.isLoading && isFormValid(profileData)
                         ) {
                             if (uiState.isLoading) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             } else {
-                                Icon(Icons.Default.Save, contentDescription = "Save")
+                                Icon(Icons.Default.Save, "Save")
                             }
                         }
                     }
@@ -160,30 +148,26 @@ fun ProfileCompletionScreen(
             )
         }
     ) { paddingValues ->
-
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
 
-            if (uiState.isLoading && !uiState.isDataLoaded) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (uiState.isLoading && uiState.userProfile == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(modifier = Modifier.size(48.dp), strokeWidth = 4.dp)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text  = "Loading profile data...",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text("Loading profile...", style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
                 LazyColumn(
-                    state           = scrollState,
-                    modifier        = Modifier.fillMaxSize(),
-                    contentPadding  = PaddingValues(16.dp),
+                    state               = scrollState,
+                    modifier            = Modifier.fillMaxSize(),
+                    contentPadding      = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
 
-                    if (uiState.dataExists) {
+                    if (isDataExists) {
                         item {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -191,11 +175,17 @@ fun ProfileCompletionScreen(
                                 shape    = RoundedCornerShape(12.dp)
                             ) {
                                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(24.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Icon(Icons.Default.Info, null,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(24.dp))
+                                    Spacer(Modifier.width(12.dp))
                                     Column {
-                                        Text("Profile Found", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                                        Text("Your existing profile data has been loaded.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
+                                        Text("Profile Found", style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        Text("Your existing profile data has been loaded.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f))
                                     }
                                 }
                             }
@@ -204,119 +194,86 @@ fun ProfileCompletionScreen(
 
                     item {
                         ProfileImageSection(
-                            imageUrl    = profileData.imageUrl,
-                            imageUri    = profileData.imageUri,
+                            imageUrl     = profileData.imageUrl,
+                            imageUri     = profileData.imageUri,
                             onImageClick = onImagePickClick,
-                            canEdit     = permissions.canModifyUser || currentUser?.userId == userId,
-                            userName    = profileData.name.ifEmpty { "User" }
+                            userName     = profileData.name.ifEmpty { "User" }
                         )
                     }
 
                     item {
-                        ProfileSectionCard(title = "Personal Information", icon = Icons.Default.Person) {
-                            ProfileTextField(value = profileData.name, onValueChange = { profileData = profileData.copy(name = it) }, label = "Full Name", icon = Icons.Default.Person, enabled = canEditField("name", permissions.canModifyUser, currentUser?.role ?: ""))
-                            ProfileTextField(value = profileData.email, onValueChange = { profileData = profileData.copy(email = it) }, label = "Email Address", icon = Icons.Default.Email, keyboardType = KeyboardType.Email, enabled = canEditField("email", permissions.canModifyUser, currentUser?.role ?: ""))
-                            ProfileTextField(value = profileData.phoneNumber, onValueChange = { profileData = profileData.copy(phoneNumber = it) }, label = "Phone Number", icon = Icons.Default.Phone, keyboardType = KeyboardType.Phone)
-                            ProfileTextField(value = profileData.address, onValueChange = { profileData = profileData.copy(address = it) }, label = "Address", icon = Icons.Default.LocationOn, maxLines = 3)
-                            DatePickerField(value = profileData.dateOfBirth, onValueChange = { profileData = profileData.copy(dateOfBirth = it) }, label = "Date of Birth", onClick = { showDatePicker = DatePickerType.DATE_OF_BIRTH })
+                        ProfileSectionCard("Personal Information", Icons.Default.Person) {
+                            PCTextField(profileData.name,        { profileData = profileData.copy(name = it) },        "Full Name",    Icons.Default.Person)
+                            PCTextField(profileData.email,       { profileData = profileData.copy(email = it) },       "Email",        Icons.Default.Email, KeyboardType.Email)
+                            PCTextField(profileData.phoneNumber, { profileData = profileData.copy(phoneNumber = it) }, "Phone",        Icons.Default.Phone, KeyboardType.Phone)
+                            PCTextField(profileData.address,     { profileData = profileData.copy(address = it) },     "Address",      Icons.Default.LocationOn, maxLines = 3)
+                            PCDateField(profileData.dateOfBirth, { profileData = profileData.copy(dateOfBirth = it) }, "Date of Birth") { showDatePicker = DatePickerType.DATE_OF_BIRTH }
                         }
                     }
 
                     item {
-                        ProfileSectionCard(title = "Work Information", icon = Icons.Default.Work) {
-                            ProfileTextField(value = profileData.companyName, onValueChange = { profileData = profileData.copy(companyName = it) }, label = "Company Name", icon = Icons.Default.Business, enabled = canEditField("companyName", permissions.canModifyUser, currentUser?.role ?: ""))
-                            ProfileTextField(value = profileData.department, onValueChange = { profileData = profileData.copy(department = it) }, label = "Department", icon = Icons.Default.Groups, enabled = canEditField("department", permissions.canModifyUser, currentUser?.role ?: ""))
-                            ProfileTextField(value = profileData.designation, onValueChange = { profileData = profileData.copy(designation = it) }, label = "Designation", icon = Icons.Default.Badge, enabled = canEditField("designation", permissions.canModifyUser, currentUser?.role ?: ""))
-                            RoleSelectionField(selectedRole = profileData.role, onRoleSelected = { profileData = profileData.copy(role = it) }, enabled = canEditField("role", permissions.canModifyUser, currentUser?.role ?: ""))
-                            ProfileTextField(value = profileData.employeeId, onValueChange = { profileData = profileData.copy(employeeId = it) }, label = "Employee ID", icon = Icons.Default.Badge)
-                            ProfileTextField(value = profileData.reportingTo, onValueChange = { profileData = profileData.copy(reportingTo = it) }, label = "Reporting To", icon = Icons.Default.SupervisorAccount)
-                            DatePickerField(value = profileData.joiningDate, onValueChange = { profileData = profileData.copy(joiningDate = it) }, label = "Joining Date", onClick = { showDatePicker = DatePickerType.JOINING_DATE })
-                            ProfileTextField(value = profileData.experience.toString(), onValueChange = { profileData = profileData.copy(experience = it.toIntOrNull() ?: 0) }, label = "Experience (Years)", icon = Icons.Default.Timeline, keyboardType = KeyboardType.Number)
-                        }
-                    }
-
-                    if (permissions.canViewAllUsers && profileData.salary > 0) {
-                        item {
-                            ProfileSectionCard(title = "Confidential Information", icon = Icons.Default.Security) {
-                                ProfileTextField(
-                                    value = if (profileData.salary > 0) profileData.salary.toString() else "",
-                                    onValueChange = { profileData = profileData.copy(salary = it.toDoubleOrNull() ?: 0.0) },
-                                    label = "Salary", icon = Icons.Default.AttachMoney, keyboardType = KeyboardType.Number
-                                )
-                            }
+                        ProfileSectionCard("Work Information", Icons.Default.Work) {
+                            PCTextField(profileData.companyName,  { profileData = profileData.copy(companyName = it) },  "Company",     Icons.Default.Business)
+                            PCTextField(profileData.department,   { profileData = profileData.copy(department = it) },   "Department",  Icons.Default.Groups)
+                            PCTextField(profileData.designation,  { profileData = profileData.copy(designation = it) },  "Designation", Icons.Default.Badge)
+                            PCRoleField(profileData.role)         { profileData = profileData.copy(role = it) }
+                            PCTextField(profileData.employeeId,   { profileData = profileData.copy(employeeId = it) },   "Employee ID", Icons.Default.Badge)
+                            PCTextField(profileData.reportingTo,  { profileData = profileData.copy(reportingTo = it) },  "Reporting To",Icons.Default.SupervisorAccount)
+                            PCDateField(profileData.joiningDate,  { profileData = profileData.copy(joiningDate = it) },  "Joining Date") { showDatePicker = DatePickerType.JOINING_DATE }
+                            PCTextField(profileData.experience.toString(), { profileData = profileData.copy(experience = it.toIntOrNull() ?: 0) }, "Experience (Years)", Icons.Default.Timeline, KeyboardType.Number)
                         }
                     }
 
                     item {
-                        ProfileSectionCard(title = "Emergency Contact", icon = Icons.Default.ContactEmergency) {
-                            ProfileTextField(value = profileData.emergencyContactName, onValueChange = { profileData = profileData.copy(emergencyContactName = it) }, label = "Contact Name", icon = Icons.Default.Person)
-                            ProfileTextField(value = profileData.emergencyContactPhone, onValueChange = { profileData = profileData.copy(emergencyContactPhone = it) }, label = "Contact Phone", icon = Icons.Default.Phone, keyboardType = KeyboardType.Phone)
-                            ProfileTextField(value = profileData.emergencyContactRelation, onValueChange = { profileData = profileData.copy(emergencyContactRelation = it) }, label = "Relationship", icon = Icons.Default.Person)
-                        }
-                    }
-
-                    if (!isEditMode && !uiState.dataExists) {
-                        item {
-                            ProfileSectionCard(title = "Security", icon = Icons.Default.Security) {
-                                ProfileTextField(
-                                    value = password, onValueChange = { password = it }, label = "Password", icon = Icons.Default.Lock,
-                                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                    trailingIcon = { IconButton(onClick = { passwordVisible = !passwordVisible }) { Icon(if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = null) } }
-                                )
-                                ProfileTextField(
-                                    value = confirmPassword, onValueChange = { confirmPassword = it }, label = "Confirm Password", icon = Icons.Default.Lock,
-                                    visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                    trailingIcon = { IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) { Icon(if (confirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = null) } },
-                                    isError = confirmPassword.isNotEmpty() && password != confirmPassword,
-                                    supportingText = if (confirmPassword.isNotEmpty() && password != confirmPassword) "Passwords do not match" else null
-                                )
-                            }
+                        ProfileSectionCard("Emergency Contact", Icons.Default.ContactEmergency) {
+                            PCTextField(profileData.emergencyContactName,     { profileData = profileData.copy(emergencyContactName = it) },     "Contact Name",  Icons.Default.Person)
+                            PCTextField(profileData.emergencyContactPhone,    { profileData = profileData.copy(emergencyContactPhone = it) },    "Contact Phone", Icons.Default.Phone, KeyboardType.Phone)
+                            PCTextField(profileData.emergencyContactRelation, { profileData = profileData.copy(emergencyContactRelation = it) }, "Relationship",  Icons.Default.People)
                         }
                     }
 
                     if (!isEditMode) {
                         item {
                             Button(
-                                onClick  = { onSaveProfile(profileData) },
+                                onClick  = { onSaveProfile(profileData.toSaveData()) },
                                 modifier = Modifier.fillMaxWidth().height(56.dp),
-                                enabled  = !uiState.isLoading && isFormValid(profileData, password, confirmPassword, isEditMode || uiState.dataExists),
+                                enabled  = !uiState.isLoading && isFormValid(profileData),
                                 shape    = RoundedCornerShape(12.dp)
                             ) {
                                 if (uiState.isLoading) {
-                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp),
+                                        color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
                                 }
-                                Text(
-                                    text = when {
-                                        uiState.isLoading -> "Saving..."
-                                        uiState.dataExists -> "Update Profile"
-                                        else -> "Complete Profile"
-                                    },
-                                    fontSize = 16.sp, fontWeight = FontWeight.Medium
-                                )
+                                Text(if (uiState.isLoading) "Saving..." else if (isDataExists) "Update Profile" else "Complete Profile",
+                                    fontSize = 16.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
 
                     uiState.error?.let { error ->
                         item {
-                            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), shape = RoundedCornerShape(12.dp)) {
+                            Card(modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                shape  = RoundedCornerShape(12.dp)
+                            ) {
                                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(24.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(text = error, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(24.dp))
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(error, style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onErrorContainer)
                                 }
                             }
                         }
                     }
 
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
+                    item { Spacer(Modifier.height(16.dp)) }
                 }
             }
         }
 
         showDatePicker?.let { type ->
-            DatePickerDialog(
+            PCDatePickerDialog(
                 onDateSelected = { selectedDate ->
                     when (type) {
                         DatePickerType.DATE_OF_BIRTH -> profileData = profileData.copy(dateOfBirth = selectedDate)
@@ -330,122 +287,121 @@ fun ProfileCompletionScreen(
     }
 }
 
+// ── Helper Composables ────────────────────────────────────────
+
 @Composable
-private fun ProfileImageSection(imageUrl: String, imageUri: Uri?, onImageClick: () -> Unit, canEdit: Boolean, userName: String) {
+private fun ProfileImageSection(imageUrl: String, imageUri: Uri?, onImageClick: () -> Unit, userName: String) {
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box {
-            Box(modifier = Modifier.size(120.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable(enabled = canEdit) { onImageClick() }, contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.size(120.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { onImageClick() },
+                contentAlignment = Alignment.Center
+            ) {
                 when {
-                    imageUri != null -> AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(imageUri).crossfade(true).build(), contentDescription = "Profile Image", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    imageUrl.isNotEmpty() -> AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(imageUrl).crossfade(true).build(), contentDescription = "Profile Image", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    imageUri != null ->
+                        AsyncImage(ImageRequest.Builder(LocalContext.current).data(imageUri).crossfade(true).build(),
+                            "Profile", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    imageUrl.isNotEmpty() ->
+                        AsyncImage(ImageRequest.Builder(LocalContext.current).data(imageUrl).crossfade(true).build(),
+                            "Profile", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                     else -> {
-                        if (userName.isNotBlank()) {
-                            val initials = userName.split(" ").take(2).map { it.firstOrNull()?.toString()?.uppercase() ?: "" }.joinToString("")
-                            Text(text = initials, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                        val initials = userName.split(" ").take(2).mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }.joinToString("")
+                        if (initials.isNotBlank()) Text(initials, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else Icon(Icons.Default.Person, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-            if (canEdit) {
-                FloatingActionButton(onClick = onImageClick, modifier = Modifier.align(Alignment.BottomEnd).size(36.dp), containerColor = MaterialTheme.colorScheme.primary) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = "Change Photo", modifier = Modifier.size(18.dp))
-                }
+            FloatingActionButton(onClick = onImageClick, modifier = Modifier.align(Alignment.BottomEnd).size(36.dp),
+                containerColor = MaterialTheme.colorScheme.primary) {
+                Icon(Icons.Default.CameraAlt, "Change Photo", modifier = Modifier.size(18.dp))
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        if (userName.isNotBlank()) {
-            Text(text = userName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-            Spacer(modifier = Modifier.height(4.dp))
-        }
-        if (canEdit) Text(text = "Tap to change photo", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+        if (userName.isNotBlank() && userName != "User")
+            Text(userName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text("Tap to change photo", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun ProfileSectionCard(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
+                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
             content()
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileTextField(value: String, onValueChange: (String) -> Unit, label: String, icon: ImageVector, modifier: Modifier = Modifier, enabled: Boolean = true, keyboardType: KeyboardType = KeyboardType.Text, visualTransformation: VisualTransformation = VisualTransformation.None, trailingIcon: @Composable (() -> Unit)? = null, maxLines: Int = 1, isError: Boolean = false, supportingText: String? = null) {
+private fun PCTextField(value: String, onValueChange: (String) -> Unit, label: String, icon: ImageVector,
+                        keyboardType: KeyboardType = KeyboardType.Text, maxLines: Int = 1) {
     OutlinedTextField(
         value = value, onValueChange = onValueChange, label = { Text(label) },
-        leadingIcon = { Icon(icon, contentDescription = null, tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline) },
-        trailingIcon = trailingIcon,
-        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp),
-        enabled = enabled, keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        visualTransformation = visualTransformation, maxLines = maxLines, isError = isError,
-        supportingText = supportingText?.let { { Text(it) } },
+        leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        maxLines = maxLines, singleLine = maxLines == 1,
         shape = RoundedCornerShape(8.dp),
-        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline, disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor   = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline)
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RoleSelectionField(selectedRole: String, onRoleSelected: (String) -> Unit, enabled: Boolean = true) {
+private fun PCRoleField(selected: String, onSelected: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    val roles = listOf("Administrator", "Manager", "Team Lead", "HR", "Employee", "Intern")
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded && enabled }) {
-        OutlinedTextField(value = selectedRole, onValueChange = {}, readOnly = true, label = { Text("Role") },
-            leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).menuAnchor(), enabled = enabled, shape = RoundedCornerShape(8.dp),
-            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline, disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-        )
+    val roles = listOf("Administrator","Manager","Team Lead","HR","Employee","Intern")
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(value = selected, onValueChange = {}, readOnly = true, label = { Text("Role") },
+            leadingIcon = { Icon(Icons.Default.Badge, null, tint = MaterialTheme.colorScheme.primary) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).menuAnchor(),
+            shape = RoundedCornerShape(8.dp),
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, unfocusedBorderColor = MaterialTheme.colorScheme.outline))
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            roles.forEach { role ->
-                DropdownMenuItem(text = { Text(role) }, onClick = { onRoleSelected(role); expanded = false },
-                    leadingIcon = { Icon(when (role) { "Administrator" -> Icons.Default.AdminPanelSettings; "Manager" -> Icons.Default.ManageAccounts; "Team Lead" -> Icons.Default.Groups; "HR" -> Icons.Default.People; "Intern" -> Icons.Default.School; else -> Icons.Default.Person }, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) })
-            }
+            roles.forEach { r -> DropdownMenuItem(text = { Text(r) }, onClick = { onSelected(r); expanded = false }) }
         }
     }
 }
 
 @Composable
-private fun DatePickerField(value: Long?, onValueChange: (Long) -> Unit, label: String, onClick: () -> Unit) {
-    val dateFormat   = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-    val displayValue = value?.let { dateFormat.format(Date(it)) } ?: ""
+private fun PCDateField(value: Long?, onValueChange: (Long) -> Unit, label: String, onClick: () -> Unit) {
+    val fmt          = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+    val displayValue = value?.let { fmt.format(Date(it)) } ?: ""
     OutlinedTextField(value = displayValue, onValueChange = {}, label = { Text(label) },
-        leadingIcon = { Icon(Icons.Default.CalendarToday, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        leadingIcon = { Icon(Icons.Default.CalendarToday, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onClick() },
         enabled = false, readOnly = true, shape = RoundedCornerShape(8.dp),
-        colors = OutlinedTextFieldDefaults.colors(disabledTextColor = MaterialTheme.colorScheme.onSurface, disabledBorderColor = MaterialTheme.colorScheme.outline, disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant, disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant)
-    )
+        colors = OutlinedTextFieldDefaults.colors(disabledTextColor = MaterialTheme.colorScheme.onSurface,
+            disabledBorderColor = MaterialTheme.colorScheme.outline,
+            disabledLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DatePickerDialog(onDateSelected: (Long) -> Unit, onDismiss: () -> Unit) {
-    val datePickerState = rememberDatePickerState()
-    DatePickerDialog(onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = { datePickerState.selectedDateMillis?.let { onDateSelected(it) } }) { Text("OK") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    ) { DatePicker(state = datePickerState) }
+private fun PCDatePickerDialog(onDateSelected: (Long) -> Unit, onDismiss: () -> Unit) {
+    val state = rememberDatePickerState()
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton    = { TextButton(onClick = { state.selectedDateMillis?.let { onDateSelected(it) } }) { Text("OK") } },
+        dismissButton    = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    ) { DatePicker(state = state) }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-private fun canEditField(fieldName: String, canModify: Boolean, userRole: String): Boolean = when (fieldName) {
-    "name", "email", "companyName", "role" -> userRole == "Administrator"
-    "department", "designation"            -> userRole in listOf("Administrator", "Manager")
-    else -> true
-}
-
-private fun isFormValid(profileData: ProfileData, password: String, confirmPassword: String, isEditMode: Boolean): Boolean {
-    val basic = profileData.name.isNotBlank() && profileData.email.isNotBlank() && profileData.companyName.isNotBlank() && profileData.department.isNotBlank() && profileData.designation.isNotBlank() && profileData.phoneNumber.isNotBlank()
-    return if (isEditMode) basic else basic && (password.isBlank() || password == confirmPassword)
-}
+private fun isFormValid(d: ProfileData): Boolean =
+    d.name.isNotBlank() && d.designation.isNotBlank()
 
 private enum class DatePickerType { DATE_OF_BIRTH, JOINING_DATE }

@@ -1,11 +1,9 @@
 package com.example.ritik_2.registration
 
 import android.net.Uri
-import android.util.Patterns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,795 +14,425 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.ritik_2.theme.Ritik_2Theme
-import kotlinx.coroutines.delay
+import coil.request.ImageRequest
+import com.example.ritik_2.data.model.Permissions
+import com.example.ritik_2.data.model.RegistrationRequest
+import kotlinx.coroutines.flow.StateFlow
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 fun RegistrationScreen(
-    onRegisterClick: (String, String, String, String, String, String, Int, Int, Int, Int, Uri?, String?, String?) -> Unit,
-    onLoginClick: () -> Unit
+    onRegisterClick  : (RegistrationRequest) -> Unit,
+    onLoginClick     : () -> Unit,
+    registrationState: StateFlow<RegistrationState>
 ) {
-    // Form states - keeping defaults for fresh registration
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }
-    var phoneNumber by remember { mutableStateOf("") }
-    var department by remember { mutableStateOf("Administrative") }
-    var designation by remember { mutableStateOf("") }
-    var companyName by remember { mutableStateOf("") }
-    var experience by remember { mutableStateOf("0") }
-    var completedProjects by remember { mutableStateOf("0") }
-    var activeProjects by remember { mutableStateOf("0") }
-    var complaints by remember { mutableStateOf("0") }
+    val state     = registrationState.collectAsState().value
+    val isLoading = state is RegistrationState.Loading
 
-    // Role is fixed to Administrator for fresh registrations
-    val selectedRole = "Administrator"
-
-    // UI states
+    var name              by remember { mutableStateOf("") }
+    var email             by remember { mutableStateOf("") }
+    var password          by remember { mutableStateOf("") }
+    var phone             by remember { mutableStateOf("") }
+    var designation       by remember { mutableStateOf("") }
+    var company           by remember { mutableStateOf("") }
+    var department        by remember { mutableStateOf("") }
+    var role              by remember { mutableStateOf("Employee") }
+    var imageUri          by remember { mutableStateOf<Uri?>(null) }
     var isPasswordVisible by remember { mutableStateOf(false) }
-    var isConfirmPasswordVisible by remember { mutableStateOf(false) }
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
-    var isLoading by remember { mutableStateOf(false) }
-    var showErrors by remember { mutableStateOf(false) }
 
-    LocalSoftwareKeyboardController.current
+    val context     = LocalContext.current
     val scrollState = rememberScrollState()
 
-    val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        imageUri = uri
-    }
-
-    // Enhanced validation for fresh account creation
-    val isFormValid = email.isNotBlank() &&
-            Patterns.EMAIL_ADDRESS.matcher(email).matches() &&
-            password.length >= 6 &&
-            password == confirmPassword &&
-            name.isNotBlank() &&
-            name.length >= 2 &&
-            phoneNumber.isNotBlank() &&
-            phoneNumber.length >= 10 &&
-            designation.isNotBlank() &&
-            companyName.isNotBlank() &&
-            companyName.length >= 2
-
-    // Button animation
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri -> imageUri = uri }
 
     Column(
-        modifier = Modifier
+        modifier            = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(scrollState)
-            .padding(16.dp)
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(Modifier.height(40.dp))
 
-        // Enhanced Header with fresh account messaging
+        // ── Header Card ───────────────────────────────────────
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            modifier  = Modifier.fillMaxWidth(),
+            colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary),
+            elevation = CardDefaults.cardElevation(8.dp)
         ) {
             Column(
-                modifier = Modifier
+                modifier            = Modifier
                     .fillMaxWidth()
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
-                    imageVector = Icons.Filled.AdminPanelSettings,
-                    contentDescription = "Admin Registration",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(40.dp)
+                    Icons.Default.PersonAdd, null,
+                    tint     = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(48.dp)
                 )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Create Admin Account",
-                    fontSize = 26.sp,
+                    "Create Account",
+                    fontSize   = 24.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    textAlign = TextAlign.Center
+                    color      = MaterialTheme.colorScheme.onPrimary
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
                 Text(
-                    text = "Register as the first Administrator for your organization",
-                    fontSize = 15.sp,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f),
-                    textAlign = TextAlign.Center,
-                    lineHeight = 20.sp
+                    "Join IT Connect",
+                    fontSize = 14.sp,
+                    color    = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "⭐ Full system access with administrative privileges",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp))
 
-        // Main Registration Form
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp)
-            ) {
-                // Profile Image Section
-                ProfileImageSection(
-                    imageUri = imageUri,
-                    onImagePick = { imagePickerLauncher.launch("image/*") }
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Personal Information Section
-                SectionHeader(
-                    title = "Personal Information",
-                    icon = Icons.Filled.Person,
-                    description = "Basic details for your administrator account"
-                )
-
-                EnhancedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = "Full Name *",
-                    icon = Icons.Filled.Person,
-                    placeholder = "Enter your full name",
-                    isError = showErrors && (name.isBlank() || name.length < 2),
-                    errorMessage = if (name.isBlank()) "Name is required" else "Name must be at least 2 characters",
-                    keyboardType = KeyboardType.Text
-                )
-
-                EnhancedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = "Email Address *",
-                    icon = Icons.Filled.Email,
-                    placeholder = "admin@company.com",
-                    isError = showErrors && (email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email).matches()),
-                    errorMessage = "Please enter a valid email address",
-                    keyboardType = KeyboardType.Email
-                )
-
-                EnhancedTextField(
-                    value = phoneNumber,
-                    onValueChange = { if (it.all { char -> char.isDigit() || char == '+' || char == '-' || char == ' ' }) phoneNumber = it },
-                    label = "Phone Number *",
-                    icon = Icons.Filled.Phone,
-                    placeholder = "+1234567890",
-                    isError = showErrors && (phoneNumber.isBlank() || phoneNumber.length < 10),
-                    errorMessage = "Please enter a valid phone number (min 10 digits)",
-                    keyboardType = KeyboardType.Phone
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Professional Information Section
-                SectionHeader(
-                    title = "Professional Information",
-                    icon = Icons.Filled.Work,
-                    description = "Your role and company details"
-                )
-
-                // Role Display (Fixed as Administrator)
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.AdminPanelSettings,
-                            contentDescription = "Administrator Role",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Role: Administrator",
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 16.sp
-                            )
-                            Text(
-                                text = "Department: Administrative",
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "Full system access and management privileges",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                EnhancedTextField(
-                    value = designation,
-                    onValueChange = { designation = it },
-                    label = "Job Title/Designation *",
-                    icon = Icons.Filled.Badge,
-                    placeholder = "CEO, CTO, IT Manager, etc.",
-                    isError = showErrors && designation.isBlank(),
-                    errorMessage = "Designation is required",
-                    keyboardType = KeyboardType.Text
-                )
-
-                EnhancedTextField(
-                    value = companyName,
-                    onValueChange = { companyName = it },
-                    label = "Company/Organization *",
-                    icon = Icons.Filled.Business,
-                    placeholder = "Your company name",
-                    isError = showErrors && (companyName.isBlank() || companyName.length < 2),
-                    errorMessage = if (companyName.isBlank()) "Company name is required" else "Company name must be at least 2 characters",
-                    keyboardType = KeyboardType.Text
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Professional Stats Section (Optional)
-                SectionHeader(
-                    title = "Professional Experience",
-                    icon = Icons.Filled.TrendingUp,
-                    description = "Optional: Your professional background"
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    NumberField(
-                        value = experience,
-                        onValueChange = { experience = it },
-                        label = "Experience (Years)",
-                        icon = Icons.Filled.WorkHistory,
-                        modifier = Modifier.weight(1f)
-                    )
-                    NumberField(
-                        value = completedProjects,
-                        onValueChange = { completedProjects = it },
-                        label = "Completed Projects",
-                        icon = Icons.Filled.CheckCircle,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Security Section
-                SectionHeader(
-                    title = "Security Settings",
-                    icon = Icons.Filled.Security,
-                    description = "Create a secure password for your account"
-                )
-
-                EnhancedPasswordField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = "Password *",
-                    placeholder = "Minimum 6 characters",
-                    isPasswordVisible = isPasswordVisible,
-                    onPasswordVisibilityChange = { isPasswordVisible = it },
-                    isError = showErrors && password.length < 6,
-                    errorMessage = "Password must be at least 6 characters"
-                )
-
-                EnhancedPasswordField(
-                    value = confirmPassword,
-                    onValueChange = { confirmPassword = it },
-                    label = "Confirm Password *",
-                    placeholder = "Re-enter your password",
-                    isPasswordVisible = isConfirmPasswordVisible,
-                    onPasswordVisibilityChange = { isConfirmPasswordVisible = it },
-                    isError = showErrors && (password != confirmPassword || confirmPassword.isEmpty()),
-                    errorMessage = if (confirmPassword.isEmpty()) "Please confirm your password" else "Passwords don't match"
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Registration Button
-                Button(
-                    onClick = {
-                        if (isFormValid) {
-                            isLoading = true
-                            onRegisterClick(
-                                email.trim(),
-                                password,
-                                name.trim(),
-                                phoneNumber.trim(),
-                                designation.trim(),
-                                companyName.trim(),
-                                experience.toIntOrNull() ?: 0,
-                                completedProjects.toIntOrNull() ?: 0,
-                                activeProjects.toIntOrNull() ?: 0,
-                                complaints.toIntOrNull() ?: 0,
-                                imageUri,
-                                selectedRole,
-                                department
-                            )
-                        } else {
-                            showErrors = true
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    enabled = !isLoading,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    AnimatedContent(
-                        targetState = isLoading,
-                        transitionSpec = {
-                            fadeIn(animationSpec = tween(300)) with fadeOut(animationSpec = tween(300))
-                        },
-                        label = "buttonContent"
-                    ) { loading ->
-                        if (loading) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(
-                                    text = "Creating Account...",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            }
-                        } else {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.PersonAdd,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Create Administrator Account",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Form validation hints
-                if (showErrors && !isFormValid) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Error,
-                                contentDescription = "Error",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Please fill in all required fields correctly",
-                                color = MaterialTheme.colorScheme.error,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                // Login Link
-                TextButton(
-                    onClick = onLoginClick,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Already have an account? Sign In",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 15.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-    }
-
-    // Reset loading state after animation
-    LaunchedEffect(isLoading) {
-        if (isLoading) {
-            delay(2000)
-            isLoading = false
-        }
-    }
-}
-
-@Composable
-fun ProfileImageSection(
-    imageUri: Uri?,
-    onImagePick: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+        // ── Profile Image Picker ──────────────────────────────
         Box(
-            modifier = Modifier
-                .size(120.dp)
+            modifier         = Modifier
+                .size(100.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { onImagePick() },
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .clickable { imagePicker.launch("image/*") },
             contentAlignment = Alignment.Center
         ) {
             if (imageUri != null) {
                 AsyncImage(
-                    model = imageUri,
-                    contentDescription = "Profile Picture",
-                    modifier = Modifier
-                        .size(120.dp)
+                    model              = ImageRequest.Builder(context)
+                        .data(imageUri).crossfade(true).build(),
+                    contentDescription = "Profile",
+                    modifier           = Modifier
+                        .fillMaxSize()
                         .clip(CircleShape),
-                    contentScale = ContentScale.Crop
+                    contentScale       = ContentScale.Crop
                 )
-
-                // Edit overlay
-                Box(
-                    modifier = Modifier
-                        .size(120.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.3f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Edit,
-                        contentDescription = "Edit Photo",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
             } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        imageVector = Icons.Filled.CameraAlt,
-                        contentDescription = "Add Photo",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Add Photo",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
+                        Icons.Default.AddAPhoto, null,
+                        tint     = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
                     )
                     Text(
-                        text = "(Optional)",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
+                        "Add Photo",
+                        fontSize = 11.sp,
+                        color    = MaterialTheme.colorScheme.primary
                     )
                 }
             }
         }
-    }
-}
 
-@Composable
-fun SectionHeader(
-    title: String,
-    icon: ImageVector,
-    description: String
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
+        Spacer(Modifier.height(24.dp))
+
+        // ── Form Card ─────────────────────────────────────────
+        Card(
+            modifier  = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .animateContentSize(),
+            elevation = CardDefaults.cardElevation(4.dp)
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = title,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
+            Column(modifier = Modifier.padding(20.dp)) {
+
+                // Personal section
+                RegSectionTitle("Personal Information", Icons.Outlined.Person)
+                Spacer(Modifier.height(8.dp))
+
+                RegTextField(
+                    value         = name,
+                    onValueChange = { name = it },
+                    label         = "Full Name",
+                    icon          = Icons.Default.Person
                 )
+                RegTextField(
+                    value         = email,
+                    onValueChange = { email = it },
+                    label         = "Email",
+                    icon          = Icons.Default.Email,
+                    keyboardType  = KeyboardType.Email
+                )
+                RegPasswordField(
+                    value         = password,
+                    onValueChange = { password = it },
+                    isVisible     = isPasswordVisible,
+                    onToggle      = { isPasswordVisible = it }
+                )
+                RegTextField(
+                    value         = phone,
+                    onValueChange = { phone = it },
+                    label         = "Phone Number",
+                    icon          = Icons.Default.Phone,
+                    keyboardType  = KeyboardType.Phone
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                // Work section
+                RegSectionTitle("Work Information", Icons.Outlined.Work)
+                Spacer(Modifier.height(8.dp))
+
+                RegTextField(
+                    value         = designation,
+                    onValueChange = { designation = it },
+                    label         = "Designation",
+                    icon          = Icons.Default.Badge
+                )
+                RegTextField(
+                    value         = company,
+                    onValueChange = { company = it },
+                    label         = "Company Name",
+                    icon          = Icons.Default.Business
+                )
+                RegTextField(
+                    value         = department,
+                    onValueChange = { department = it },
+                    label         = "Department",
+                    icon          = Icons.Default.Group
+                )
+
+                Spacer(Modifier.height(12.dp))
+
                 Text(
-                    text = description,
-                    fontSize = 13.sp,
+                    "Role",
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-        }
-    }
-}
+                Spacer(Modifier.height(4.dp))
+                RegRoleDropdown(selected = role, onSelected = { role = it })
 
-@Composable
-fun EnhancedTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    icon: ImageVector,
-    placeholder: String = "",
-    keyboardType: KeyboardType = KeyboardType.Text,
-    isError: Boolean = false,
-    errorMessage: String = ""
-) {
-    Column {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
-            leadingIcon = {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                )
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = keyboardType,
-                imeAction = ImeAction.Next
-            ),
-            isError = isError,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                errorBorderColor = MaterialTheme.colorScheme.error,
-                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-            ),
-            singleLine = true
-        )
-
-        if (isError && errorMessage.isNotEmpty()) {
-            Row(
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Error,
-                    contentDescription = "Error",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = errorMessage,
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 12.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun EnhancedPasswordField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    placeholder: String = "",
-    isPasswordVisible: Boolean,
-    onPasswordVisibilityChange: (Boolean) -> Unit,
-    isError: Boolean = false,
-    errorMessage: String = ""
-) {
-    Column {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
-            leadingIcon = {
-                Icon(
-                    Icons.Filled.Lock,
-                    contentDescription = null,
-                    tint = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                )
-            },
-            trailingIcon = {
-                IconButton(onClick = { onPasswordVisibilityChange(!isPasswordVisible) }) {
-                    Icon(
-                        imageVector = if (isPasswordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                        contentDescription = "Toggle Password Visibility",
-                        tint = MaterialTheme.colorScheme.primary
+                // Error message
+                if (state is RegistrationState.Error) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text      = state.message,
+                        color     = MaterialTheme.colorScheme.error,
+                        fontSize  = 13.sp,
+                        textAlign = TextAlign.Center,
+                        modifier  = Modifier.fillMaxWidth()
                     )
                 }
-            },
-            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password,
-                imeAction = ImeAction.Next
-            ),
-            isError = isError,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                errorBorderColor = MaterialTheme.colorScheme.error,
-                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-            ),
-            singleLine = true
-        )
 
-        if (isError && errorMessage.isNotEmpty()) {
-            Row(
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Error,
-                    contentDescription = "Error",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = errorMessage,
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 12.sp
-                )
-            }
-        }
-    }
+                Spacer(Modifier.height(24.dp))
+
+                // Register Button
+                Button(
+                    onClick = {
+                        val imageBytes = imageUri?.let { uri ->
+                            try {
+                                context.contentResolver.openInputStream(uri)?.readBytes()
+                            } catch (_: Exception) { null }
+                        }
+                        onRegisterClick(
+                            RegistrationRequest(
+                                email       = email.trim(),
+                                password    = password,
+                                name        = name.trim(),
+                                phoneNumber = phone.trim(),
+                                designation = designation.trim(),
+                                companyName = company.trim(),
+                                department  = department,
+                                role        = role,
+                                imageBytes  = imageBytes
+                            )
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    enabled  = !isLoading
+                            && name.isNotBlank()
+                            && email.isNotBlank()
+                            && password.isNotBlank()
+                            && company.isNotBlank()
+                            && designation.isNotBlank()
+                            && department.isNotBlank(),
+                    colors   = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            color       = MaterialTheme.colorScheme.onPrimary,
+                            modifier    = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Creating Account...")
+                    } else {
+                        Icon(
+                            Icons.Default.PersonAdd, null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Create Account", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                TextButton(
+                    onClick  = onLoginClick,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Already have an account? Sign In",
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+            } // end Column inside Card
+        } // end Card
+
+        Spacer(Modifier.height(32.dp))
+
+    } // end main Column
 }
 
+// ── Helper Composables ────────────────────────────────────────
+
 @Composable
-fun NumberField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = { newValue ->
-            if (newValue.all { it.isDigit() } && newValue.length <= 3) {
-                onValueChange(newValue)
-            }
-        },
-        label = { Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-        leadingIcon = {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
-        },
-        modifier = modifier.padding(vertical = 4.dp),
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Number,
-            imeAction = ImeAction.Next
-        ),
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-        ),
-        singleLine = true
+private fun RegSectionTitle(title: String, icon: ImageVector) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            icon, null,
+            tint     = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            title,
+            style      = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color      = MaterialTheme.colorScheme.primary
+        )
+    }
+    HorizontalDivider(
+        modifier = Modifier.padding(top = 4.dp),
+        color    = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
     )
 }
 
-@Preview(showBackground = true)
 @Composable
-fun PreviewRegistrationScreen() {
-    Ritik_2Theme {
-        RegistrationScreen(
-            onRegisterClick = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
-            onLoginClick = { }
+private fun RegTextField(
+    value        : String,
+    onValueChange: (String) -> Unit,
+    label        : String,
+    icon         : ImageVector,
+    keyboardType : KeyboardType = KeyboardType.Text
+) {
+    OutlinedTextField(
+        value           = value,
+        onValueChange   = onValueChange,
+        label           = { Text(label) },
+        leadingIcon     = {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+        },
+        modifier        = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        singleLine      = true,
+        colors          = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor   = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline
         )
-    }
+    )
 }
 
-@Preview(showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
 @Composable
-fun PreviewRegistrationScreenDark() {
-    Ritik_2Theme {
-        RegistrationScreen(
-            onRegisterClick = { _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
-            onLoginClick = { }
+private fun RegPasswordField(
+    value        : String,
+    onValueChange: (String) -> Unit,
+    isVisible    : Boolean,
+    onToggle     : (Boolean) -> Unit
+) {
+    OutlinedTextField(
+        value                = value,
+        onValueChange        = onValueChange,
+        label                = { Text("Password") },
+        leadingIcon          = {
+            Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
+        },
+        trailingIcon         = {
+            IconButton(onClick = { onToggle(!isVisible) }) {
+                Icon(
+                    if (isVisible) Icons.Default.Visibility
+                    else Icons.Default.VisibilityOff,
+                    contentDescription = "Toggle password",
+                    tint               = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        visualTransformation = if (isVisible) VisualTransformation.None
+        else PasswordVisualTransformation(),
+        modifier             = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        keyboardOptions      = KeyboardOptions(keyboardType = KeyboardType.Password),
+        singleLine           = true,
+        colors               = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor   = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline
         )
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RegRoleDropdown(selected: String, onSelected: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded          = expanded,
+        onExpandedChange  = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value         = selected,
+            onValueChange = {},
+            readOnly      = true,
+            label         = { Text("Role") },
+            leadingIcon   = {
+                Icon(
+                    Icons.Default.ManageAccounts, null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier      = Modifier
+                .fillMaxWidth()
+                .menuAnchor(),
+            colors        = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            )
+        )
+        ExposedDropdownMenu(
+            expanded          = expanded,
+            onDismissRequest  = { expanded = false }
+        ) {
+            Permissions.ALL_ROLES.forEach { r ->
+                DropdownMenuItem(
+                    text    = { Text(r) },
+                    onClick = { onSelected(r); expanded = false }
+                )
+            }
+        }
     }
 }
