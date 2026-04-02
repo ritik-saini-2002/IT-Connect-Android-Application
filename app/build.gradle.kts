@@ -127,7 +127,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.storage)           // kept for other activities
     implementation(libs.firebase.messaging)         // kept for FCM if needed later
-    implementation(libs.firebase.crashlytics.ktx)
+    //implementation(libs.firebase.crashlytics.ktx)
 
     // ── GMS ───────────────────────────────────────────────────
     implementation(libs.play.services.auth)
