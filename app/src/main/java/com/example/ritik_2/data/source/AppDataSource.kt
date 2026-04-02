@@ -17,7 +17,7 @@ interface AppDataSource {
     // ── User ──────────────────────────────────────────────────
     suspend fun getUserProfile(userId: String): Result<UserProfile>
     suspend fun updateUserProfile(userId: String, fields: Map<String, Any>): Result<Unit>
-    suspend fun uploadProfileImage(userId: String, bytes: ByteArray, filename: String): Result<String>
+    suspend fun uploadProfileImage(userId: String, bytes: ByteArray, filename: String, token: String = ""): Result<String>
 
     // ── Registration ──────────────────────────────────────────
     suspend fun registerUser(request: RegistrationRequest): Result<String>

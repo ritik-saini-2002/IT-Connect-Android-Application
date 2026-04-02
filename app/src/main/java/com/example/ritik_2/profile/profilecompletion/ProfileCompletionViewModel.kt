@@ -3,9 +3,6 @@ package com.example.ritik_2.profile.profilecompletion
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ritik_2.core.StringUtils
-import com.example.ritik_2.core.parseJsonMap
-import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,10 +15,25 @@ import javax.inject.Inject
 
 data class ProfileCompletionUiState(
     val isLoading       : Boolean      = false,
-    val userProfile     : UserProfile? = null,
+    val userProfile     : com.example.ritik_2.data.model.UserProfile? = null,
     val selectedImageUri: Uri?         = null,
     val error           : String?      = null,
     val isSaved         : Boolean      = false
+)
+
+// ── Only fields that are NOT already collected during registration ────────────
+data class ProfileSaveData(
+    val address                 : String = "",
+    val employeeId              : String = "",
+    val reportingTo             : String = "",
+    val salary                  : Double = 0.0,
+    val experience              : Int    = 0,
+    val emergencyContactName    : String = "",
+    val emergencyContactPhone   : String = "",
+    val emergencyContactRelation: String = "",
+    val existingImageUrl        : String = ""
+    // name, designation, phoneNumber, role, companyName, department
+    // are already saved during registerUser — not needed here
 )
 
 @HiltViewModel
@@ -36,12 +48,8 @@ class ProfileCompletionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             dataSource.getUserProfile(userId)
-                .onSuccess { profile ->
-                    _uiState.update { it.copy(userProfile = profile, isLoading = false) }
-                }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
-                }
+                .onSuccess  { profile -> _uiState.update { it.copy(userProfile = profile, isLoading = false) } }
+                .onFailure  { e      -> _uiState.update { it.copy(isLoading = false, error = e.message) } }
         }
     }
 
@@ -52,23 +60,21 @@ class ProfileCompletionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // Validate
-            val validation = validate(data)
-            if (validation != null) {
-                _uiState.update { it.copy(isLoading = false, error = validation) }
-                return@launch
-            }
-
-            // Upload image if selected
+            // Upload avatar if a new image was picked — pass empty token,
+            // uploadProfileImage will fall back to the current auth token
             var imageUrl = data.existingImageUrl
-            imageBytes?.let { bytes ->
-                dataSource.uploadProfileImage(userId, bytes, "profile_$userId.jpg")
+            if (imageBytes != null) {
+                dataSource.uploadProfileImage(userId, imageBytes, "profile_$userId.jpg", "")
                     .onSuccess { url -> imageUrl = url }
+                    .onFailure { e  -> android.util.Log.w("ProfileVM", "Image upload failed: ${e.message}") }
             }
 
+            // Build profile JSON — preserve fields already set during registration
+            val existingProfile = _uiState.value.userProfile
             val profileJson = JSONObject().apply {
                 put("imageUrl",    imageUrl)
-                put("phoneNumber", data.phoneNumber)
+                // Keep phone number that was set during registration
+                put("phoneNumber", existingProfile?.phoneNumber ?: "")
                 put("address",     data.address)
                 put("employeeId",  data.employeeId)
                 put("reportingTo", data.reportingTo)
@@ -79,51 +85,25 @@ class ProfileCompletionViewModel @Inject constructor(
             }.toString()
 
             val workJson = JSONObject().apply {
-                put("experience",         data.experience)
-                put("completedProjects",  0)
-                put("activeProjects",     0)
-                put("pendingTasks",       0)
-                put("completedTasks",     0)
-                put("totalWorkingHours",  0)
+                // Keep existing work stats set during registration
+                put("experience",           data.experience)
+                put("completedProjects",    existingProfile?.completedProjects ?: 0)
+                put("activeProjects",       existingProfile?.activeProjects    ?: 0)
+                put("pendingTasks",         existingProfile?.pendingTasks      ?: 0)
+                put("completedTasks",       existingProfile?.completedTasks    ?: 0)
+                put("totalWorkingHours",    0)
                 put("avgPerformanceRating", 0.0)
             }.toString()
 
+            // Only update fields that profile completion is responsible for
             val fields = mapOf<String, Any>(
-                "name"        to data.name,
-                "designation" to data.designation,
-                "profile"     to profileJson,
-                "workStats"   to workJson
+                "profile"   to profileJson,
+                "workStats" to workJson
             )
 
             dataSource.updateUserProfile(userId, fields)
-                .onSuccess {
-                    _uiState.update { it.copy(isLoading = false, isSaved = true) }
-                }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
-                }
+                .onSuccess { _uiState.update { it.copy(isLoading = false, isSaved = true) } }
+                .onFailure { e -> _uiState.update { it.copy(isLoading = false, error = e.message) } }
         }
     }
-
-    private fun validate(data: ProfileSaveData): String? = when {
-        data.name.isBlank()        -> "Name is required"
-        data.name.length < 2       -> "Name must be at least 2 characters"
-        data.designation.isBlank() -> "Designation is required"
-        else -> null
-    }
 }
-
-data class ProfileSaveData(
-    val name                    : String,
-    val designation             : String,
-    val phoneNumber             : String = "",
-    val address                 : String = "",
-    val employeeId              : String = "",
-    val reportingTo             : String = "",
-    val salary                  : Double = 0.0,
-    val experience              : Int    = 0,
-    val emergencyContactName    : String = "",
-    val emergencyContactPhone   : String = "",
-    val emergencyContactRelation: String = "",
-    val existingImageUrl        : String = ""
-)

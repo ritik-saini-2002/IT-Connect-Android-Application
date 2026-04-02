@@ -1,4 +1,3 @@
-// ─── profile/ProfileActivity.kt ───────────────────────────────
 package com.example.ritik_2.profile
 
 import android.os.Bundle
@@ -7,23 +6,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.getValue
-import com.example.ritik_2.auth.AuthRepository
-import com.example.ritik_2.data.source.AppDataSource
-import com.example.ritik_2.main.UserProfileData
-import com.example.ritik_2.main.toUiModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
-import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 @AndroidEntryPoint
 class ProfileActivity : ComponentActivity() {
@@ -41,39 +29,59 @@ class ProfileActivity : ComponentActivity() {
             ITConnectTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-                uiState.profile?.let { profile ->
-                    ProfileScreen(
-                        profileImageUrl    = null,  // Uri? — null since we use String URL
-                        name               = profile.name,
-                        email              = profile.email,
-                        phoneNumber        = profile.phoneNumber,
-                        designation        = profile.designation,
-                        companyName        = profile.companyName,
-                        role               = profile.role,
-                        userId             = profile.id,
-                        complaints         = profile.totalComplaints,
-                        experience         = profile.experience,
-                        completedProjects  = profile.completedProjects,
-                        activeProjects     = profile.activeProjects,
-                        isLoading          = uiState.isLoading,
-                        onLogoutClick      = { viewModel.logout(); finish() },
-                        onEditClick        = { field, value -> viewModel.updateField(userId, field, value) },
-                        onChangeProfilePic = { },
-                        onBackClick        = { finish() }
-                    )
-                } ?: run {
-                    if (uiState.isLoading) {
-                        androidx.compose.material3.CircularProgressIndicator()
-                    } else {
-                        Toast.makeText(this, uiState.error ?: "Profile not found",
-                            android.widget.Toast.LENGTH_LONG).show()
+                when {
+                    uiState.isLoading -> CircularProgressIndicator()
+
+                    uiState.profile != null -> {
+                        val p = uiState.profile!!
+                        ProfileScreen(
+                            imageUrl           = p.imageUrl,
+                            name               = p.name,
+                            email              = p.email,
+                            phoneNumber        = p.phoneNumber,
+                            designation        = p.designation,
+                            companyName        = p.companyName,
+                            department         = p.department,
+                            role               = p.role,
+                            userId             = p.id,
+                            experience         = p.experience,
+                            completedProjects  = p.completedProjects,
+                            activeProjects     = p.activeProjects,
+                            pendingTasks       = p.pendingTasks,
+                            totalComplaints    = p.totalComplaints,
+                            resolvedComplaints = p.resolvedComplaints,
+                            isLoading          = uiState.isLoading,
+                            onEditClick        = {
+                                startActivity(
+                                    ProfileCompletionActivity.createIntent(
+                                        this, userId, isEditMode = true
+                                    )
+                                )
+                            },
+                            onLogoutClick = {
+                                viewModel.logout()
+                                finish()
+                            },
+                            onBackClick = { finish() }
+                        )
+                    }
+
+                    else -> {
+                        Toast.makeText(
+                            this,
+                            uiState.error ?: "Profile not found",
+                            Toast.LENGTH_LONG
+                        ).show()
                         finish()
                     }
                 }
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Refresh when returning from edit screen so changes show immediately
+        intent.getStringExtra("userId")?.let { viewModel.loadProfile(it) }
+    }
 }
-
-
-// ─── profile/profilecompletion/ProfileCompletionActivity.kt ───

@@ -2,6 +2,7 @@ package com.example.ritik_2.main
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,21 +15,22 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// ── UI State — uses UserProfileData (UI model) ─────────────────
+// ── UI State ──────────────────────────────────────────────────
 data class MainUiState(
     val isLoading   : Boolean          = true,
     val isRefreshing: Boolean          = false,
-    val userProfile : UserProfileData? = null,   // ✅ UI model, not domain model
+    val userProfile : UserProfileData? = null,
     val error       : String?          = null
 )
 
-// ── UI model — lives here, used by MainScreen ──────────────────
+// ── UI model ──────────────────────────────────────────────────
 data class UserProfileData(
     val id                : String,
     val name              : String,
     val email             : String,
     val role              : String,
     val companyName       : String,
+    val department        : String       = "",
     val designation       : String       = "IT Professional",
     val imageUrl          : String?      = null,
     val phoneNumber       : String       = "",
@@ -44,7 +46,6 @@ data class UserProfileData(
     val documentPath      : String       = "",
     val permissions       : List<String> = emptyList()
 ) {
-    // ✅ Computed properties — safe for data class (no constructor default issue)
     val performanceScore: Double
         get() = if (completedProjects + activeProjects > 0)
             completedProjects.toDouble() / (completedProjects + activeProjects) * 100.0
@@ -56,15 +57,17 @@ data class UserProfileData(
         else 100.0
 }
 
-// ── Domain → UI model mapper ───────────────────────────────────
+// ── Domain → UI model mapper ──────────────────────────────────
 fun UserProfile.toUiModel() = UserProfileData(
     id                 = id,
     name               = name,
     email              = email,
     role               = role,
     companyName        = companyName,
+    department         = department,
     designation        = designation,
-    imageUrl           = imageUrl.ifBlank { null },
+    // PocketBase stores only the filename in avatar field — build full URL here
+    imageUrl           = AppConfig.avatarUrl(id, imageUrl),
     phoneNumber        = phoneNumber,
     experience         = experience,
     completedProjects  = completedProjects,
@@ -106,13 +109,13 @@ class MainViewModel @Inject constructor(
             }
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            var profile: UserProfileData? = null
-            var lastError: Throwable?     = null
+            var profile  : UserProfileData? = null
+            var lastError: Throwable?       = null
 
             repeat(MAX_RETRIES) { attempt ->
                 if (profile != null) return@repeat
                 dataSource.getUserProfile(userId)
-                    .onSuccess { profile = it.toUiModel() }   // ✅ map to UI model here
+                    .onSuccess { profile = it.toUiModel() }
                     .onFailure {
                         lastError = it
                         if (attempt < MAX_RETRIES - 1) delay(RETRY_DELAY)
@@ -124,8 +127,8 @@ class MainViewModel @Inject constructor(
                 cacheTimestamp = System.currentTimeMillis()
                 _uiState.update { it.copy(userProfile = profile, isLoading = false, error = null) }
             } else {
-                val msg = lastError?.message ?: "Failed to load profile"
-                _uiState.update { it.copy(isLoading = false, error = msg) }
+                _uiState.update { it.copy(isLoading = false,
+                    error = lastError?.message ?: "Failed to load profile") }
             }
         }
     }
@@ -135,15 +138,13 @@ class MainViewModel @Inject constructor(
         loadJob = viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true) }
             dataSource.getUserProfile(userId)
-                .onSuccess { profile ->
-                    val uiProfile  = profile.toUiModel()
-                    cachedProfile  = uiProfile
+                .onSuccess {
+                    val ui = it.toUiModel()
+                    cachedProfile  = ui
                     cacheTimestamp = System.currentTimeMillis()
-                    _uiState.update { it.copy(userProfile = uiProfile, isRefreshing = false, error = null) }
+                    _uiState.update { s -> s.copy(userProfile = ui, isRefreshing = false, error = null) }
                 }
-                .onFailure {
-                    _uiState.update { it.copy(isRefreshing = false) }
-                }
+                .onFailure { _uiState.update { s -> s.copy(isRefreshing = false) } }
         }
     }
 

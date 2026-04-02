@@ -2,7 +2,6 @@ package com.example.ritik_2.profile.profilecompletion
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -57,15 +56,16 @@ class ProfileCompletionActivity : ComponentActivity() {
             return
         }
 
-        // Observe save success
         lifecycleScope.launch {
             viewModel.uiState.collect { state ->
                 if (state.isSaved) {
                     Toast.makeText(this@ProfileCompletionActivity,
                         "Profile saved! ✅", Toast.LENGTH_SHORT).show()
-                    startActivity(Intent(this@ProfileCompletionActivity, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    })
+                    startActivity(
+                        Intent(this@ProfileCompletionActivity, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        }
+                    )
                     finish()
                 }
                 state.error?.let { err ->
@@ -77,13 +77,15 @@ class ProfileCompletionActivity : ComponentActivity() {
 
         setContent {
             ITConnectTheme {
-                Surface(modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color    = MaterialTheme.colorScheme.background
+                ) {
                     ProfileCompletionScreen(
                         viewModel        = viewModel,
                         onImagePickClick = { imagePickerLauncher.launch("image/*") },
                         onSaveProfile    = { data ->
-                            // Read image bytes if new image selected
+                            // Read image bytes only if user picked a new image
                             val imageBytes = viewModel.uiState.value.selectedImageUri?.let { uri ->
                                 try { contentResolver.openInputStream(uri)?.readBytes() }
                                 catch (_: Exception) { null }

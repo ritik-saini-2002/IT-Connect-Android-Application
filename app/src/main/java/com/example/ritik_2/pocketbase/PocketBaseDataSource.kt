@@ -179,23 +179,40 @@ class PocketBaseDataSource @Inject constructor(
         }
 
     override suspend fun uploadProfileImage(
-        userId: String, bytes: ByteArray, filename: String
+        userId: String, bytes: ByteArray, filename: String,
+        token: String        // ← no default here, override can't have defaults
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val resolvedToken = token.ifEmpty { getAuthToken() }  // ← resolve inside body
             val mediaType   = "image/jpeg".toMediaType()
             val requestBody = okhttp3.MultipartBody.Builder()
                 .setType(okhttp3.MultipartBody.FORM)
-                .addFormDataPart("profileImage", filename,
+                .addFormDataPart("avatar", filename,          // ← "avatar" matches PocketBase users collection default
                     okhttp3.RequestBody.create(mediaType, bytes))
                 .build()
             val req = Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                .addHeader("Authorization", "Bearer ${getAuthToken()}")
+                .addHeader("Authorization", "Bearer $resolvedToken")
                 .patch(requestBody)
                 .build()
-            val res = http.newCall(req).execute()
+            val res     = http.newCall(req).execute()
+            val resBody = res.body?.string() ?: ""
+            val resCode = res.code
             res.close()
-            Result.success("${AppConfig.BASE_URL}/api/files/$COL_USERS/$userId/$filename")
+
+            if (!res.isSuccessful) {
+                Log.e(TAG, "uploadProfileImage HTTP $resCode: $resBody")
+                return@withContext Result.failure(Exception("Upload failed: $resCode — $resBody"))
+            }
+
+            Log.d(TAG, "uploadProfileImage HTTP $resCode ✅")
+
+            // PocketBase returns the filename it stored (may differ from what we sent)
+            val storedFilename = try {
+                JSONObject(resBody).optString("avatar", filename)
+            } catch (_: Exception) { filename }
+
+            Result.success("${AppConfig.BASE_URL}/api/files/$COL_USERS/$userId/$storedFilename")
         } catch (e: Exception) {
             Log.e(TAG, "uploadProfileImage failed: ${e.message}")
             Result.failure(e)
@@ -237,7 +254,9 @@ class PocketBaseDataSource @Inject constructor(
                 pb.login { this.token = userToken }
 
                 val imageUrl = request.imageBytes?.let { bytes ->
-                    uploadProfileImage(userId, bytes, "profile_$userId.jpg").getOrDefault("")
+                    uploadProfileImage(userId, bytes, "profile_$userId.jpg", adminToken)
+                        .onFailure { Log.e(TAG, "Image upload failed: ${it.message}") }
+                        .getOrDefault("")
                 } ?: ""
 
                 val documentPath = "users/$sc/$sd/${request.role}/$userId"
@@ -483,8 +502,17 @@ class PocketBaseDataSource @Inject constructor(
             .addHeader("Authorization", "Bearer $token")
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
-        val res = http.newCall(req).execute()
-        if (!res.isSuccessful) Log.w(TAG, "POST $url failed: ${res.code} ${res.body?.string()}")
+        val res     = http.newCall(req).execute()
+        val resBody = res.body?.string() ?: ""
+        if (res.isSuccessful) {
+            Log.d(TAG, "POST $url → HTTP ${res.code} ✅")
+            Log.d(TAG, "POST response: $resBody")
+        } else {
+            Log.e(TAG, "POST $url → HTTP ${res.code} ❌")
+            Log.e(TAG, "POST error body: $resBody")
+            Log.e(TAG, "POST request body was: $body")
+            error("POST failed: HTTP ${res.code} — $resBody")  // ← throw so registerUser catches it
+        }
         res.close()
     }
 
@@ -494,8 +522,17 @@ class PocketBaseDataSource @Inject constructor(
             .addHeader("Authorization", "Bearer $token")
             .patch(body.toRequestBody("application/json".toMediaType()))
             .build()
-        val res = http.newCall(req).execute()
-        if (!res.isSuccessful) Log.w(TAG, "PATCH $url failed: ${res.code} ${res.body?.string()}")
+        val res     = http.newCall(req).execute()
+        val resBody = res.body?.string() ?: ""
+        if (res.isSuccessful) {
+            Log.d(TAG, "PATCH $url → HTTP ${res.code} ✅")
+            Log.d(TAG, "PATCH response: $resBody")
+        } else {
+            Log.e(TAG, "PATCH $url → HTTP ${res.code} ❌")
+            Log.e(TAG, "PATCH error body: $resBody")
+            Log.e(TAG, "PATCH request body was: $body")
+            error("PATCH failed: HTTP ${res.code} — $resBody")  // ← throw so registerUser catches it
+        }
         res.close()
     }
 
@@ -522,7 +559,7 @@ class PocketBaseDataSource @Inject constructor(
             try {
                 val body = JSONObject().apply {
                     put("identity", AppConfig.ADMIN_EMAIL)
-                    put("password", AppConfig.ADMIN_PASS)
+                    put("password", AppConfig.ADMIN_PASS)   // AppConfig.ADMIN_PASS reads BuildConfig.PB_ADMIN_PASSWORD
                 }.toString().toRequestBody("application/json".toMediaType())
                 val req     = Request.Builder().url(url).post(body).build()
                 val res     = http.newCall(req).execute()

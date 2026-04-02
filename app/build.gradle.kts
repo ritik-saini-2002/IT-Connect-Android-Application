@@ -12,29 +12,31 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId         = "com.example.itconnect"
-        minSdk                = 26
-        targetSdk             = 35
-        versionCode           = 1
-        versionName           = "2.0.0"
+        applicationId             = "com.example.itconnect"
+        minSdk                    = 26
+        targetSdk                 = 35
+        versionCode               = 1
+        versionName               = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Read PocketBase config from local.properties (never commit credentials)
-        val props = com.android.build.gradle.internal.cxx.configure.gradleLocalProperties(rootDir, providers)
-        buildConfigField("String", "PB_HOST",     "\"${props.getProperty("pb.host", "192.168.1.100")}\"")
-        buildConfigField("String", "PB_PORT",     "\"${props.getProperty("pb.port", "8090")}\"")
-        buildConfigField("String", "PB_ADMIN_EMAIL",    "\"${props.getProperty("pb.admin.email", "")}\"")
-        buildConfigField("String", "PB_ADMIN_PASSWORD", "\"${props.getProperty("pb.admin.password", "")}\"")
+        val props = com.android.build.gradle.internal.cxx.configure
+            .gradleLocalProperties(rootDir, providers)
+
+        buildConfigField("String", "PB_HOST",             "\"${props.getProperty("pb.host",             "192.168.1.100")}\"")
+        buildConfigField("String", "PB_PORT",             "\"${props.getProperty("pb.port",             "8090")}\"")
+        buildConfigField("String", "PB_ADMIN_EMAIL",      "\"${props.getProperty("pb.admin.email",      "")}\"")
+        buildConfigField("String", "PB_ADMIN_PASSWORD",   "\"${props.getProperty("pb.admin.password",   "")}\"")
     }
 
     buildTypes {
         debug {
-            isDebuggable   = true
-            isMinifyEnabled = false
+            isDebuggable        = true
+            isMinifyEnabled     = false
             applicationIdSuffix = ".debug"
         }
         release {
-            isMinifyEnabled  = true
+            isMinifyEnabled   = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -101,12 +103,12 @@ dependencies {
     // Navigation
     implementation(libs.androidx.navigation.compose)
 
-    // Room (local cache)
+    // Room
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // Hilt DI
+    // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     implementation(libs.androidx.hilt.navigation.compose)

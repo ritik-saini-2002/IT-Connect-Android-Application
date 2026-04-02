@@ -15,9 +15,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ProfileUiState(
-    val isLoading  : Boolean          = true,
-    val profile    : UserProfileData? = null,
-    val error      : String?          = null
+    val isLoading: Boolean          = true,
+    val profile  : UserProfileData? = null,
+    val error    : String?          = null
 )
 
 @HiltViewModel
@@ -33,22 +33,8 @@ class ProfileViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             dataSource.getUserProfile(userId)
-                .onSuccess { profile ->
-                    _uiState.update { it.copy(isLoading = false, profile = profile.toUiModel()) }
-                }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
-                }
-        }
-    }
-
-    fun updateField(userId: String, field: String, value: String) {
-        viewModelScope.launch {
-            dataSource.updateUserProfile(userId, mapOf(field to value))
-                .onSuccess { loadProfile(userId) }
-                .onFailure { e ->
-                    _uiState.update { it.copy(error = e.message) }
-                }
+                .onSuccess { _uiState.update { s -> s.copy(isLoading = false, profile = it.toUiModel()) } }
+                .onFailure { _uiState.update { s -> s.copy(isLoading = false, error = it.message) } }
         }
     }
 

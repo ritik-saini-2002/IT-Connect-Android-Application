@@ -1,599 +1,352 @@
 package com.example.ritik_2.profile
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
-import com.example.ritik_2.theme.Ritik_2Theme
 
 @Composable
 fun ProfileScreen(
-    profileImageUrl: Uri?,
-    name: String,
-    email: String,
-    phoneNumber: String,
-    designation: String,
-    companyName: String,
-    role: String,
-    userId: String,
-    complaints: Int = 0,
-    experience: Int,
-    completedProjects: Int,
-    activeProjects: Int,
-    isLoading: Boolean,
-    onLogoutClick: () -> Unit,
-    onEditClick: (String, String) -> Unit,
-    onChangeProfilePic: () -> Unit,
-    onBackClick: () -> Unit
+    imageUrl          : String?,
+    name              : String,
+    email             : String,
+    phoneNumber       : String,
+    designation       : String,
+    companyName       : String,
+    department        : String,
+    role              : String,
+    userId            : String,
+    experience        : Int,
+    completedProjects : Int,
+    activeProjects    : Int,
+    pendingTasks      : Int,
+    totalComplaints   : Int,
+    resolvedComplaints: Int,
+    isLoading         : Boolean,
+    onLogoutClick     : () -> Unit,
+    onEditClick       : () -> Unit,
+    onBackClick       : () -> Unit
 ) {
-    var isFlipped by remember { mutableStateOf(false) }
-    var showEditDialog by remember { mutableStateOf(false) }
-    var selectedField by remember { mutableStateOf("") }
-    var selectedValue by remember { mutableStateOf("") }
-    val context = LocalContext.current
+    val scrollState = rememberScrollState()
 
-    // Animation for flip
-    val rotation by animateFloatAsState(
-        targetValue = if (isFlipped) 180f else 0f,
-        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
-        label = "cardFlip"
-    )
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // Flip Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(500.dp)
-                .graphicsLayer {
-                    rotationY = rotation
-                    cameraDistance = 12f * density
+        if (isLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            return@Box
+        }
+
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
+
+            // ── Hero gradient header ──────────────────────────────────
+            Box(
+                modifier = Modifier.fillMaxWidth().height(280.dp)
+                    .background(Brush.verticalGradient(listOf(
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                        MaterialTheme.colorScheme.background
+                    )))
+            ) {
+                // Back button
+                IconButton(
+                    onClick  = onBackClick,
+                    modifier = Modifier.padding(top = 8.dp, start = 4.dp).align(Alignment.TopStart)
+                ) {
+                    Icon(Icons.Default.ArrowBack, "Back",
+                        tint = MaterialTheme.colorScheme.onPrimary)
                 }
-                .clickable { isFlipped = !isFlipped },
-            shape = RoundedCornerShape(16.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Front side (visible when rotation <= 90f)
-                if (rotation <= 90f) {
-                    ProfileBackSide(
-                        profileImageUrl = profileImageUrl,
-                        name = name,
-                        designation = designation,
-                        modifier = Modifier.graphicsLayer { rotationY = 0f }
-                    )
-                } else {
-                    // Back side (visible when rotation > 90f) - needs 180° rotation to appear correctly
-                    ProfileFrontSide(
-                        profileImageUrl = profileImageUrl,
-                        name = name,
-                        email = email,
-                        phoneNumber = phoneNumber,
-                        designation = designation,
-                        companyName = companyName,
-                        experience = experience,
-                        completedProjects = completedProjects,
-                        activeProjects = activeProjects,
-                        complaints = complaints,
-                        onEditClick = { field, value ->
-                            selectedField = field
-                            selectedValue = value
-                            showEditDialog = true
-                        },
-                        onChangeProfilePic = onChangeProfilePic,
-                        modifier = Modifier.graphicsLayer { rotationY = 180f }
-                    )
+
+                // Avatar + name centred
+                Column(
+                    modifier = Modifier.align(Alignment.Center).padding(top = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Gradient ring around avatar
+                    Box(
+                        modifier = Modifier
+                            .size(112.dp)
+                            .background(
+                                Brush.linearGradient(listOf(
+                                    MaterialTheme.colorScheme.secondary,
+                                    MaterialTheme.colorScheme.primary
+                                )), CircleShape
+                            )
+                            .padding(3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!imageUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(imageUrl).crossfade(true).build(),
+                                contentDescription = "Avatar",
+                                modifier     = Modifier.size(106.dp).clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                Modifier.size(106.dp).clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val initials = name.split(" ").take(2)
+                                    .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
+                                    .joinToString("")
+                                if (initials.isNotBlank())
+                                    Text(initials,
+                                        style      = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color      = MaterialTheme.colorScheme.onPrimary)
+                                else
+                                    Icon(Icons.Default.Person, null,
+                                        modifier = Modifier.size(54.dp),
+                                        tint     = MaterialTheme.colorScheme.onPrimary)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Text(name,
+                        style      = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color      = MaterialTheme.colorScheme.onPrimary)
+
+                    Text(designation,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f))
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Role badge
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
+                    ) {
+                        Text(role,
+                            modifier   = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                            style      = MaterialTheme.typography.labelSmall,
+                            color      = MaterialTheme.colorScheme.onPrimary,
+                            fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            Button(
-                onClick = {
-                    val intent = Intent(context, ProfileCompletionActivity::class.java)
-                    intent.putExtra("userId", userId)
-                    context.startActivity(intent)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
+            // ── Stats card — floats over the gradient ─────────────────
+            Card(
+                modifier  = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .offset(y = (-20).dp),
+                shape     = RoundedCornerShape(16.dp),
+                colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Edit,
-                    contentDescription = "Update Profile",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onPrimary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "Update Profile",
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    ProfileStat(experience.toString(),        "Exp (yrs)", Icons.Outlined.Work,        MaterialTheme.colorScheme.primary)
+                    VerticalDivider(Modifier.height(40.dp))
+                    ProfileStat(completedProjects.toString(), "Done",      Icons.Outlined.CheckCircle, Color(0xFF4CAF50))
+                    VerticalDivider(Modifier.height(40.dp))
+                    ProfileStat(activeProjects.toString(),    "Active",    Icons.Outlined.Pending,     Color(0xFF2196F3))
+                    VerticalDivider(Modifier.height(40.dp))
+                    ProfileStat(pendingTasks.toString(),      "Tasks",     Icons.Outlined.Assignment,  Color(0xFFFF9800))
+                }
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Button(
-                onClick = onLogoutClick,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
+            // ── Info sections ─────────────────────────────────────────
+            Column(
+                modifier            = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Logout,
-                    contentDescription = "Logout",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onError
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "Logout",
-                    color = MaterialTheme.colorScheme.onError
-                )
+
+                // Work info
+                InfoCard("Work Info", Icons.Outlined.Work) {
+                    InfoRow(Icons.Outlined.Business,    "Company",     companyName)
+                    InfoRow(Icons.Outlined.Groups,      "Department",  department)
+                    InfoRow(Icons.Outlined.Badge,       "Designation", designation)
+                    InfoRow(Icons.Outlined.WorkOutline, "Role",        role)
+                }
+
+                // Contact info
+                InfoCard("Contact Info", Icons.Outlined.ContactPage) {
+                    InfoRow(Icons.Outlined.Email, "Email", email)
+                    InfoRow(Icons.Outlined.Phone, "Phone", phoneNumber.ifBlank { "—" })
+                }
+
+                // Complaint resolution (only if there are complaints)
+                if (totalComplaints > 0) {
+                    val rate = resolvedComplaints.toFloat() / totalComplaints
+                    Card(
+                        modifier  = Modifier.fillMaxWidth(),
+                        shape     = RoundedCornerShape(14.dp),
+                        colors    = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(2.dp)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.ReportProblem, null,
+                                    tint     = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Complaint Resolution",
+                                    style      = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.weight(1f))
+                                Text("${(rate * 100).toInt()}%",
+                                    style      = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color      = Color(0xFF4CAF50))
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress   = { rate },
+                                modifier   = Modifier.fillMaxWidth().height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
+                                color      = Color(0xFF4CAF50),
+                                trackColor = Color(0xFF4CAF50).copy(alpha = 0.15f)
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text("$resolvedComplaints of $totalComplaints resolved",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                // ── Single Edit + Logout row ──────────────────────────
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick  = onEditClick,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape    = RoundedCornerShape(14.dp),
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Edit Profile", fontWeight = FontWeight.SemiBold)
+                    }
+
+                    OutlinedButton(
+                        onClick  = onLogoutClick,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape    = RoundedCornerShape(14.dp),
+                        colors   = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error),
+                        border   = androidx.compose.foundation.BorderStroke(
+                            1.dp, MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Default.Logout, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Logout", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                Spacer(Modifier.height(32.dp))
             }
         }
-    }
-
-    // Edit Dialog
-    if (showEditDialog) {
-        EditDialog(
-            field = selectedField,
-            value = selectedValue,
-            onSave = { newValue ->
-                onEditClick(selectedField, newValue)
-                showEditDialog = false
-            },
-            onClose = { showEditDialog = false }
-        )
     }
 }
 
+// ── Reusable composables ──────────────────────────────────────
+
 @Composable
-fun ProfileFrontSide(
-    profileImageUrl: Uri?,
-    name: String,
-    email: String,
-    phoneNumber: String,
-    designation: String,
-    companyName: String,
-    experience: Int,
-    completedProjects: Int,
-    activeProjects: Int,
-    complaints: Int,
-    onEditClick: (String, String) -> Unit,
-    onChangeProfilePic: () -> Unit,
-    modifier: Modifier = Modifier
+private fun ProfileStat(
+    value: String, label: String, icon: ImageVector, color: Color
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Profile Picture
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { onChangeProfilePic() },
-            contentAlignment = Alignment.Center
-        ) {
-            if (profileImageUrl != null) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(profileImageUrl)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = "Profile Picture",
-                    modifier = Modifier
-                        .size(100.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Filled.Person,
-                    contentDescription = "Default Profile",
-                    modifier = Modifier.size(50.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Name and Designation
-        Text(
-            text = name,
-            style = MaterialTheme.typography.headlineSmall,
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(value,
             fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-            text = designation,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Personal Information Section
-        ProfileSection(title = "Personal Information") {
-            ProfileInfoItem(
-                icon = Icons.Filled.Email,
-                label = "Email",
-                value = email,
-                onClick = { onEditClick("Email", email) }
-            )
-            ProfileInfoItem(
-                icon = Icons.Filled.Phone,
-                label = "Phone",
-                value = phoneNumber,
-                onClick = { onEditClick("Phone", phoneNumber) }
-            )
-            ProfileInfoItem(
-                icon = Icons.Filled.Business,
-                label = "Company",
-                value = companyName,
-                onClick = { onEditClick("Company", companyName) }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Professional Statistics
-        ProfileSection(title = "Professional Stats") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                StatCard(
-                    title = "Experience",
-                    value = "$experience years",
-                    color = MaterialTheme.colorScheme.primary
-                )
-                StatCard(
-                    title = "Completed",
-                    value = "$completedProjects",
-                    color = Color(0xFF4CAF50) // Green
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                StatCard(
-                    title = "Active",
-                    value = "$activeProjects",
-                    color = Color(0xFF2196F3) // Blue
-                )
-                StatCard(
-                    title = "Complaints",
-                    value = "$complaints",
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-        }
+            style      = MaterialTheme.typography.titleMedium,
+            color      = color)
+        Text(label,
+            style    = MaterialTheme.typography.labelSmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 10.sp)
     }
 }
 
 @Composable
-fun ProfileBackSide(
-    profileImageUrl: Uri?,
-    name: String,
-    designation: String,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // Large Profile Picture
-        Box(
-            modifier = Modifier
-                .size(200.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            if (profileImageUrl != null) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(profileImageUrl)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = "Profile Picture",
-                    modifier = Modifier
-                        .size(200.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Filled.Person,
-                    contentDescription = "Default Profile",
-                    modifier = Modifier.size(100.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Name and Designation centered at bottom
-        Text(
-            text = name,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Text(
-            text = designation,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-fun ProfileSection(
-    title: String,
-    content: @Composable () -> Unit
-) {
-    Column {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        content()
-    }
-}
-
-@Composable
-fun ProfileInfoItem(
-    icon: ImageVector,
-    label: String,
-    value: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-        Icon(
-            imageVector = Icons.Filled.Edit,
-            contentDescription = "Edit",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp)
-        )
-    }
-}
-
-@Composable
-fun StatCard(
-    title: String,
-    value: String,
-    color: Color
+private fun InfoCard(
+    title  : String,
+    icon   : ImageVector,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .width(80.dp)
-            .height(60.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = color.copy(alpha = 0.1f)
-        ),
-        shape = RoundedCornerShape(8.dp)
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(14.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = color
-            )
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall,
-                color = color,
-                fontSize = 10.sp
-            )
+        Column(Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier          = Modifier.padding(bottom = 10.dp)
+            ) {
+                Icon(icon, null,
+                    tint     = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(title,
+                    style      = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold)
+            }
+            content()
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditDialog(
-    field: String,
-    value: String,
-    onSave: (String) -> Unit,
-    onClose: () -> Unit
-) {
-    var newValue by remember { mutableStateOf(value) }
-
-    AlertDialog(
-        onDismissRequest = { onClose() },
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(20.dp),
-        title = {
-            Text(
-                text = "Edit $field",
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        },
-        text = {
-            OutlinedTextField(
-                value = newValue,
-                onValueChange = { newValue = it },
-                label = {
-                    Text(
-                        "Enter new $field",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                )
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(newValue) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    "Save",
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = { onClose() },
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Text("Cancel")
-            }
+private fun InfoRow(icon: ImageVector, label: String, value: String) {
+    if (value.isBlank()) return
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null,
+            tint     = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+            modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value,
+                style      = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium)
         }
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun PreviewProfileScreen() {
-    Ritik_2Theme {
-        ProfileScreen(
-            profileImageUrl = null,
-            name = "John Doe",
-            email = "john.doe@company.com",
-            phoneNumber = "+1234567890",
-            designation = "Senior Developer",
-            companyName = "Tech Corp",
-            role = "Administrator",
-            userId = "user123",
-            complaints = 2,
-            experience = 5,
-            completedProjects = 15,
-            activeProjects = 3,
-            isLoading = false,
-            onLogoutClick = { },
-            onEditClick = { _, _ -> },
-            onChangeProfilePic = { },
-            onBackClick = { }
-        )
-    }
-}
-
-@Preview(showBackground = true, uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES)
-@Composable
-fun PreviewProfileScreenDark() {
-    Ritik_2Theme {
-        ProfileScreen(
-            profileImageUrl = null,
-            name = "John Doe",
-            email = "john.doe@company.com",
-            phoneNumber = "+1234567890",
-            designation = "Senior Developer",
-            companyName = "Tech Corp",
-            role = "Administrator",
-            userId = "user123",
-            complaints = 2,
-            experience = 5,
-            completedProjects = 15,
-            activeProjects = 3,
-            isLoading = false,
-            onLogoutClick = { },
-            onEditClick = { _, _ -> },
-            onChangeProfilePic = { },
-            onBackClick = { }
-        )
     }
 }
