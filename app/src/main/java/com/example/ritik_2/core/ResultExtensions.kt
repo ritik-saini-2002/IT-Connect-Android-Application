@@ -1,6 +1,6 @@
 package com.example.ritik_2.core
 
-/** Runs [block] and wraps any exception in Result.failure */
+/** Runs [block] and wraps any exception in Result. Failure */
 inline fun <T> safeCall(block: () -> T): Result<T> =
     try { Result.success(block()) }
     catch (e: Exception) { Result.failure(e) }

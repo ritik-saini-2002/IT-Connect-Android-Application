@@ -25,7 +25,7 @@ class LoginViewModel @Inject constructor(
             _loginState.value = AuthState.Loading
             _loginState.value = authRepository.login(email, password)
                 .fold(
-                    onSuccess = { AuthState.Success },
+                    onSuccess = { AuthState.Success() },
                     onFailure = { AuthState.Error(mapError(it.message)) }
                 )
         }
@@ -36,7 +36,7 @@ class LoginViewModel @Inject constructor(
             _resetState.value = AuthState.Loading
             _resetState.value = authRepository.sendPasswordReset(email)
                 .fold(
-                    onSuccess = { AuthState.Success },
+                    onSuccess = { AuthState.Success() },
                     onFailure = { AuthState.Error(it.message ?: "Failed to send reset link") }
                 )
         }

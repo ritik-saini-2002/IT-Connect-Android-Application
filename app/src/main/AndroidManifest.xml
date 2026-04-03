@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -11,16 +10,13 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Legacy storage — only up to API 32 -->
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
-    <!-- Optional hardware -->
     <uses-feature android:name="android.hardware.camera"    android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
-    <!-- App queries for external intents -->
     <queries>
         <intent>
             <action android:name="android.intent.action.SENDTO" />
@@ -49,7 +45,7 @@
         android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="35">
 
-        <!-- ── SPLASH — this is the entry point ───────────── -->
+        <!-- ── Entry point ────────────────────────────────── -->
         <activity
             android:name=".splash.SplashActivity"
             android:exported="true"
@@ -61,48 +57,40 @@
         </activity>
 
         <!-- ── Auth ───────────────────────────────────────── -->
-        <activity
-            android:name=".login.LoginActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
-
-        <activity
-            android:name=".registration.RegistrationActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".login.LoginActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".registration.RegistrationActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Main ───────────────────────────────────────── -->
-        <activity
-            android:name=".main.MainActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".main.MainActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Profile ────────────────────────────────────── -->
-        <activity
-            android:name=".profile.ProfileActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
-
-        <activity
-            android:name=".profile.profilecompletion.ProfileCompletionActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".profile.ProfileActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".profile.profilecompletion.ProfileCompletionActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Features ───────────────────────────────────── -->
-        <activity
-            android:name=".contact.ContactActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".contact.ContactActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".windowscontrol.PcControlActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".winshare.ServerConnectActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
 
-        <activity
-            android:name=".windowscontrol.PcControlActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
-
-        <activity
-            android:name=".winshare.ServerConnectActivity"
-            android:exported="false"
-            android:theme="@style/Theme.Ritik_2" />
+        <!-- ── Admin ──────────────────────────────────────── -->
+        <activity android:name=".administrator.AdministratorPanelActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".administrator.databasemanager.DatabaseManagerActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".administrator.manageuser.ManageUserActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".administrator.rolemanagement.RoleManagementActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".administrator.newusercreation.CreateUserActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── File Provider ──────────────────────────────── -->
         <provider

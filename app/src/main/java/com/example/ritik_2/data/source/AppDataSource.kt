@@ -1,7 +1,6 @@
 package com.example.ritik_2.data.source
 
 import com.example.ritik_2.data.model.AuthSession
-import com.example.ritik_2.data.model.Company
 import com.example.ritik_2.data.model.RegistrationRequest
 import com.example.ritik_2.data.model.UserProfile
 

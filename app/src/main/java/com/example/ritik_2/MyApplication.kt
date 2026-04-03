@@ -3,6 +3,7 @@ package com.example.ritik_2
 import android.app.Application
 import android.util.Log
 import com.example.ritik_2.data.source.AppDataSource
+import com.example.ritik_2.pocketbase.PocketBaseInitializer
 import com.example.ritik_2.windowscontrol.PcControlMain
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -21,14 +22,20 @@ class MyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // ✅ PcControlMain initialized here — simple and direct
         PcControlMain.init(this, "")
 
-        // Initialize PocketBase collections
         appScope.launch {
-            dataSource.ensureCollectionsExist()
-                .onSuccess { Log.d("MyApplication", "Collections ready ✅") }
-                .onFailure { Log.e("MyApplication", "Collections setup failed: ${it.message}") }
+            try {
+                Log.d("MyApplication", "Running PocketBase initializer...")
+                PocketBaseInitializer.initialize()
+                Log.d("MyApplication", "PocketBase initializer complete ✅")
+
+                dataSource.ensureCollectionsExist()
+                    .onSuccess { Log.d("MyApplication", "Collections verified ✅") }
+                    .onFailure { Log.e("MyApplication", "Collections check: ${it.message}") }
+            } catch (e: Exception) {
+                Log.e("MyApplication", "App init failed: ${e.message}", e)
+            }
         }
     }
 }

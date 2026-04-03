@@ -3,37 +3,37 @@ package com.example.ritik_2.profile.profilecompletion
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import javax.inject.Inject
 
 data class ProfileCompletionUiState(
-    val isLoading       : Boolean      = false,
-    val userProfile     : com.example.ritik_2.data.model.UserProfile? = null,
-    val selectedImageUri: Uri?         = null,
-    val error           : String?      = null,
-    val isSaved         : Boolean      = false
+    val isLoading        : Boolean     = false,
+    val userProfile      : UserProfile? = null,
+    val selectedImageUri : Uri?        = null,
+    val error            : String?     = null,
+    val isSaved          : Boolean     = false
 )
 
-// ── Only fields that are NOT already collected during registration ────────────
+/**
+ * Fields profile completion collects.
+ * Registration already stored: name, email, password, phone,
+ * designation, company, department, role, photo.
+ */
 data class ProfileSaveData(
-    val address                 : String = "",
-    val employeeId              : String = "",
-    val reportingTo             : String = "",
-    val salary                  : Double = 0.0,
-    val experience              : Int    = 0,
-    val emergencyContactName    : String = "",
-    val emergencyContactPhone   : String = "",
-    val emergencyContactRelation: String = "",
-    val existingImageUrl        : String = ""
-    // name, designation, phoneNumber, role, companyName, department
-    // are already saved during registerUser — not needed here
+    val address                  : String = "",
+    val employeeId               : String = "",
+    val reportingTo              : String = "",
+    val salary                   : Double = 0.0,
+    val experience               : Int    = 0,
+    val emergencyContactName     : String = "",
+    val emergencyContactPhone    : String = "",
+    val emergencyContactRelation : String = "",
+    val existingImageUrl         : String = ""
 )
 
 @HiltViewModel
@@ -48,8 +48,8 @@ class ProfileCompletionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             dataSource.getUserProfile(userId)
-                .onSuccess  { profile -> _uiState.update { it.copy(userProfile = profile, isLoading = false) } }
-                .onFailure  { e      -> _uiState.update { it.copy(isLoading = false, error = e.message) } }
+                .onSuccess { p -> _uiState.update { it.copy(userProfile = p, isLoading = false) } }
+                .onFailure { e -> _uiState.update { it.copy(isLoading = false, error = e.message) } }
         }
     }
 
@@ -60,21 +60,20 @@ class ProfileCompletionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            // Upload avatar if a new image was picked — pass empty token,
-            // uploadProfileImage will fall back to the current auth token
+            // Upload new photo if provided
             var imageUrl = data.existingImageUrl
             if (imageBytes != null) {
+                // token = "" → PocketBaseDataSource uses admin token internally
                 dataSource.uploadProfileImage(userId, imageBytes, "profile_$userId.jpg", "")
                     .onSuccess { url -> imageUrl = url }
                     .onFailure { e  -> android.util.Log.w("ProfileVM", "Image upload failed: ${e.message}") }
             }
 
-            // Build profile JSON — preserve fields already set during registration
-            val existingProfile = _uiState.value.userProfile
+            val existing = _uiState.value.userProfile
+
             val profileJson = JSONObject().apply {
                 put("imageUrl",    imageUrl)
-                // Keep phone number that was set during registration
-                put("phoneNumber", existingProfile?.phoneNumber ?: "")
+                put("phoneNumber", existing?.phoneNumber ?: "")  // preserved from registration
                 put("address",     data.address)
                 put("employeeId",  data.employeeId)
                 put("reportingTo", data.reportingTo)
@@ -85,20 +84,19 @@ class ProfileCompletionViewModel @Inject constructor(
             }.toString()
 
             val workJson = JSONObject().apply {
-                // Keep existing work stats set during registration
                 put("experience",           data.experience)
-                put("completedProjects",    existingProfile?.completedProjects ?: 0)
-                put("activeProjects",       existingProfile?.activeProjects    ?: 0)
-                put("pendingTasks",         existingProfile?.pendingTasks      ?: 0)
-                put("completedTasks",       existingProfile?.completedTasks    ?: 0)
+                put("completedProjects",    existing?.completedProjects    ?: 0)
+                put("activeProjects",       existing?.activeProjects       ?: 0)
+                put("pendingTasks",         existing?.pendingTasks         ?: 0)
+                put("completedTasks",       existing?.completedTasks       ?: 0)
                 put("totalWorkingHours",    0)
                 put("avgPerformanceRating", 0.0)
             }.toString()
 
-            // Only update fields that profile completion is responsible for
             val fields = mapOf<String, Any>(
-                "profile"   to profileJson,
-                "workStats" to workJson
+                "profile"                to profileJson,
+                "workStats"              to workJson,
+                "needsProfileCompletion" to false        // ← clears the flag
             )
 
             dataSource.updateUserProfile(userId, fields)

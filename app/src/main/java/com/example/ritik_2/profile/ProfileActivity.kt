@@ -9,14 +9,22 @@ import androidx.activity.viewModels
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+
+// Roles that can edit profiles via the admin panel
+private val CAN_EDIT_ROLES = setOf("Administrator", "Manager", "HR")
 
 @AndroidEntryPoint
 class ProfileActivity : ComponentActivity() {
 
     private val viewModel: ProfileViewModel by viewModels()
+
+    // Inject AuthRepository to check the CURRENT logged-in user's role
+    @Inject lateinit var authRepository: AuthRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,6 +32,10 @@ class ProfileActivity : ComponentActivity() {
 
         val userId = intent.getStringExtra("userId") ?: run { finish(); return }
         viewModel.loadProfile(userId)
+
+        // Get the role of the person who is currently logged in
+        val currentUserRole = authRepository.getSession()?.role ?: ""
+        val canEdit         = currentUserRole in CAN_EDIT_ROLES
 
         setContent {
             ITConnectTheme {
@@ -51,6 +63,7 @@ class ProfileActivity : ComponentActivity() {
                             totalComplaints    = p.totalComplaints,
                             resolvedComplaints = p.resolvedComplaints,
                             isLoading          = uiState.isLoading,
+                            canEdit            = canEdit,           // ✅ pass down
                             onEditClick        = {
                                 startActivity(
                                     ProfileCompletionActivity.createIntent(
@@ -81,7 +94,6 @@ class ProfileActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Refresh when returning from edit screen so changes show immediately
         intent.getStringExtra("userId")?.let { viewModel.loadProfile(it) }
     }
 }

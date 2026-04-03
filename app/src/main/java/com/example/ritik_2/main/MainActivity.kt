@@ -10,11 +10,15 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope                          // ✅ correct import
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.example.ritik_2.administrator.AdministratorPanelActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.profile.ProfileActivity
+import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.PcControlActivity
 import com.example.ritik_2.winshare.ServerConnectActivity
@@ -34,12 +38,33 @@ class MainActivity : ComponentActivity() {
 
         if (!authRepository.isLoggedIn) { navigateToLogin(); return }
 
+        val needsProfileCompletion = intent.getBooleanExtra("SHOW_COMPLETE_PROFILE_TOGGLE", false)
+
         val session = authRepository.getSession()
-        session?.userId?.let { viewModel.loadUserProfile(it) }
+        val userId  = session?.userId
+        userId?.let { viewModel.loadUserProfile(it) }
+
+        // Refresh profile in background every time MainActivity resumes
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                userId?.let { viewModel.loadUserProfile(it, forceRefresh = true) }
+            }
+        }
 
         setContent {
             ITConnectTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+                // Show profile completion toast once on entry
+                LaunchedEffect(Unit) {
+                    if (needsProfileCompletion) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Please complete your profile",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
 
                 LaunchedEffect(uiState.error) {
                     uiState.error?.let { error ->
@@ -54,18 +79,23 @@ class MainActivity : ComponentActivity() {
                 }
 
                 MainScreen(
-                    uiState        = uiState,
-                    onLogout       = { performLogout() },        // ✅ renamed
-                    onCardClick    = { handleCardClick(it) },
-                    onProfileClick = { uiState.userProfile?.id?.let { navigateToProfile(it) } }
+                    uiState                  = uiState,
+                    onLogout                 = { performLogout() },
+                    onCardClick              = { handleCardClick(it) },
+                    onProfileClick = {
+                        val uid = uiState.userProfile?.id ?: return@MainScreen
+                        // Always go to ProfileActivity — edit button visibility
+                        // is controlled by role inside ProfileActivity itself
+                        navigateToProfile(uid)
+                    },
+                    showCompleteProfileBanner = needsProfileCompletion
                 )
             }
         }
     }
 
-    // ✅ Renamed from lifecycleScope() — was conflicting with AndroidX property
     private fun performLogout() {
-        lifecycleScope.launch {                                  // ✅ now resolves correctly
+        lifecycleScope.launch {
             authRepository.logout()
             navigateToLogin()
         }
@@ -73,6 +103,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleCardClick(cardId: Int) {
         val intent = when (cardId) {
+            3    -> Intent(this, AdministratorPanelActivity::class.java)
             4    -> Intent(this, ServerConnectActivity::class.java)
             6    -> Intent(this, PcControlActivity::class.java)
             8    -> Intent(this, ContactActivity::class.java)
@@ -83,10 +114,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun navigateToProfile(userId: String) {
-        startActivity(
-            Intent(this, ProfileActivity::class.java)
-                .putExtra("userId", userId)
-        )
+        startActivity(Intent(this, ProfileActivity::class.java).putExtra("userId", userId))
+    }
+
+    private fun navigateToProfileCompletion(userId: String) {
+        startActivity(ProfileCompletionActivity.createIntent(this, userId))
     }
 
     private fun navigateToLogin() {
@@ -101,6 +133,5 @@ class MainActivity : ComponentActivity() {
         if (!authRepository.isLoggedIn) navigateToLogin()
     }
 
-    private fun toast(msg: String) =
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 }

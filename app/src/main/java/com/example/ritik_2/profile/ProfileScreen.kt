@@ -44,6 +44,7 @@ fun ProfileScreen(
     totalComplaints   : Int,
     resolvedComplaints: Int,
     isLoading         : Boolean,
+    canEdit           : Boolean = false,   // ✅ only true for Administrator/Manager/HR
     onLogoutClick     : () -> Unit,
     onEditClick       : () -> Unit,
     onBackClick       : () -> Unit
@@ -61,7 +62,7 @@ fun ProfileScreen(
 
         Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
 
-            // ── Hero gradient header ──────────────────────────────────
+            // ── Hero gradient header ──────────────────────────────────────────
             Box(
                 modifier = Modifier.fillMaxWidth().height(280.dp)
                     .background(Brush.verticalGradient(listOf(
@@ -70,7 +71,6 @@ fun ProfileScreen(
                         MaterialTheme.colorScheme.background
                     )))
             ) {
-                // Back button
                 IconButton(
                     onClick  = onBackClick,
                     modifier = Modifier.padding(top = 8.dp, start = 4.dp).align(Alignment.TopStart)
@@ -79,22 +79,17 @@ fun ProfileScreen(
                         tint = MaterialTheme.colorScheme.onPrimary)
                 }
 
-                // Avatar + name centred
                 Column(
-                    modifier = Modifier.align(Alignment.Center).padding(top = 16.dp),
+                    modifier            = Modifier.align(Alignment.Center).padding(top = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Gradient ring around avatar
                     Box(
-                        modifier = Modifier
-                            .size(112.dp)
-                            .background(
-                                Brush.linearGradient(listOf(
-                                    MaterialTheme.colorScheme.secondary,
-                                    MaterialTheme.colorScheme.primary
-                                )), CircleShape
-                            )
-                            .padding(3.dp),
+                        modifier = Modifier.size(112.dp).background(
+                            Brush.linearGradient(listOf(
+                                MaterialTheme.colorScheme.secondary,
+                                MaterialTheme.colorScheme.primary
+                            )), CircleShape
+                        ).padding(3.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!imageUrl.isNullOrBlank()) {
@@ -128,19 +123,14 @@ fun ProfileScreen(
                     }
 
                     Spacer(Modifier.height(12.dp))
-
                     Text(name,
                         style      = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color      = MaterialTheme.colorScheme.onPrimary)
-
                     Text(designation,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f))
-
                     Spacer(Modifier.height(8.dp))
-
-                    // Role badge
                     Surface(
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
@@ -154,12 +144,10 @@ fun ProfileScreen(
                 }
             }
 
-            // ── Stats card — floats over the gradient ─────────────────
+            // ── Stats card ────────────────────────────────────────────────────
             Card(
-                modifier  = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .offset(y = (-20).dp),
+                modifier  = Modifier.fillMaxWidth()
+                    .padding(horizontal = 16.dp).offset(y = (-20).dp),
                 shape     = RoundedCornerShape(16.dp),
                 colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(8.dp)
@@ -178,13 +166,11 @@ fun ProfileScreen(
                 }
             }
 
-            // ── Info sections ─────────────────────────────────────────
+            // ── Info sections ─────────────────────────────────────────────────
             Column(
                 modifier            = Modifier.padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-
-                // Work info
                 InfoCard("Work Info", Icons.Outlined.Work) {
                     InfoRow(Icons.Outlined.Business,    "Company",     companyName)
                     InfoRow(Icons.Outlined.Groups,      "Department",  department)
@@ -192,13 +178,11 @@ fun ProfileScreen(
                     InfoRow(Icons.Outlined.WorkOutline, "Role",        role)
                 }
 
-                // Contact info
                 InfoCard("Contact Info", Icons.Outlined.ContactPage) {
                     InfoRow(Icons.Outlined.Email, "Email", email)
                     InfoRow(Icons.Outlined.Phone, "Phone", phoneNumber.ifBlank { "—" })
                 }
 
-                // Complaint resolution (only if there are complaints)
                 if (totalComplaints > 0) {
                     val rate = resolvedComplaints.toFloat() / totalComplaints
                     Card(
@@ -241,26 +225,45 @@ fun ProfileScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                // ── Single Edit + Logout row ──────────────────────────
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Button(
-                        onClick  = onEditClick,
-                        modifier = Modifier.weight(1f).height(52.dp),
-                        shape    = RoundedCornerShape(14.dp),
-                        colors   = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary)
+                // ── Action buttons ────────────────────────────────────────────
+                // Edit button: only shown if canEdit = true (Administrator/Manager/HR)
+                // Logout button: always shown (user can always log out)
+                if (canEdit) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Edit Profile", fontWeight = FontWeight.SemiBold)
-                    }
+                        Button(
+                            onClick  = onEditClick,
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape    = RoundedCornerShape(14.dp),
+                            colors   = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Edit Profile", fontWeight = FontWeight.SemiBold)
+                        }
 
+                        OutlinedButton(
+                            onClick  = onLogoutClick,
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape    = RoundedCornerShape(14.dp),
+                            colors   = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error),
+                            border   = androidx.compose.foundation.BorderStroke(
+                                1.dp, MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Default.Logout, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Logout", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                } else {
+                    // Non-admin roles: only logout, full width
                     OutlinedButton(
                         onClick  = onLogoutClick,
-                        modifier = Modifier.weight(1f).height(52.dp),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
                         shape    = RoundedCornerShape(14.dp),
                         colors   = ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.error),
@@ -279,23 +282,17 @@ fun ProfileScreen(
     }
 }
 
-// ── Reusable composables ──────────────────────────────────────
+// ── Reusable composables ──────────────────────────────────────────────────────
 
 @Composable
-private fun ProfileStat(
-    value: String, label: String, icon: ImageVector, color: Color
-) {
+private fun ProfileStat(value: String, label: String, icon: ImageVector, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
         Spacer(Modifier.height(4.dp))
-        Text(value,
-            fontWeight = FontWeight.Bold,
-            style      = MaterialTheme.typography.titleMedium,
-            color      = color)
-        Text(label,
-            style    = MaterialTheme.typography.labelSmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 10.sp)
+        Text(value, fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium, color = color)
+        Text(label, style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
     }
 }
 
@@ -312,10 +309,8 @@ private fun InfoCard(
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier          = Modifier.padding(bottom = 10.dp)
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                modifier          = Modifier.padding(bottom = 10.dp)) {
                 Icon(icon, null,
                     tint     = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp))

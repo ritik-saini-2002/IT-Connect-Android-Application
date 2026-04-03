@@ -11,7 +11,9 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class DataModule {
-    /** To switch database: bind a different implementation here */
-    @Binds @Singleton
+
+    /** To switch backend: bind a different implementation here */
+    @Binds
+    @Singleton
     abstract fun bindDataSource(impl: PocketBaseDataSource): AppDataSource
 }

@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// ── UI State ──────────────────────────────────────────────────
 data class MainUiState(
     val isLoading   : Boolean          = true,
     val isRefreshing: Boolean          = false,
@@ -23,7 +22,6 @@ data class MainUiState(
     val error       : String?          = null
 )
 
-// ── UI model ──────────────────────────────────────────────────
 data class UserProfileData(
     val id                : String,
     val name              : String,
@@ -31,7 +29,7 @@ data class UserProfileData(
     val role              : String,
     val companyName       : String,
     val department        : String       = "",
-    val designation       : String       = "IT Professional",
+    val designation       : String       = "",
     val imageUrl          : String?      = null,
     val phoneNumber       : String       = "",
     val experience        : Int          = 0,
@@ -44,7 +42,8 @@ data class UserProfileData(
     val pendingComplaints : Int          = 0,
     val isActive          : Boolean      = true,
     val documentPath      : String       = "",
-    val permissions       : List<String> = emptyList()
+    val permissions       : List<String> = emptyList(),
+    val needsCompletion   : Boolean      = false
 ) {
     val performanceScore: Double
         get() = if (completedProjects + activeProjects > 0)
@@ -55,9 +54,12 @@ data class UserProfileData(
         get() = if (totalComplaints > 0)
             resolvedComplaints.toDouble() / totalComplaints * 100.0
         else 100.0
+
+    // Used by MainActivity to decide whether to show ProfileCompletion
+    val isProfileIncomplete: Boolean
+        get() = needsCompletion || designation.isBlank()
 }
 
-// ── Domain → UI model mapper ──────────────────────────────────
 fun UserProfile.toUiModel() = UserProfileData(
     id                 = id,
     name               = name,
@@ -66,7 +68,6 @@ fun UserProfile.toUiModel() = UserProfileData(
     companyName        = companyName,
     department         = department,
     designation        = designation,
-    // PocketBase stores only the filename in avatar field — build full URL here
     imageUrl           = AppConfig.avatarUrl(id, imageUrl),
     phoneNumber        = phoneNumber,
     experience         = experience,
@@ -79,7 +80,8 @@ fun UserProfile.toUiModel() = UserProfileData(
     pendingComplaints  = pendingComplaints,
     isActive           = isActive,
     documentPath       = documentPath,
-    permissions        = permissions
+    permissions        = permissions,
+    needsCompletion    = needsProfileCompletion
 )
 
 @HiltViewModel

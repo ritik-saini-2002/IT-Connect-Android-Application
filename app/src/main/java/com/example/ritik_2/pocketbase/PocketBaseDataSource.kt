@@ -20,7 +20,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,18 +30,15 @@ internal const val COL_SEARCH_INDEX   = "user_search_index"
 
 @Singleton
 class PocketBaseDataSource @Inject constructor(
-    private val clientProvider: PocketBaseClientProvider
+    private val http      : OkHttpClient,
+    private val pbProvider: PocketBaseClientProvider
 ) : AppDataSource {
 
-    private val pb  get() = clientProvider.client
-    private val TAG = "PBDataSource"
+    private val pb  get() = pbProvider.client
+    private val tag = "PBDataSource"
 
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    // ── Auth ──────────────────────────────────────────────────────────────────
 
-    // ── Auth ──────────────────────────────────────────────────
     override suspend fun login(email: String, password: String): AuthSession =
         withContext(Dispatchers.IO) {
             val response = pb.records.authWithPassword<UserRecord>(COL_USERS, email, password)
@@ -50,14 +46,38 @@ class PocketBaseDataSource @Inject constructor(
             val uid      = response.record?.id ?: error("No user ID received")
             pb.login { this.token = token }
 
+            // ── Check isActive from user record directly ──────────────────────
+            // This is the DISABLED check. We read it from the users record
+            // which is always populated (it's a bool field with default true).
+            val userRecord = response.record
+            val isActive   = userRecord?.isActive ?: true
+
+            if (!isActive) {
+                // Account disabled by administrator — reject immediately
+                pb.logout()
+                error("Your account has been disabled. Contact your administrator.")
+            }
+
+            // ── Try to get role from access_control ───────────────────────────
+            // If access_control record doesn't exist yet (new registration where
+            // the background write hasn't finished), fall back to the users record.
             val access = fetchAccessControl(uid).getOrNull()
+            val role   = when {
+                !access?.role.isNullOrBlank() -> access!!.role
+                !userRecord?.role.isNullOrBlank() -> userRecord!!.role
+                else -> ""   // brand-new user, profile not set up yet — still allow login
+            }
+
+            // ── Build session ─────────────────────────────────────────────────
+            // We no longer reject on empty role. SplashActivity will route the
+            // user to ProfileCompletionActivity if needsProfileCompletion = true.
             AuthSession(
                 userId       = uid,
                 token        = token,
                 email        = email,
-                name         = access?.name         ?: "",
-                role         = access?.role         ?: "",
-                documentPath = access?.documentPath ?: ""
+                name         = access?.name         ?: userRecord?.name         ?: "",
+                role         = role,
+                documentPath = access?.documentPath ?: userRecord?.documentPath ?: ""
             )
         }
 
@@ -73,46 +93,46 @@ class PocketBaseDataSource @Inject constructor(
             } catch (e: Exception) { Result.failure(e) }
         }
 
-    override suspend fun createUser(email: String, password: String, name: String, adminToken: String): String =
-        withContext(Dispatchers.IO) {
-            val adminToken = adminToken.ifEmpty { getAdminToken() }
-            val body = JSONObject().apply {
-                put("email",           email)
-                put("password",        password)
-                put("passwordConfirm", password)
-                put("name",            name)
-                put("emailVisibility", true)
-            }.toString().toRequestBody("application/json".toMediaType())
+    override suspend fun createUser(
+        email     : String,
+        password  : String,
+        name      : String,
+        adminToken: String
+    ): String = withContext(Dispatchers.IO) {
+        val token = adminToken.ifEmpty { getAdminToken() }
+        val body  = JSONObject().apply {
+            put("email",           email)
+            put("password",        password)
+            put("passwordConfirm", password)
+            put("name",            name)
+            put("emailVisibility", true)
+        }.toString().toRequestBody("application/json".toMediaType())
 
-            val req = Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records")
-                .addHeader("Authorization", "Bearer $adminToken")
-                .post(body)
-                .build()
+        val req = Request.Builder()
+            .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records")
+            .addHeader("Authorization", "Bearer $token")
+            .post(body).build()
 
-            val res     = http.newCall(req).execute()
-            val resBody = res.body?.string() ?: error("Empty response")
-            val resCode = res.code
-            res.close()
+        val res     = http.newCall(req).execute()
+        val resBody = res.body?.string() ?: error("Empty response")
+        val resCode = res.code
+        res.close()
 
-            Log.d(TAG, "createUser HTTP $resCode: $resBody")
-            if (!res.isSuccessful) error("createUser failed: HTTP $resCode — $resBody")
-
-            val json = JSONObject(resBody)
-            json.optString("id").ifEmpty { error("No user ID in response") }
-        }
+        if (!res.isSuccessful) error("createUser failed: HTTP $resCode — $resBody")
+        JSONObject(resBody).optString("id").ifEmpty { error("No user ID in response") }
+    }
 
     override suspend fun restoreSession(token: String) = withContext(Dispatchers.IO) {
         pb.login { this.token = token }
     }
 
-    // ── User Profile ──────────────────────────────────────────
+    // ── User Profile ──────────────────────────────────────────────────────────
+
     override suspend fun getUserProfile(userId: String): Result<UserProfile> =
         withContext(Dispatchers.IO) {
             try {
-                val user   = pb.records.getOne<UserRecord>(COL_USERS, userId)
-                val access = fetchAccessControl(userId).getOrNull()
-
+                val user      = pb.records.getOne<UserRecord>(COL_USERS, userId)
+                val access    = fetchAccessControl(userId).getOrNull()
                 val profile   = parseJsonMap(user.profile)
                 val workStats = parseJsonMap(user.workStats)
                 val issues    = parseJsonMap(user.issues)
@@ -121,8 +141,8 @@ class PocketBaseDataSource @Inject constructor(
                     id                       = userId,
                     name                     = user.name.ifBlank { access?.name ?: "" },
                     email                    = user.email.ifBlank { access?.email ?: "" },
-                    role                     = access?.role         ?: user.role,
-                    companyName              = user.companyName,
+                    role                     = if (access?.role.isNullOrBlank()) user.role else access!!.role,
+                    companyName              = user.companyName.ifBlank { access?.companyName ?: "" },
                     sanitizedCompany         = user.sanitizedCompanyName,
                     department               = user.department,
                     sanitizedDept            = user.sanitizedDepartment,
@@ -133,9 +153,6 @@ class PocketBaseDataSource @Inject constructor(
                     employeeId               = profile["employeeId"]  ?: "",
                     reportingTo              = profile["reportingTo"] ?: "",
                     salary                   = profile["salary"]?.toDoubleOrNull() ?: 0.0,
-                    emergencyContactName     = profile["emergencyContactName"]     ?: "",
-                    emergencyContactPhone    = profile["emergencyContactPhone"]    ?: "",
-                    emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
                     experience               = workStats["experience"]?.toIntOrNull()        ?: 0,
                     completedProjects        = workStats["completedProjects"]?.toIntOrNull() ?: 0,
                     activeProjects           = workStats["activeProjects"]?.toIntOrNull()    ?: 0,
@@ -145,11 +162,17 @@ class PocketBaseDataSource @Inject constructor(
                     resolvedComplaints       = issues["resolvedComplaints"]?.toIntOrNull()   ?: 0,
                     pendingComplaints        = issues["pendingComplaints"]?.toIntOrNull()    ?: 0,
                     isActive                 = access?.isActive ?: user.isActive,
-                    documentPath             = access?.documentPath ?: user.documentPath,
-                    permissions              = parseJsonList(access?.permissions ?: user.permissions)
+                    documentPath             = user.documentPath.ifBlank { access?.documentPath ?: "" },
+                    permissions              = parseJsonList(
+                        if (access?.permissions.isNullOrBlank()) user.permissions else access!!.permissions),
+                    emergencyContactName     = profile["emergencyContactName"]     ?: "",
+                    emergencyContactPhone    = profile["emergencyContactPhone"]    ?: "",
+                    emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
+                    // Profile is incomplete if the flag is set OR designation is blank
+                    needsProfileCompletion   = user.needsProfileCompletion || user.designation.isBlank()
                 ))
             } catch (e: Exception) {
-                Log.e(TAG, "getUserProfile failed: ${e.message}")
+                Log.e(tag, "getUserProfile failed: ${e.message}")
                 Result.failure(e)
             }
         }
@@ -162,8 +185,7 @@ class PocketBaseDataSource @Inject constructor(
                 val req = Request.Builder()
                     .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
                     .addHeader("Authorization", "Bearer ${getAuthToken()}")
-                    .patch(body)
-                    .build()
+                    .patch(body).build()
                 val res = http.newCall(req).execute()
                 if (!res.isSuccessful) {
                     val err = res.body?.string() ?: "Unknown error"
@@ -173,53 +195,48 @@ class PocketBaseDataSource @Inject constructor(
                 res.close()
                 Result.success(Unit)
             } catch (e: Exception) {
-                Log.e(TAG, "updateUserProfile failed: ${e.message}")
+                Log.e(tag, "updateUserProfile failed: ${e.message}")
                 Result.failure(e)
             }
         }
 
     override suspend fun uploadProfileImage(
-        userId: String, bytes: ByteArray, filename: String,
-        token: String        // ← no default here, override can't have defaults
+        userId  : String,
+        bytes   : ByteArray,
+        filename: String,
+        token   : String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val resolvedToken = token.ifEmpty { getAuthToken() }  // ← resolve inside body
-            val mediaType   = "image/jpeg".toMediaType()
-            val requestBody = okhttp3.MultipartBody.Builder()
+            val resolvedToken = token.ifEmpty { getAuthToken() }
+            val requestBody   = okhttp3.MultipartBody.Builder()
                 .setType(okhttp3.MultipartBody.FORM)
-                .addFormDataPart("avatar", filename,          // ← "avatar" matches PocketBase users collection default
-                    okhttp3.RequestBody.create(mediaType, bytes))
+                .addFormDataPart("avatar", filename,
+                    bytes.toRequestBody("image/jpeg".toMediaType()))
                 .build()
             val req = Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
                 .addHeader("Authorization", "Bearer $resolvedToken")
-                .patch(requestBody)
-                .build()
+                .patch(requestBody).build()
             val res     = http.newCall(req).execute()
             val resBody = res.body?.string() ?: ""
             val resCode = res.code
             res.close()
 
             if (!res.isSuccessful) {
-                Log.e(TAG, "uploadProfileImage HTTP $resCode: $resBody")
                 return@withContext Result.failure(Exception("Upload failed: $resCode — $resBody"))
             }
-
-            Log.d(TAG, "uploadProfileImage HTTP $resCode ✅")
-
-            // PocketBase returns the filename it stored (may differ from what we sent)
             val storedFilename = try {
                 JSONObject(resBody).optString("avatar", filename)
             } catch (_: Exception) { filename }
-
             Result.success("${AppConfig.BASE_URL}/api/files/$COL_USERS/$userId/$storedFilename")
         } catch (e: Exception) {
-            Log.e(TAG, "uploadProfileImage failed: ${e.message}")
+            Log.e(tag, "uploadProfileImage failed: ${e.message}")
             Result.failure(e)
         }
     }
 
-    // ── Registration ──────────────────────────────────────────
+    // ── Registration ──────────────────────────────────────────────────────────
+
     override suspend fun registerUser(request: RegistrationRequest): Result<String> =
         withContext(Dispatchers.IO) {
             var createdUserId: String? = null
@@ -233,31 +250,26 @@ class PocketBaseDataSource @Inject constructor(
                     )
                 }
 
-                // Fetch admin token once — reuse for all privileged operations
                 val adminToken = getAdminToken()
+                val userId     = createUser(request.email, request.password, request.name, adminToken)
+                createdUserId  = userId
 
-                val userId = createUser(request.email, request.password, request.name, adminToken)
-                createdUserId = userId
-
-                // Login as the new user to get their token
+                // Login to get token for subsequent calls
                 val loginBody = JSONObject().apply {
                     put("identity", request.email)
                     put("password", request.password)
                 }.toString().toRequestBody("application/json".toMediaType())
-                val loginReq = Request.Builder()
+                val loginRes  = http.newCall(Request.Builder()
                     .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-password")
-                    .post(loginBody).build()
-                val loginRes  = http.newCall(loginReq).execute()
-                val loginJson = JSONObject(loginRes.body?.string() ?: "")
+                    .post(loginBody).build()).execute()
+                val loginJson = loginRes.body?.string() ?: ""
                 loginRes.close()
-                val userToken = loginJson.optString("token")
-                pb.login { this.token = userToken }
+                pb.login { this.token = JSONObject(loginJson).optString("token") }
 
-                val imageUrl = request.imageBytes?.let { bytes ->
-                    uploadProfileImage(userId, bytes, "profile_$userId.jpg", adminToken)
-                        .onFailure { Log.e(TAG, "Image upload failed: ${it.message}") }
+                val imageUrl = if (request.imageBytes != null) {
+                    uploadProfileImage(userId, request.imageBytes, "profile_$userId.jpg", adminToken)
                         .getOrDefault("")
-                } ?: ""
+                } else ""
 
                 val documentPath = "users/$sc/$sd/${request.role}/$userId"
                 val permissions  = Json.encodeToString(Permissions.forRole(request.role))
@@ -269,25 +281,22 @@ class PocketBaseDataSource @Inject constructor(
                     put("employeeId",  "")
                     put("reportingTo", "")
                     put("salary",      0)
+                    put("emergencyContactName",     "")
+                    put("emergencyContactPhone",    "")
+                    put("emergencyContactRelation", "")
                 }.toString()
 
                 val workJson = JSONObject().apply {
-                    put("experience",           request.experience)
-                    put("completedProjects",    request.completedProjects)
-                    put("activeProjects",       request.activeProjects)
-                    put("pendingTasks",         0)
-                    put("completedTasks",       0)
-                    put("totalWorkingHours",    0)
+                    put("experience", 0); put("completedProjects", 0)
+                    put("activeProjects", 0); put("pendingTasks", 0)
+                    put("completedTasks", 0); put("totalWorkingHours", 0)
                     put("avgPerformanceRating", 0.0)
                 }.toString()
 
                 val issuesJson = JSONObject().apply {
-                    put("totalComplaints",    request.complaints)
-                    put("resolvedComplaints", 0)
-                    put("pendingComplaints",  request.complaints)
+                    put("totalComplaints", 0); put("resolvedComplaints", 0); put("pendingComplaints", 0)
                 }.toString()
 
-                // Patch user record — use admin token so no permission issues
                 httpPatch(
                     url   = "${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId",
                     token = adminToken,
@@ -305,11 +314,11 @@ class PocketBaseDataSource @Inject constructor(
                         put("profile",              profileJson)
                         put("workStats",            workJson)
                         put("issues",               issuesJson)
+                        put("needsProfileCompletion", true)
                     }.toString()
                 )
 
-                // Pass cached admin token — no extra network call
-                getOrCreateCompany(sc, request.companyName, request.role, request.department, adminToken)
+                upsertCompany(sc, request.companyName, request.role, request.department, adminToken)
 
                 httpPost(
                     url   = "${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records",
@@ -323,9 +332,11 @@ class PocketBaseDataSource @Inject constructor(
                         put("department",           request.department)
                         put("sanitizedDepartment",  sd)
                         put("role",                 request.role)
+                        put("designation",          request.designation)
                         put("permissions",          permissions)
                         put("isActive",             true)
                         put("documentPath",         documentPath)
+                        put("needsProfileCompletion", true)
                     }.toString()
                 )
 
@@ -353,17 +364,18 @@ class PocketBaseDataSource @Inject constructor(
                     }.toString()
                 )
 
-                Log.d(TAG, "User registered: $userId ✅")
+                Log.d(tag, "registerUser ✅  userId=$userId")
                 Result.success(userId)
 
             } catch (e: Exception) {
                 createdUserId?.let { deleteUserSilently(it) }
-                Log.e(TAG, "registerUser failed: ${e.message}", e)
+                Log.e(tag, "registerUser failed: ${e.message}", e)
                 Result.failure(e)
             }
         }
 
-    // ── Company ───────────────────────────────────────────────
+    // ── Company ───────────────────────────────────────────────────────────────
+
     override suspend fun companyExists(sanitizedName: String): Boolean =
         withContext(Dispatchers.IO) {
             try {
@@ -374,26 +386,43 @@ class PocketBaseDataSource @Inject constructor(
                 val res  = http.newCall(req).execute()
                 val body = res.body?.string() ?: ""
                 res.close()
-                val json = JSONObject(body)
-                json.optInt("totalItems", 0) > 0
+                JSONObject(body).optInt("totalItems", 0) > 0
             } catch (_: Exception) { false }
         }
 
+    private fun upsertCompany(sc: String, companyName: String, role: String,
+                              department: String, adminToken: String) {
+        val url    = "${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records"
+        val getRes = http.newCall(Request.Builder()
+            .url("$url?filter=(sanitizedName='$sc')")
+            .addHeader("Authorization", "Bearer $adminToken").get().build()).execute()
+        val getBody   = getRes.body?.string() ?: ""
+        getRes.close()
+        val companyId = JSONObject(getBody).optJSONArray("items")
+            ?.optJSONObject(0)?.optString("id")
+
+        val payload = JSONObject().apply {
+            put("sanitizedName",  sc); put("originalName", companyName)
+            put("departments",    JSONArray().put(department))
+            put("availableRoles", JSONArray().put(role))
+            put("totalUsers",     1); put("activeUsers", 1)
+            put("lastUpdated",    System.currentTimeMillis())
+        }.toString()
+
+        if (companyId.isNullOrEmpty()) httpPost(url, adminToken, payload)
+        else                           httpPatch("$url/$companyId", adminToken, payload)
+    }
+
     override suspend fun getOrCreateCompany(
-        sanitizedName: String,
-        originalName : String,
-        role         : String,
-        department   : String,
-        adminToken   : String
+        sanitizedName: String, originalName: String,
+        role: String, department: String, adminToken: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val token = adminToken.ifEmpty { getAdminToken() }
-
-            val req = Request.Builder()
+            val req   = Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records" +
                         "?filter=sanitizedName%3D%27$sanitizedName%27&perPage=1")
-                .addHeader("Authorization", "Bearer $token")
-                .get().build()
+                .addHeader("Authorization", "Bearer $token").get().build()
             val res  = http.newCall(req).execute()
             val body = res.body?.string() ?: ""
             res.close()
@@ -402,50 +431,41 @@ class PocketBaseDataSource @Inject constructor(
             val totalItems = json.optInt("totalItems", 0)
 
             if (totalItems > 0) {
-                val item  = json.getJSONArray("items").getJSONObject(0)
-                val id    = item.optString("id")
-                val roles = JSONArray(item.optString("availableRoles", "[]")).let { arr ->
-                    val list = List(arr.length()) { arr.optString(it) }.toMutableList()
-                    if (role !in list) list.add(role)
-                    Json.encodeToString(list)
-                }
-                val depts = JSONArray(item.optString("departments", "[]")).let { arr ->
-                    val list = List(arr.length()) { arr.optString(it) }.toMutableList()
-                    if (department !in list) list.add(department)
-                    Json.encodeToString(list)
-                }
-                httpPatch(
-                    url   = "${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records/$id",
-                    token = token,
-                    body  = JSONObject().apply {
-                        put("totalUsers",     item.optInt("totalUsers", 0) + 1)
+                val item = json.getJSONArray("items").getJSONObject(0)
+                val id   = item.optString("id")
+                val rolesJson = JSONArray(item.optString("availableRoles", "[]"))
+                val rolesList = ArrayList<String>()
+                for (i in 0 until rolesJson.length()) rolesList.add(rolesJson.getString(i))
+                if (role !in rolesList) rolesList.add(role)
+                val deptsJson = JSONArray(item.optString("departments", "[]"))
+                val deptsList = ArrayList<String>()
+                for (i in 0 until deptsJson.length()) deptsList.add(deptsJson.getString(i))
+                if (department !in deptsList) deptsList.add(department)
+                httpPatch("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records/$id", token,
+                    JSONObject().apply {
+                        put("totalUsers",     item.optInt("totalUsers",  0) + 1)
                         put("activeUsers",    item.optInt("activeUsers", 0) + 1)
-                        put("availableRoles", roles)
-                        put("departments",    depts)
-                    }.toString()
-                )
+                        put("availableRoles", Json.encodeToString(rolesList))
+                        put("departments",    Json.encodeToString(deptsList))
+                    }.toString())
             } else {
-                httpPost(
-                    url   = "${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records",
-                    token = token,
-                    body  = JSONObject().apply {
-                        put("originalName",   originalName)
-                        put("sanitizedName",  sanitizedName)
-                        put("totalUsers",     1)
-                        put("activeUsers",    1)
+                httpPost("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records", token,
+                    JSONObject().apply {
+                        put("originalName",   originalName); put("sanitizedName", sanitizedName)
+                        put("totalUsers",     1); put("activeUsers", 1)
                         put("availableRoles", Json.encodeToString(listOf(role)))
                         put("departments",    Json.encodeToString(listOf(department)))
-                    }.toString()
-                )
+                    }.toString())
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "getOrCreateCompany failed: ${e.message}")
+            Log.e(tag, "getOrCreateCompany failed: ${e.message}")
             Result.failure(e)
         }
     }
 
-    // ── Collections Setup ─────────────────────────────────────
+    // ── Collections Setup ─────────────────────────────────────────────────────
+
     override suspend fun ensureCollectionsExist(): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
@@ -457,12 +477,13 @@ class PocketBaseDataSource @Inject constructor(
                 ).forEach { (name, schema) -> ensureCollection(token, name, schema) }
                 Result.success(Unit)
             } catch (e: Exception) {
-                Log.e(TAG, "ensureCollectionsExist failed: ${e.message}")
+                Log.e(tag, "ensureCollectionsExist failed: ${e.message}")
                 Result.failure(e)
             }
         }
 
-    // ── Private Helpers ───────────────────────────────────────
+    // ── Private helpers ───────────────────────────────────────────────────────
+
     private suspend fun fetchAccessControl(userId: String): Result<AccessControlRecord> =
         withContext(Dispatchers.IO) {
             try {
@@ -475,9 +496,8 @@ class PocketBaseDataSource @Inject constructor(
                 val body = res.body?.string() ?: ""
                 res.close()
                 val json = JSONObject(body)
-                if (json.optInt("totalItems", 0) == 0) {
+                if (json.optInt("totalItems", 0) == 0)
                     return@withContext Result.failure(Exception("No access control for $userId"))
-                }
                 val item   = json.getJSONArray("items").getJSONObject(0)
                 val record = AccessControlRecord(
                     userId               = item.optString("userId"),
@@ -497,41 +517,27 @@ class PocketBaseDataSource @Inject constructor(
         }
 
     private fun httpPost(url: String, token: String = getAuthToken(), body: String) {
-        val req = Request.Builder()
-            .url(url)
+        val req = Request.Builder().url(url)
             .addHeader("Authorization", "Bearer $token")
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+            .post(body.toRequestBody("application/json".toMediaType())).build()
         val res     = http.newCall(req).execute()
         val resBody = res.body?.string() ?: ""
-        if (res.isSuccessful) {
-            Log.d(TAG, "POST $url → HTTP ${res.code} ✅")
-            Log.d(TAG, "POST response: $resBody")
-        } else {
-            Log.e(TAG, "POST $url → HTTP ${res.code} ❌")
-            Log.e(TAG, "POST error body: $resBody")
-            Log.e(TAG, "POST request body was: $body")
-            error("POST failed: HTTP ${res.code} — $resBody")  // ← throw so registerUser catches it
+        if (!res.isSuccessful) {
+            Log.e(tag, "POST $url → HTTP ${res.code} ❌  body: $resBody")
+            res.close(); error("POST failed: HTTP ${res.code} — $resBody")
         }
         res.close()
     }
 
     private fun httpPatch(url: String, token: String = getAuthToken(), body: String) {
-        val req = Request.Builder()
-            .url(url)
+        val req = Request.Builder().url(url)
             .addHeader("Authorization", "Bearer $token")
-            .patch(body.toRequestBody("application/json".toMediaType()))
-            .build()
+            .patch(body.toRequestBody("application/json".toMediaType())).build()
         val res     = http.newCall(req).execute()
         val resBody = res.body?.string() ?: ""
-        if (res.isSuccessful) {
-            Log.d(TAG, "PATCH $url → HTTP ${res.code} ✅")
-            Log.d(TAG, "PATCH response: $resBody")
-        } else {
-            Log.e(TAG, "PATCH $url → HTTP ${res.code} ❌")
-            Log.e(TAG, "PATCH error body: $resBody")
-            Log.e(TAG, "PATCH request body was: $body")
-            error("PATCH failed: HTTP ${res.code} — $resBody")  // ← throw so registerUser catches it
+        if (!res.isSuccessful) {
+            Log.e(tag, "PATCH $url → HTTP ${res.code} ❌  body: $resBody")
+            res.close(); error("PATCH failed: HTTP ${res.code} — $resBody")
         }
         res.close()
     }
@@ -541,12 +547,10 @@ class PocketBaseDataSource @Inject constructor(
 
     private fun deleteUserSilently(userId: String) {
         try {
-            val token = getAdminToken()
-            val req = Request.Builder()
+            http.newCall(Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                .addHeader("Authorization", "Bearer $token")
-                .delete().build()
-            http.newCall(req).execute().close()
+                .addHeader("Authorization", "Bearer ${getAdminToken()}").delete().build()
+            ).execute().close()
         } catch (_: Exception) {}
     }
 
@@ -559,123 +563,75 @@ class PocketBaseDataSource @Inject constructor(
             try {
                 val body = JSONObject().apply {
                     put("identity", AppConfig.ADMIN_EMAIL)
-                    put("password", AppConfig.ADMIN_PASS)   // AppConfig.ADMIN_PASS reads BuildConfig.PB_ADMIN_PASSWORD
+                    put("password", AppConfig.ADMIN_PASS)
                 }.toString().toRequestBody("application/json".toMediaType())
-                val req     = Request.Builder().url(url).post(body).build()
-                val res     = http.newCall(req).execute()
+                val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
                 val resBody = res.body?.string() ?: ""
-                val resCode = res.code
-                res.close()
-
-                Log.d(TAG, "Admin auth $url → HTTP $resCode")
-                Log.d(TAG, "Admin auth response: $resBody")
-
-                if (res.isSuccessful) {
-                    val token = JSONObject(resBody).optString("token")
-                    if (token.isNotEmpty()) {
-                        Log.d(TAG, "✅ Admin token obtained")
-                        return token
-                    }
+                val ok      = res.isSuccessful; res.close()
+                if (ok) {
+                    val t = JSONObject(resBody).optString("token")
+                    if (t.isNotEmpty()) return t
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Admin auth exception at $url: ${e.message}")
+                Log.w(tag, "Admin auth exception at $url: ${e.message}")
             }
         }
-        Log.e(TAG, "❌ No admin token obtained")
-        Log.e(TAG, "   BASE_URL     : ${AppConfig.BASE_URL}")
-        Log.e(TAG, "   ADMIN_EMAIL  : ${AppConfig.ADMIN_EMAIL}")
-        Log.e(TAG, "   ADMIN_PASS   : ${AppConfig.ADMIN_PASS.take(3)}***")
         error("No admin token")
     }
 
     private fun ensureCollection(token: String, name: String, schema: String) {
-        // Check existence
-        val checkReq = Request.Builder()
+        val checkRes = http.newCall(Request.Builder()
             .url("${AppConfig.BASE_URL}/api/collections/$name")
-            .addHeader("Authorization", "Bearer $token").get().build()
-        val checkRes = http.newCall(checkReq).execute()
-        if (checkRes.isSuccessful) {
-            checkRes.close()
-            // Ensure rules are open on already-existing collections
-            updateCollectionRules(token, name)
-            return
-        }
+            .addHeader("Authorization", "Bearer $token").get().build()).execute()
+        if (checkRes.isSuccessful) { checkRes.close(); updateCollectionRules(token, name); return }
         checkRes.close()
 
-        // Create with open API rules
         val createBody = JSONObject().apply {
-            put("name",       name)
-            put("type",       "base")
+            put("name", name); put("type", "base")
             put("schema",     JSONArray(schema))
-            put("listRule",   "")
-            put("viewRule",   "")
-            put("createRule", "")
-            put("updateRule", "")
+            put("listRule",   JSONObject.NULL); put("viewRule",   JSONObject.NULL)
+            put("createRule", JSONObject.NULL); put("updateRule", JSONObject.NULL)
             put("deleteRule", JSONObject.NULL)
         }.toString().toRequestBody("application/json".toMediaType())
 
-        val createReq = Request.Builder()
+        val createRes = http.newCall(Request.Builder()
             .url("${AppConfig.BASE_URL}/api/collections")
-            .addHeader("Authorization", "Bearer $token").post(createBody).build()
-        val createRes = http.newCall(createReq).execute()
-        val createResBody = createRes.body?.string() ?: ""
-        Log.d(TAG, "Create '$name' → HTTP ${createRes.code}: $createResBody")
+            .addHeader("Authorization", "Bearer $token").post(createBody).build()).execute()
+        Log.d(tag, "Create '$name' → HTTP ${createRes.code}")
         createRes.close()
     }
 
     private fun updateCollectionRules(token: String, name: String) {
         try {
-            val body = JSONObject().apply {
-                put("listRule",   "")
-                put("viewRule",   "")
-                put("createRule", "")
-                put("updateRule", "")
-                put("deleteRule", JSONObject.NULL)
-            }.toString().toRequestBody("application/json".toMediaType())
-            val req = Request.Builder()
+            val body = """{"listRule":null,"viewRule":null,"createRule":null,"updateRule":null,"deleteRule":null}"""
+                .toRequestBody("application/json".toMediaType())
+            http.newCall(Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$name")
-                .addHeader("Authorization", "Bearer $token")
-                .patch(body).build()
-            val res = http.newCall(req).execute()
-            Log.d(TAG, "Rules update '$name' → HTTP ${res.code}")
-            res.close()
-        } catch (e: Exception) {
-            Log.w(TAG, "updateCollectionRules '$name' failed: ${e.message}")
-        }
+                .addHeader("Authorization", "Bearer $token").patch(body).build()).execute().close()
+        } catch (e: Exception) { Log.w(tag, "updateCollectionRules '$name': ${e.message}") }
     }
 
     private fun buildCompaniesSchema() = """[
         {"name":"originalName","type":"text","required":true},
         {"name":"sanitizedName","type":"text","required":true},
-        {"name":"totalUsers","type":"number"},
-        {"name":"activeUsers","type":"number"},
-        {"name":"availableRoles","type":"json"},
-        {"name":"departments","type":"json"}]"""
+        {"name":"totalUsers","type":"number"},{"name":"activeUsers","type":"number"},
+        {"name":"availableRoles","type":"json"},{"name":"departments","type":"json"}]"""
 
     private fun buildAccessControlSchema() = """[
         {"name":"userId","type":"text","required":true},
-        {"name":"name","type":"text"},
-        {"name":"email","type":"email"},
-        {"name":"companyName","type":"text"},
-        {"name":"sanitizedCompanyName","type":"text"},
-        {"name":"department","type":"text"},
-        {"name":"sanitizedDepartment","type":"text"},
-        {"name":"role","type":"text"},
-        {"name":"permissions","type":"json"},
-        {"name":"isActive","type":"bool"},
-        {"name":"documentPath","type":"text"}]"""
+        {"name":"name","type":"text"},{"name":"email","type":"email"},
+        {"name":"companyName","type":"text"},{"name":"sanitizedCompanyName","type":"text"},
+        {"name":"department","type":"text"},{"name":"sanitizedDepartment","type":"text"},
+        {"name":"role","type":"text"},{"name":"designation","type":"text"},
+        {"name":"permissions","type":"json"},{"name":"isActive","type":"bool"},
+        {"name":"documentPath","type":"text"},{"name":"needsProfileCompletion","type":"bool"}]"""
 
     private fun buildSearchIndexSchema() = """[
         {"name":"userId","type":"text","required":true},
-        {"name":"name","type":"text"},
-        {"name":"email","type":"email"},
-        {"name":"companyName","type":"text"},
-        {"name":"sanitizedCompanyName","type":"text"},
-        {"name":"department","type":"text"},
-        {"name":"sanitizedDepartment","type":"text"},
-        {"name":"role","type":"text"},
-        {"name":"designation","type":"text"},
-        {"name":"isActive","type":"bool"},
-        {"name":"searchTerms","type":"json"},
+        {"name":"name","type":"text"},{"name":"email","type":"email"},
+        {"name":"companyName","type":"text"},{"name":"sanitizedCompanyName","type":"text"},
+        {"name":"department","type":"text"},{"name":"sanitizedDepartment","type":"text"},
+        {"name":"role","type":"text"},{"name":"designation","type":"text"},
+        {"name":"isActive","type":"bool"},{"name":"searchTerms","type":"json"},
         {"name":"documentPath","type":"text"}]"""
 }

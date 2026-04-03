@@ -15,7 +15,6 @@ class AuthRepository @Inject constructor(
 
     val isLoggedIn: Boolean get() = sessionManager.isLoggedIn()
 
-    /** Restore saved session into PocketBase SDK without network call */
     suspend fun restoreSession() {
         sessionManager.get()?.let { session ->
             try {
@@ -28,20 +27,15 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    /** Full login — network call */
     suspend fun login(email: String, password: String): Result<Unit> =
         try {
             val session = dataSource.login(email, password)
-
-            // Validate account is active via access control (already fetched inside login)
-            if (session.role.isEmpty()) {
-                dataSource.logout()
-                Result.failure(Exception("Profile not configured. Contact administrator."))
-            } else {
-                sessionManager.save(session)
-                Log.d(TAG, "Login success: $email ✅")
-                Result.success(Unit)
-            }
+            // isActive=false is already rejected inside PocketBaseDataSource.login()
+            // with a clear error message. If we reach here the account is active.
+            // We no longer reject on empty role — new users may not have one yet.
+            sessionManager.save(session)
+            Log.d(TAG, "Login success: $email ✅")
+            Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}")
             Result.failure(e)

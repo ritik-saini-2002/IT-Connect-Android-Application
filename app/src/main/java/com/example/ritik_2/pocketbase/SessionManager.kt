@@ -29,8 +29,7 @@ class SessionManager @Inject constructor(
 
     private fun createPrefs(): SharedPreferences = try {
         val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(
             context, PREFS, masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
@@ -50,7 +49,7 @@ class SessionManager @Inject constructor(
             putString(KEY_ROLE,  session.role)
             putString(KEY_PATH,  session.documentPath)
         }.apply()
-        Log.d(TAG, "Session saved for ${session.email}")
+        Log.d(TAG, "Session saved for ${session.email} role=${session.role}")
     }
 
     fun get(): AuthSession? {
@@ -61,7 +60,7 @@ class SessionManager @Inject constructor(
             token        = token,
             email        = prefs.getString(KEY_EMAIL, "") ?: "",
             name         = prefs.getString(KEY_NAME,  "") ?: "",
-            role         = prefs.getString(KEY_ROLE,  "") ?: "",
+            role         = prefs.getString(KEY_ROLE,  "") ?: "",   // ✅ role persisted
             documentPath = prefs.getString(KEY_PATH,  "") ?: ""
         )
     }
