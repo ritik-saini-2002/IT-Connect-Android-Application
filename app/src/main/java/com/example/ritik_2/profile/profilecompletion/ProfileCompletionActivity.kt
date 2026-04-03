@@ -10,15 +10,19 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
+import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class ProfileCompletionActivity : ComponentActivity() {
 
     private val viewModel: ProfileCompletionViewModel by viewModels()
+
+    @Inject lateinit var authRepository: AuthRepository
 
     private val imagePicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -46,8 +50,12 @@ class ProfileCompletionActivity : ComponentActivity() {
             finish(); return
         }
 
-        viewModel.loadUser(userId)
-        observeState()
+        // Check if current user is Administrator
+        val currentRole = authRepository.getSession()?.role ?: ""
+        val isAdmin     = currentRole == "Administrator"
+
+        viewModel.loadUser(userId, isEditMode)
+        observeState(userId, isAdmin)
 
         setContent {
             ITConnectTheme {
@@ -60,17 +68,18 @@ class ProfileCompletionActivity : ComponentActivity() {
                                 contentResolver.openInputStream(uri)?.readBytes()
                             }.getOrNull()
                         }
-                        viewModel.saveProfile(userId, data, imageBytes)
+                        viewModel.saveProfile(userId, data, imageBytes, isAdmin)
                     },
                     onNavigateBack   = { finish() },
                     isEditMode       = isEditMode,
+                    isAdmin          = isAdmin,
                     userId           = userId
                 )
             }
         }
     }
 
-    private fun observeState() {
+    private fun observeState(userId: String, isAdmin: Boolean) {
         lifecycleScope.launch {
             viewModel.uiState.collect { state ->
                 if (state.isSaved) {

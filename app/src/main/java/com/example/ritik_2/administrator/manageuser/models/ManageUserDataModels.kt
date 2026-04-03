@@ -1,7 +1,5 @@
 package com.example.ritik_2.administrator.manageuser.models
 
-// ── Domain models ─────────────────────────────────────────────────────────────
-
 data class MUCompany(
     val sanitizedName : String,
     val originalName  : String,
@@ -12,7 +10,7 @@ data class MUCompany(
 data class MUDepartment(
     val sanitizedName  : String,
     val departmentName : String,
-    val companyName    : String,   // sanitized company name
+    val companyName    : String,
     val userCount      : Int,
     val activeUsers    : Int,
     val roles          : List<String>
@@ -20,8 +18,8 @@ data class MUDepartment(
 
 data class MURoleInfo(
     val roleName    : String,
-    val companyName : String,   // sanitized
-    val deptName    : String,   // sanitized
+    val companyName : String,
+    val deptName    : String,
     val userCount   : Int,
     val activeUsers : Int
 )
@@ -41,17 +39,16 @@ data class MUUser(
     val completedProjects : Int,
     val totalComplaints   : Int,
     val isActive          : Boolean,
-    val documentPath      : String
+    val documentPath      : String,
+    // original (non-sanitized) values for display
+    val originalCompany   : String = "",
+    val originalDept      : String = ""
 )
-
-// ── UI state ──────────────────────────────────────────────────────────────────
 
 data class ManageUserUiState(
     val isLoading           : Boolean            = false,
     val currentRole         : String             = "",
     val companies           : List<MUCompany>    = emptyList(),
-    val departments         : List<MUDepartment> = emptyList(),
-    val roles               : List<MURoleInfo>   = emptyList(),
     val users               : List<MUUser>       = emptyList(),
     val expandedCompanies   : Set<String>        = emptySet(),
     val expandedDepartments : Set<String>        = emptySet(),

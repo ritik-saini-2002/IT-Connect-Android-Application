@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.lifecycleScope
+import com.example.ritik_2.administrator.databasemanager.DatabaseManagerActivity
 import com.example.ritik_2.administrator.manageuser.ManageUserActivity
 import com.example.ritik_2.administrator.newusercreation.CreateUserActivity
 import com.example.ritik_2.administrator.rolemanagement.RoleManagementActivity
@@ -183,6 +184,15 @@ class AdministratorPanelActivity : ComponentActivity() {
                 // Only Administrator can change roles
                 if (ad.role == "Administrator") {
                     startActivity(Intent(this, RoleManagementActivity::class.java))
+                } else {
+                    toast("Only Administrator can manage roles.")
+                }
+            }
+
+            "database_manager" -> {
+                // Only Administrator can change roles
+                if (ad.role == "Administrator") {
+                    startActivity(Intent(this, DatabaseManagerActivity::class.java))
                 } else {
                     toast("Only Administrator can manage roles.")
                 }

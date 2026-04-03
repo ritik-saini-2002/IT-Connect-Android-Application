@@ -100,6 +100,14 @@ fun AdministratorPanelScreen(
                 color       = Color(0xFFF44336),
                 adminOnly   = true
             ))
+            if (isAdmin) add(AdminFunction(
+                id          = "database_manager",
+                title       = "Database Manager",
+                description = "Manage your database",
+                icon        = Icons.Default.Cloud,
+                color       = Color(0xFF9C27B0),
+                adminOnly   = true
+            ))
             add(AdminFunction(
                 id          = "company_settings",
                 title       = "Company Settings",

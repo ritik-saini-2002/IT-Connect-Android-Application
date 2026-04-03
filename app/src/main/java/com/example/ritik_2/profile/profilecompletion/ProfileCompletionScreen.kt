@@ -25,8 +25,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
-// ── Local form state — ONLY fields not collected at registration ───────────────
 private data class FormState(
+    // Editable by everyone
     val address                  : String = "",
     val employeeId               : String = "",
     val reportingTo              : String = "",
@@ -35,7 +35,14 @@ private data class FormState(
     val emergencyContactName     : String = "",
     val emergencyContactPhone    : String = "",
     val emergencyContactRelation : String = "",
-    val imageUri                 : Uri?   = null
+    val imageUri                 : Uri?   = null,
+    // Admin-only editable
+    val name                     : String = "",
+    val phoneNumber              : String = "",
+    val designation              : String = "",
+    val role                     : String = "",
+    val department               : String = "",
+    val companyName              : String = ""
 )
 
 private fun FormState.toSaveData(existingImageUrl: String) = ProfileSaveData(
@@ -47,10 +54,14 @@ private fun FormState.toSaveData(existingImageUrl: String) = ProfileSaveData(
     emergencyContactName     = emergencyContactName,
     emergencyContactPhone    = emergencyContactPhone,
     emergencyContactRelation = emergencyContactRelation,
-    existingImageUrl         = existingImageUrl
+    existingImageUrl         = existingImageUrl,
+    name                     = name,
+    phoneNumber              = phoneNumber,
+    designation              = designation,
+    role                     = role,
+    department               = department,
+    companyName              = companyName
 )
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,13 +71,15 @@ fun ProfileCompletionScreen(
     onSaveProfile    : (ProfileSaveData) -> Unit,
     onNavigateBack   : () -> Unit,
     isEditMode       : Boolean = false,
+    isAdmin          : Boolean = false,
     userId           : String  = ""
 ) {
-    val uiState    by viewModel.uiState.collectAsState()
-    val scrollState = rememberLazyListState()
-    var form       by remember { mutableStateOf(FormState()) }
+    val uiState     by viewModel.uiState.collectAsState()
+    val scrollState  = rememberLazyListState()
+    var form        by remember { mutableStateOf(FormState()) }
+    val isEditing    = uiState.isEditing
 
-    // Pre-fill from existing profile when in edit mode
+    // Pre-fill from existing profile
     LaunchedEffect(uiState.userProfile) {
         uiState.userProfile?.let { p ->
             form = FormState(
@@ -77,12 +90,17 @@ fun ProfileCompletionScreen(
                 experience               = if (p.experience > 0) p.experience.toString() else "",
                 emergencyContactName     = p.emergencyContactName,
                 emergencyContactPhone    = p.emergencyContactPhone,
-                emergencyContactRelation = p.emergencyContactRelation
+                emergencyContactRelation = p.emergencyContactRelation,
+                name                     = p.name,
+                phoneNumber              = p.phoneNumber,
+                designation              = p.designation,
+                role                     = p.role,
+                department               = p.department,
+                companyName              = p.companyName
             )
         }
     }
 
-    // Sync newly picked image URI
     LaunchedEffect(uiState.selectedImageUri) {
         uiState.selectedImageUri?.let { form = form.copy(imageUri = it) }
     }
@@ -92,7 +110,11 @@ fun ProfileCompletionScreen(
             TopAppBar(
                 title = {
                     Text(
-                        if (isEditMode) "Edit Profile" else "Complete Your Profile",
+                        when {
+                            !isEditMode          -> "Complete Your Profile"
+                            isAdmin              -> "Edit User Profile"
+                            else                 -> "My Profile"
+                        },
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -105,14 +127,30 @@ fun ProfileCompletionScreen(
                 },
                 actions = {
                     if (isEditMode) {
-                        TextButton(
-                            onClick = { onSaveProfile(form.toSaveData(uiState.userProfile?.imageUrl ?: "")) },
-                            enabled = !uiState.isLoading
-                        ) {
-                            if (uiState.isLoading)
-                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            else
-                                Text("Save", fontWeight = FontWeight.SemiBold)
+                        if (isEditing) {
+                            // Save button when editing
+                            TextButton(
+                                onClick = {
+                                    onSaveProfile(form.toSaveData(uiState.userProfile?.imageUrl ?: ""))
+                                },
+                                enabled = !uiState.isLoading
+                            ) {
+                                if (uiState.isLoading)
+                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                else
+                                    Text("Save", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        // Edit button — only shown if isAdmin or it's the user's own profile
+                        if (!isEditing && (isAdmin || !isEditMode)) {
+                            IconButton(onClick = { viewModel.toggleEditing() }) {
+                                Icon(Icons.Default.Edit, "Edit")
+                            }
+                        }
+                        if (isEditing && isEditMode) {
+                            IconButton(onClick = { viewModel.setEditing(false) }) {
+                                Icon(Icons.Default.Close, "Cancel")
+                            }
                         }
                     }
                 },
@@ -142,7 +180,7 @@ fun ProfileCompletionScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
 
-                // ── Welcome banner (first-time only) ─────────────────────────
+                // Welcome banner (first-time only)
                 if (!isEditMode) {
                     item {
                         Card(
@@ -162,89 +200,135 @@ fun ProfileCompletionScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         color      = MaterialTheme.colorScheme.onPrimaryContainer)
                                     Spacer(Modifier.height(3.dp))
-                                    Text(
-                                        "Just a few more details to complete your profile.",
+                                    Text("Just a few more details to complete your profile.",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.8f)
-                                    )
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.8f))
                                 }
                             }
                         }
                     }
                 }
 
-                // ── Avatar ───────────────────────────────────────────────────
+                // Avatar — editable only when isEditing
                 item {
                     AvatarSection(
                         imageUrl     = uiState.userProfile?.imageUrl ?: "",
                         imageUri     = form.imageUri,
                         userName     = uiState.userProfile?.name ?: "",
-                        onImageClick = onImagePickClick
+                        isEditing    = isEditing,
+                        onImageClick = { if (isEditing) onImagePickClick() }
                     )
                 }
 
-                // ── Read-only: already filled at registration ─────────────────
-                uiState.userProfile?.let { p ->
-                    item {
-                        PCCard("Your Account", Icons.Default.Lock) {
-                            ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
-                            ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
-                            ReadOnlyRow("Phone",       p.phoneNumber, Icons.Default.Phone)
-                            ReadOnlyRow("Designation", p.designation, Icons.Default.Badge)
-                            ReadOnlyRow("Role",        p.role,        Icons.Default.ManageAccounts)
-                            ReadOnlyRow("Company",     p.companyName, Icons.Default.Business)
-                            ReadOnlyRow("Department",  p.department,  Icons.Default.Groups)
+                // ── Account Info ─────────────────────────────────────────────
+                // Admin can edit all, others see read-only
+                item {
+                    PCCard("Account Info", Icons.Default.Person) {
+                        if (isAdmin && isEditing) {
+                            PCField(form.name,        { form = form.copy(name = it) },
+                                "Full Name",   Icons.Default.Person)
+                            PCField(form.phoneNumber, { form = form.copy(phoneNumber = it) },
+                                "Phone",       Icons.Default.Phone,
+                                keyboardType = KeyboardType.Phone)
+                            PCField(form.designation, { form = form.copy(designation = it) },
+                                "Designation", Icons.Default.Badge)
+                            PCField(form.role,        { form = form.copy(role = it) },
+                                "Role",        Icons.Default.ManageAccounts)
+                            PCField(form.companyName, { form = form.copy(companyName = it) },
+                                "Company",     Icons.Default.Business)
+                            PCField(form.department,  { form = form.copy(department = it) },
+                                "Department",  Icons.Default.Groups)
+                        } else {
+                            uiState.userProfile?.let { p ->
+                                ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
+                                ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
+                                ReadOnlyRow("Phone",       p.phoneNumber, Icons.Default.Phone)
+                                ReadOnlyRow("Designation", p.designation, Icons.Default.Badge)
+                                ReadOnlyRow("Role",        p.role,        Icons.Default.ManageAccounts)
+                                ReadOnlyRow("Company",     p.companyName, Icons.Default.Business)
+                                ReadOnlyRow("Department",  p.department,  Icons.Default.Groups)
+                            }
                         }
                     }
                 }
 
-                // ── Professional extras (editable, new) ───────────────────────
+                // ── Professional Details — READ ONLY for everyone ────────────
                 item {
                     PCCard("Professional Details", Icons.Default.Work) {
-                        PCField(form.experience,
-                            { form = form.copy(experience = it) },
-                            "Years of Experience", Icons.Default.Timeline,
-                            keyboardType = KeyboardType.Number)
-                        PCField(form.employeeId,
-                            { form = form.copy(employeeId = it) },
-                            "Employee ID", Icons.Default.Badge)
-                        PCField(form.reportingTo,
-                            { form = form.copy(reportingTo = it) },
-                            "Reporting To", Icons.Default.SupervisorAccount)
-                        PCField(form.salary,
-                            { form = form.copy(salary = it) },
-                            "Salary", Icons.Default.CurrencyRupee,
-                            keyboardType = KeyboardType.Number)
+                        if (isEditing && !isAdmin) {
+                            // Only experience is editable for non-admins
+                            PCField(form.experience, { form = form.copy(experience = it) },
+                                "Years of Experience", Icons.Default.Timeline,
+                                keyboardType = KeyboardType.Number)
+                            uiState.userProfile?.let { p ->
+                                ReadOnlyRow("Employee ID",  p.employeeId,  Icons.Default.Badge)
+                                ReadOnlyRow("Reporting To", p.reportingTo, Icons.Default.SupervisorAccount)
+                                ReadOnlyRow("Salary",       if (p.salary > 0) p.salary.toString() else "—",
+                                    Icons.Default.CurrencyRupee)
+                            }
+                        } else if (isEditing && isAdmin) {
+                            // Admin can edit all professional details
+                            PCField(form.experience,  { form = form.copy(experience = it) },
+                                "Years of Experience", Icons.Default.Timeline,
+                                keyboardType = KeyboardType.Number)
+                            PCField(form.employeeId,  { form = form.copy(employeeId = it) },
+                                "Employee ID",  Icons.Default.Badge)
+                            PCField(form.reportingTo, { form = form.copy(reportingTo = it) },
+                                "Reporting To", Icons.Default.SupervisorAccount)
+                            PCField(form.salary,      { form = form.copy(salary = it) },
+                                "Salary",       Icons.Default.CurrencyRupee,
+                                keyboardType = KeyboardType.Number)
+                        } else {
+                            uiState.userProfile?.let { p ->
+                                ReadOnlyRow("Experience",   "${p.experience} yrs", Icons.Default.Timeline)
+                                ReadOnlyRow("Employee ID",  p.employeeId,          Icons.Default.Badge)
+                                ReadOnlyRow("Reporting To", p.reportingTo,         Icons.Default.SupervisorAccount)
+                                ReadOnlyRow("Salary",       if (p.salary > 0) p.salary.toString() else "—",
+                                    Icons.Default.CurrencyRupee)
+                            }
+                        }
                     }
                 }
 
-                // ── Personal extras (editable, new) ───────────────────────────
+                // ── Personal Details — editable by everyone ──────────────────
                 item {
                     PCCard("Personal Details", Icons.Default.PersonPin) {
-                        PCField(form.address,
-                            { form = form.copy(address = it) },
-                            "Address", Icons.Default.LocationOn,
-                            maxLines = 3)
+                        if (isEditing) {
+                            PCField(form.address, { form = form.copy(address = it) },
+                                "Address", Icons.Default.LocationOn, maxLines = 3)
+                        } else {
+                            ReadOnlyRow("Address",
+                                uiState.userProfile?.address?.ifBlank { "—" } ?: "—",
+                                Icons.Default.LocationOn)
+                        }
                     }
                 }
 
-                // ── Emergency contact (editable, new) ─────────────────────────
+                // ── Emergency Contact — editable by everyone ─────────────────
                 item {
                     PCCard("Emergency Contact", Icons.Default.ContactEmergency) {
-                        PCField(form.emergencyContactName,
-                            { form = form.copy(emergencyContactName = it) },
-                            "Contact Name", Icons.Default.Person)
-                        PCField(form.emergencyContactPhone,
-                            { form = form.copy(emergencyContactPhone = it) },
-                            "Contact Phone", Icons.Default.Phone,
-                            keyboardType = KeyboardType.Phone)
-                        PCField(form.emergencyContactRelation,
-                            { form = form.copy(emergencyContactRelation = it) },
-                            "Relationship", Icons.Default.People)
+                        if (isEditing) {
+                            PCField(form.emergencyContactName,
+                                { form = form.copy(emergencyContactName = it) },
+                                "Contact Name",  Icons.Default.Person)
+                            PCField(form.emergencyContactPhone,
+                                { form = form.copy(emergencyContactPhone = it) },
+                                "Contact Phone", Icons.Default.Phone,
+                                keyboardType = KeyboardType.Phone)
+                            PCField(form.emergencyContactRelation,
+                                { form = form.copy(emergencyContactRelation = it) },
+                                "Relationship",  Icons.Default.People)
+                        } else {
+                            uiState.userProfile?.let { p ->
+                                ReadOnlyRow("Name",         p.emergencyContactName.ifBlank { "—" },    Icons.Default.Person)
+                                ReadOnlyRow("Phone",        p.emergencyContactPhone.ifBlank { "—" },   Icons.Default.Phone)
+                                ReadOnlyRow("Relationship", p.emergencyContactRelation.ifBlank { "—" }, Icons.Default.People)
+                            }
+                        }
                     }
                 }
 
-                // ── Error ─────────────────────────────────────────────────────
+                // Error
                 uiState.error?.let { err ->
                     item {
                         Card(
@@ -257,14 +341,13 @@ fun ProfileCompletionScreen(
                                 Icon(Icons.Default.Error, null,
                                     tint = MaterialTheme.colorScheme.onErrorContainer)
                                 Spacer(Modifier.width(10.dp))
-                                Text(err,
-                                    color = MaterialTheme.colorScheme.onErrorContainer)
+                                Text(err, color = MaterialTheme.colorScheme.onErrorContainer)
                             }
                         }
                     }
                 }
 
-                // ── Save button (first-time mode) ─────────────────────────────
+                // Save button — first-time mode
                 if (!isEditMode) {
                     item {
                         Button(
@@ -278,7 +361,7 @@ fun ProfileCompletionScreen(
                             if (uiState.isLoading) {
                                 CircularProgressIndicator(
                                     Modifier.size(20.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    color       = MaterialTheme.colorScheme.onPrimary,
                                     strokeWidth = 2.dp)
                                 Spacer(Modifier.width(10.dp))
                                 Text("Saving…", fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -299,15 +382,14 @@ fun ProfileCompletionScreen(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared helper composables
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Shared helper composables ─────────────────────────────────────────────────
 
 @Composable
 private fun AvatarSection(
     imageUrl     : String,
     imageUri     : Uri?,
     userName     : String,
+    isEditing    : Boolean,
     onImageClick : () -> Unit
 ) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -317,7 +399,7 @@ private fun AvatarSection(
                     .size(110.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { onImageClick() },
+                    .then(if (isEditing) Modifier.clickable { onImageClick() } else Modifier),
                 contentAlignment = Alignment.Center
             ) {
                 when {
@@ -342,18 +424,22 @@ private fun AvatarSection(
                     }
                 }
             }
-            FloatingActionButton(
-                onClick        = onImageClick,
-                modifier       = Modifier.align(Alignment.BottomEnd).size(34.dp),
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.CameraAlt, null, Modifier.size(16.dp))
+            if (isEditing) {
+                FloatingActionButton(
+                    onClick        = onImageClick,
+                    modifier       = Modifier.align(Alignment.BottomEnd).size(34.dp),
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(Icons.Default.CameraAlt, null, Modifier.size(16.dp))
+                }
             }
         }
-        Spacer(Modifier.height(6.dp))
-        Text("Tap to update photo",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (isEditing) {
+            Spacer(Modifier.height(6.dp))
+            Text("Tap to update photo",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -375,7 +461,9 @@ private fun PCCard(
                 Icon(icon, null,
                     tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(title,
+                    style      = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold)
             }
             content()
         }
