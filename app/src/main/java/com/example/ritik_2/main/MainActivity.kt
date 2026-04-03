@@ -11,11 +11,13 @@ import com.example.ritik_2.administrator.AdministratorPanelActivity
 import com.example.ritik_2.administrator.manageuser.ManageUserActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.auth.SessionStatus
+import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.PcControlActivity
+import com.example.ritik_2.winshare.ServerConnectActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -63,17 +65,17 @@ class MainActivity : ComponentActivity() {
                 // AccessDeniedScreen with auto-redirect for unauthorized users
                 startActivity(Intent(this, AdministratorPanelActivity::class.java))
             }
-            4 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
             5 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
-            7 -> {
-                // Settings → view own profile (ProfileActivity)
-                val userId = authRepository.getSession()?.userId ?: return
-                startActivity(Intent(this, ProfileActivity::class.java).apply {
-                    putExtra("userId", userId)
-                })
-            }
-            8 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            7 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            8 -> {
+            // Settings → view own profile (ProfileActivity)
+            val userId = authRepository.getSession()?.userId ?: return
+            startActivity(Intent(this, ContactActivity::class.java).apply {
+                putExtra("userId", userId)
+            })
+        }
         }
     }
 

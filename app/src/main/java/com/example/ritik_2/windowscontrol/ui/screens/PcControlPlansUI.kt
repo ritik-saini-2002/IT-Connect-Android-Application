@@ -39,7 +39,6 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
     val plans            by viewModel.plans.observeAsState(emptyList())
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
     val uiState          by viewModel.uiState.collectAsStateWithLifecycle()
-    val isExecuting       = uiState is PcUiState.Loading
     val context           = LocalContext.current
 
     LaunchedEffect(uiState) {
@@ -109,11 +108,10 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
                 }
                 items(plans, key = { it.planId }) { plan ->
                     SwipeablePlanCard(
-                        plan        = plan,
-                        isExecuting = isExecuting,
-                        onExecute   = { viewModel.executePlan(plan) },
-                        onEdit      = { viewModel.startEditPlan(plan) },
-                        onDelete    = { viewModel.deletePlan(plan) }
+                        plan      = plan,
+                        onExecute = { viewModel.executePlan(plan) },
+                        onEdit    = { viewModel.startEditPlan(plan) },
+                        onDelete  = { viewModel.deletePlan(plan) }
                     )
                 }
                 item { Spacer(Modifier.height(80.dp)) }
@@ -147,18 +145,17 @@ fun PcScreenTopBar(
         },
         actions = {
             extraActions?.invoke(this)
-            // Connection chip in top bar — same style as sidebar
-            val (color, label) = when (connectionStatus) {
+            val (dotColor, label) = when (connectionStatus) {
                 PcConnectionStatus.ONLINE   -> Color(0xFF4ADE80) to "Online"
                 PcConnectionStatus.OFFLINE  -> Color(0xFFFF6B6B) to "Offline"
                 PcConnectionStatus.CHECKING -> Color(0xFFFBBF24) to "Checking"
-                PcConnectionStatus.UNKNOWN  -> Color.White.copy(0.6f) to "Ping"
+                PcConnectionStatus.UNKNOWN  -> Color.White.copy(0.55f) to "Ping"
             }
             Surface(
-                onClick = onPing,
-                shape   = RoundedCornerShape(20.dp),
-                color   = color.copy(0.18f),
-                border  = BorderStroke(1.dp, color.copy(0.5f)),
+                onClick  = onPing,
+                shape    = RoundedCornerShape(20.dp),
+                color    = dotColor.copy(0.18f),
+                border   = BorderStroke(1.dp, dotColor.copy(0.45f)),
                 modifier = Modifier.padding(end = 10.dp)
             ) {
                 Text(
@@ -166,13 +163,14 @@ fun PcScreenTopBar(
                     modifier   = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
                     fontSize   = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color      = color
+                    color      = dotColor
                 )
             }
         },
+        // Match sidebar header — primary background, white content
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor    = MaterialTheme.colorScheme.primary,
-            titleContentColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor             = MaterialTheme.colorScheme.primary,
+            titleContentColor          = MaterialTheme.colorScheme.onPrimary,
             navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
             actionIconContentColor     = MaterialTheme.colorScheme.onPrimary
         )
@@ -185,11 +183,10 @@ fun PcScreenTopBar(
 
 @Composable
 fun SwipeablePlanCard(
-    plan       : PcPlan,
-    isExecuting: Boolean,
-    onExecute  : () -> Unit,
-    onEdit     : () -> Unit,
-    onDelete   : () -> Unit
+    plan      : PcPlan,
+    onExecute : () -> Unit,
+    onEdit    : () -> Unit,
+    onDelete  : () -> Unit
 ) {
     val scope       = rememberCoroutineScope()
     val offsetX     = remember { Animatable(0f) }
@@ -250,7 +247,7 @@ fun SwipeablePlanCard(
                     },
                     onDragStopped = { _ ->
                         scope.launch {
-                            if (offsetX.value >= threshold && !isExecuting) {
+                            if (offsetX.value >= threshold) {
                                 offsetX.animateTo(threshold * 1.1f, tween(80))
                                 offsetX.animateTo(0f, spring(
                                     dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -287,21 +284,6 @@ fun SwipeablePlanCard(
                     Text("$cnt step${if (cnt != 1) "s" else ""}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-
-                if (isExecuting) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    FilledIconButton(
-                        onClick  = onExecute,
-                        modifier = Modifier.size(36.dp),
-                        colors   = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(Icons.Default.PlayArrow, "Run",
-                            modifier = Modifier.size(18.dp),
-                            tint     = MaterialTheme.colorScheme.onPrimary)
-                    }
                 }
 
                 Box {
