@@ -95,8 +95,7 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
                         PcScreen.APP_DIRECTORY -> PcControlAppDirectoryUI(viewModel)
                         PcScreen.FILE_BROWSER  -> PcControlFileBrowserUI(viewModel)
                         PcScreen.KEYBOARD      -> PcControlKeyboardUI(viewModel)
-                        PcScreen.SETTINGS      -> PcControlSettingsUI(viewModel)
-                    }
+                        PcScreen.SETTINGS      -> PcControlSettingsUI(viewModel)                    }
                 }
             }
         }

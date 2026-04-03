@@ -47,17 +47,10 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
 
     Scaffold(
         topBar = {
-            PcTopBar(
+            PcScreenTopBar(
                 title            = "Settings",
                 connectionStatus = connectionStatus,
-                onPing           = { viewModel.pingPc() },
-                actions = {
-                    PcConnectionChip(
-                        status  = connectionStatus,
-                        onClick = { viewModel.pingPc() }
-                    )
-                    Spacer(Modifier.width(6.dp))
-                }
+                onPing           = { viewModel.pingPc() }
             )
         }
     ) { padding ->

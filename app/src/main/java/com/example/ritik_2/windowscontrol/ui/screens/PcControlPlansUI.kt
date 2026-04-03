@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -30,10 +31,6 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-
-// ─────────────────────────────────────────────────────────────
-//  PLANS SCREEN
-// ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,14 +58,10 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
 
     Scaffold(
         topBar = {
-            PcTopBar(
+            PcScreenTopBar(
                 title            = "Plans",
                 connectionStatus = connectionStatus,
-                onPing           = { viewModel.pingPc() },
-                actions          = {
-                    PcConnectionChip(status = connectionStatus, onClick = { viewModel.pingPc() })
-                    Spacer(Modifier.width(6.dp))
-                }
+                onPing           = { viewModel.pingPc() }
             )
         },
         floatingActionButton = {
@@ -81,19 +74,36 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
         }
     ) { padding ->
         if (plans.isEmpty()) {
-            EmptyPlansState(Modifier.fillMaxSize().padding(padding))
+            Box(
+                modifier         = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("⚡", fontSize = 48.sp)
+                    Text("No plans yet",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Tap + to create your first automation",
+                        style     = MaterialTheme.typography.bodySmall,
+                        color     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
+                        textAlign = TextAlign.Center)
+                }
+            }
         } else {
             LazyColumn(
-                modifier        = Modifier.fillMaxSize().padding(padding),
-                contentPadding  = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier            = Modifier.fillMaxSize().padding(padding),
+                contentPadding      = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 item {
                     Text(
                         "← Swipe right to execute",
-                        style    = MaterialTheme.typography.labelSmall,
-                        color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.55f),
-                        modifier = Modifier.fillMaxWidth(),
+                        style     = MaterialTheme.typography.labelSmall,
+                        color     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f),
+                        modifier  = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Center
                     )
                 }
@@ -112,28 +122,65 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  SHARED TOP BAR — used by ALL screens
+// ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EmptyPlansState(modifier: Modifier) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text("⚡", fontSize = 52.sp)
-            Text("No plans yet",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Tap + to create your first automation plan",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 32.dp))
-        }
-    }
+fun PcScreenTopBar(
+    title            : String,
+    connectionStatus : PcConnectionStatus,
+    onPing           : () -> Unit,
+    navigationIcon   : (@Composable () -> Unit)? = null,
+    extraActions     : (@Composable RowScope.() -> Unit)? = null
+) {
+    TopAppBar(
+        navigationIcon = { navigationIcon?.invoke() },
+        title = {
+            Text(
+                title,
+                fontWeight = FontWeight.Bold,
+                style      = MaterialTheme.typography.titleMedium,
+                color      = MaterialTheme.colorScheme.onPrimary
+            )
+        },
+        actions = {
+            extraActions?.invoke(this)
+            // Connection chip in top bar — same style as sidebar
+            val (color, label) = when (connectionStatus) {
+                PcConnectionStatus.ONLINE   -> Color(0xFF4ADE80) to "Online"
+                PcConnectionStatus.OFFLINE  -> Color(0xFFFF6B6B) to "Offline"
+                PcConnectionStatus.CHECKING -> Color(0xFFFBBF24) to "Checking"
+                PcConnectionStatus.UNKNOWN  -> Color.White.copy(0.6f) to "Ping"
+            }
+            Surface(
+                onClick = onPing,
+                shape   = RoundedCornerShape(20.dp),
+                color   = color.copy(0.18f),
+                border  = BorderStroke(1.dp, color.copy(0.5f)),
+                modifier = Modifier.padding(end = 10.dp)
+            ) {
+                Text(
+                    "● $label",
+                    modifier   = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                    fontSize   = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color      = color
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor    = MaterialTheme.colorScheme.primary,
+            titleContentColor = MaterialTheme.colorScheme.onPrimary,
+            navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+            actionIconContentColor     = MaterialTheme.colorScheme.onPrimary
+        )
+    )
 }
 
 // ─────────────────────────────────────────────────────────────
-//  SWIPEABLE PLAN CARD — swipe only, no drag icon
+//  SWIPEABLE PLAN CARD
 // ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -144,63 +191,51 @@ fun SwipeablePlanCard(
     onEdit     : () -> Unit,
     onDelete   : () -> Unit
 ) {
-    val scope        = rememberCoroutineScope()
-    val offsetX      = remember { Animatable(0f) }
-    val density      = LocalDensity.current
-    val threshold    = with(density) { 130.dp.toPx() }
-    var showMenu     by remember { mutableStateOf(false) }
-    var showConfirm  by remember { mutableStateOf(false) }
+    val scope       = rememberCoroutineScope()
+    val offsetX     = remember { Animatable(0f) }
+    val density     = LocalDensity.current
+    val threshold   = with(density) { 120.dp.toPx() }
+    var showMenu    by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
 
-    val progress   = (offsetX.value / threshold).coerceIn(0f, 1f)
-    val cardBg     = lerpColor(
+    val progress  = (offsetX.value / threshold).coerceIn(0f, 1f)
+    val cardBg    = lerpColor(
         MaterialTheme.colorScheme.surface,
-        Color(0xFF22C55E).copy(alpha = 0.18f),
+        Color(0xFF22C55E).copy(alpha = 0.15f),
         progress
     )
-    val revealBg   = Color(0xFF22C55E).copy(alpha = (0.08f + 0.22f * progress).coerceIn(0f, 1f))
 
     Box(modifier = Modifier.fillMaxWidth()) {
-
-        // ── Reveal background ──────────────────────────────
+        // Reveal background
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .clip(RoundedCornerShape(16.dp))
-                .background(revealBg),
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF22C55E).copy(alpha = (0.05f + 0.2f * progress).coerceIn(0f, 1f))),
             contentAlignment = Alignment.CenterStart
         ) {
-            Row(
-                modifier = Modifier.padding(start = 22.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            AnimatedVisibility(
+                visible = progress > 0.1f,
+                enter   = fadeIn() + slideInHorizontally { -it / 2 },
+                exit    = fadeOut(),
+                modifier = Modifier.padding(start = 20.dp)
             ) {
-                AnimatedVisibility(
-                    visible = progress > 0.1f,
-                    enter   = fadeIn() + scaleIn(),
-                    exit    = fadeOut() + scaleOut()
+                Row(
+                    verticalAlignment     = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(
-                        Icons.Default.PlayArrow, null,
+                    Icon(Icons.Default.PlayArrow, null,
                         tint     = Color(0xFF22C55E),
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-                AnimatedVisibility(
-                    visible = progress > 0.3f,
-                    enter   = fadeIn(tween(80)) + slideInHorizontally { -it / 2 },
-                    exit    = fadeOut()
-                ) {
-                    Text(
-                        "Execute",
-                        color      = Color(0xFF22C55E),
-                        fontWeight = FontWeight.Bold,
-                        style      = MaterialTheme.typography.labelLarge
-                    )
+                        modifier = Modifier.size(24.dp))
+                    if (progress > 0.35f) {
+                        Text("Execute", color = Color(0xFF22C55E),
+                            fontWeight = FontWeight.Bold,
+                            style      = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
         }
 
-        // ── Card ───────────────────────────────────────────
         Card(
             modifier  = Modifier
                 .fillMaxWidth()
@@ -209,7 +244,6 @@ fun SwipeablePlanCard(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->
                         scope.launch {
-                            // Only allow rightward swipe
                             val next = (offsetX.value + delta).coerceAtLeast(0f)
                             offsetX.snapTo(next)
                         }
@@ -217,11 +251,7 @@ fun SwipeablePlanCard(
                     onDragStopped = { _ ->
                         scope.launch {
                             if (offsetX.value >= threshold && !isExecuting) {
-                                // Animate to threshold then snap back
-                                offsetX.animateTo(
-                                    threshold * 1.1f,
-                                    tween(80)
-                                )
+                                offsetX.animateTo(threshold * 1.1f, tween(80))
                                 offsetX.animateTo(0f, spring(
                                     dampingRatio = Spring.DampingRatioMediumBouncy,
                                     stiffness    = Spring.StiffnessMedium
@@ -236,95 +266,105 @@ fun SwipeablePlanCard(
                         }
                     }
                 ),
-            shape     = RoundedCornerShape(16.dp),
+            shape     = RoundedCornerShape(14.dp),
             colors    = CardDefaults.cardColors(containerColor = cardBg),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
-            Column(modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    modifier              = Modifier.fillMaxWidth(),
-                    verticalAlignment     = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Plan name + step count
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            plan.planName,
-                            style      = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        val cnt = plan.steps.size
-                        Text(
-                            "$cnt step${if (cnt != 1) "s" else ""}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(plan.planName,
+                        style      = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines   = 1,
+                        overflow   = TextOverflow.Ellipsis)
+                    val cnt = plan.steps.size
+                    Text("$cnt step${if (cnt != 1) "s" else ""}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
 
-                    // Execute button
-                    if (isExecuting) {
-                        CircularProgressIndicator(
-                            modifier    = Modifier.size(22.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        FilledIconButton(
-                            onClick  = onExecute,
-                            modifier = Modifier.size(38.dp),
-                            colors   = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primary)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, "Run",
-                                modifier = Modifier.size(20.dp),
-                                tint     = MaterialTheme.colorScheme.onPrimary)
-                        }
-                    }
-
-                    // Menu
-                    Box {
-                        IconButton(onClick = { showMenu = true }, modifier = Modifier.size(38.dp)) {
-                            Icon(Icons.Default.MoreVert, "Options", modifier = Modifier.size(20.dp))
-                        }
-                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(
-                                text          = { Text("Edit") },
-                                leadingIcon   = { Icon(Icons.Default.Edit, null) },
-                                onClick       = { showMenu = false; onEdit() }
-                            )
-                            DropdownMenuItem(
-                                text          = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon   = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                                onClick       = { showMenu = false; showConfirm = true }
-                            )
-                        }
+                if (isExecuting) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else {
+                    FilledIconButton(
+                        onClick  = onExecute,
+                        modifier = Modifier.size(36.dp),
+                        colors   = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.PlayArrow, "Run",
+                            modifier = Modifier.size(18.dp),
+                            tint     = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
 
-                // ── File path steps with open button ──────────
-                val fileSteps = plan.steps.filter { it.hasFilePath() }
-                if (fileSteps.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Spacer(Modifier.height(8.dp))
+                Box {
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.MoreVert, "Options", modifier = Modifier.size(18.dp))
+                    }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(
+                            text        = { Text("Edit") },
+                            leadingIcon = { Icon(Icons.Default.Edit, null) },
+                            onClick     = { showMenu = false; onEdit() }
+                        )
+                        DropdownMenuItem(
+                            text        = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                            onClick     = { showMenu = false; showConfirm = true }
+                        )
+                    }
+                }
+            }
+
+            // File step rows
+            val fileSteps = plan.steps.filter { it.hasFilePath() }
+            if (fileSteps.isNotEmpty()) {
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 14.dp))
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     fileSteps.forEach { step ->
-                        PlanFileStepRow(step = step, onOpen = {
-                            // Execute just this open step immediately
-                            val openStep = if (step.type == "LAUNCH_APP" && step.args.isNotEmpty())
-                                PcStep("SYSTEM_CMD", "OPEN_FILE", args = listOf(step.args[0]))
-                            else step
-                            // trigger via parent — we just re-execute the whole plan for simplicity;
-                            // or you can expose a quick-step here:
-                        })
+                        val path = step.filePathArg()
+                        val name = path.substringAfterLast('/').substringAfterLast('\\').take(32)
+                        val isMedia = step.fileExtension() in
+                                listOf("mp4","mkv","avi","mov","mp3","wav","flac","aac")
+                        Row(
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(step.fileIcon(), fontSize = 13.sp)
+                            Text(name,
+                                style    = MaterialTheme.typography.bodySmall,
+                                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis)
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isMedia) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.secondaryContainer
+                            ) {
+                                Text(
+                                    if (isMedia) "▶ Play" else "Open",
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style    = MaterialTheme.typography.labelSmall,
+                                    color    = if (isMedia) MaterialTheme.colorScheme.onPrimaryContainer
+                                    else MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    // Delete confirmation
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
@@ -335,69 +375,13 @@ fun SwipeablePlanCard(
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
-            }
+            dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancel") } }
         )
-    }
-}
-
-@Composable
-private fun PlanFileStepRow(step: PcStep, onOpen: () -> Unit) {
-    val filePath = step.filePathArg()
-    val name     = filePath.substringAfterLast('/').substringAfterLast('\\').take(36)
-    val icon     = step.fileIcon()
-    val isMedia  = step.fileExtension() in listOf("mp4","mkv","avi","mov","mp3","wav","flac")
-
-    Row(
-        modifier              = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(icon, fontSize = 16.sp)
-        Text(
-            name,
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-            maxLines = 1
-        )
-        if (filePath.isNotBlank()) {
-            Surface(
-                onClick = onOpen,
-                shape   = RoundedCornerShape(8.dp),
-                color   = if (isMedia)
-                    MaterialTheme.colorScheme.primaryContainer
-                else
-                    MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        if (isMedia) Icons.Default.PlayArrow else Icons.Default.OpenInNew,
-                        null, modifier = Modifier.size(12.dp),
-                        tint = if (isMedia) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                    Text(
-                        if (isMedia) "Play" else "Open",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isMedia) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-            }
-        }
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  SHARED: Connection chip  +  TopBar
+//  CONNECTION CHIP
 // ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -411,12 +395,12 @@ fun PcConnectionChip(status: PcConnectionStatus, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape   = RoundedCornerShape(20.dp),
-        color   = color.copy(0.13f),
-        border  = BorderStroke(1.dp, color.copy(0.4f))
+        color   = color.copy(0.12f),
+        border  = BorderStroke(1.dp, color.copy(0.35f))
     ) {
         Text(
             "● $label",
-            modifier   = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            modifier   = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
             fontSize   = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color      = color
@@ -424,35 +408,6 @@ fun PcConnectionChip(status: PcConnectionStatus, onClick: () -> Unit) {
     }
 }
 
-/** Unified top bar used across all screens — matches sidebar style */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PcTopBar(
-    title            : String,
-    connectionStatus : PcConnectionStatus,
-    onPing           : () -> Unit,
-    navigationIcon   : @Composable (() -> Unit)? = null,
-    actions          : @Composable RowScope.() -> Unit = {}
-) {
-    TopAppBar(
-        navigationIcon = { navigationIcon?.invoke() },
-        title = {
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(title, fontWeight = FontWeight.Bold)
-            }
-        },
-        actions = actions,
-        colors  = TopAppBarDefaults.topAppBarColors(
-            containerColor    = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
-        )
-    )
-}
-
-// Color lerp helper
 internal fun lerpColor(start: Color, end: Color, fraction: Float): Color {
     val f = fraction.coerceIn(0f, 1f)
     return Color(
