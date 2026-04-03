@@ -19,25 +19,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.windowscontrol.data.PcStep
+import com.example.ritik_2.windowscontrol.viewmodel.FileBrowserMode
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcScreen
 import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────
-//  MAIN SCREEN — Navigation drawer + bottom nav
+//  MAIN SCREEN
 // ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PcControlMainScreen(viewModel: PcControlViewModel) {
 
-    val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
-    val editingPlan   by viewModel.editingPlan.collectAsStateWithLifecycle()
-    val uiState       by viewModel.uiState.collectAsStateWithLifecycle()
-    val drawerState   = rememberDrawerState(DrawerValue.Closed)
-    val scope         = rememberCoroutineScope()
+    val currentScreen  by viewModel.currentScreen.collectAsStateWithLifecycle()
+    val editingPlan    by viewModel.editingPlan.collectAsStateWithLifecycle()
+    val drawerState    = rememberDrawerState(DrawerValue.Closed)
+    val scope          = rememberCoroutineScope()
 
-    // Plan editor overlay
     if (editingPlan != null) {
         BackHandler { viewModel.cancelEdit() }
         PcControlPlanEditorUI(viewModel = viewModel)
@@ -48,15 +47,15 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
         drawerState   = drawerState,
         drawerContent = {
             NavigationPanel(
-                viewModel   = viewModel,
+                viewModel     = viewModel,
                 currentScreen = currentScreen,
-                onNavigate  = { screen ->
+                onNavigate    = { screen ->
                     viewModel.navigateTo(screen)
                     scope.launch { drawerState.close() }
                     when (screen) {
                         PcScreen.APP_DIRECTORY -> viewModel.loadInstalledApps()
                         PcScreen.FILE_BROWSER  -> viewModel.loadDrives()
-                        else -> {}
+                        else                   -> {}
                     }
                 },
                 onClose = { scope.launch { drawerState.close() } }
@@ -66,22 +65,24 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
         Scaffold(
             bottomBar = {
                 PcControlBottomNav(
-                    currentScreen = currentScreen,
-                    onNavigate    = { screen ->
+                    currentScreen  = currentScreen,
+                    browserMode    = viewModel.fileBrowserMode.collectAsStateWithLifecycle().value,
+                    onNavigate     = { screen ->
                         viewModel.navigateTo(screen)
                         when (screen) {
                             PcScreen.APP_DIRECTORY -> viewModel.loadInstalledApps()
                             PcScreen.FILE_BROWSER  -> viewModel.loadDrives()
-                            else -> {}
+                            else                   -> {}
                         }
                     },
-                    onOpenDrawer = { scope.launch { drawerState.open() } }
+                    onFilesDoubleTap = { viewModel.toggleFileBrowserMode() },
+                    onOpenDrawer     = { scope.launch { drawerState.open() } }
                 )
             }
         ) { padding ->
             Box(modifier = Modifier.padding(padding)) {
                 AnimatedContent(
-                    targetState  = currentScreen,
+                    targetState = currentScreen,
                     transitionSpec = {
                         fadeIn(tween(220)) + slideInHorizontally(tween(220)) togetherWith
                                 fadeOut(tween(180)) + slideOutHorizontally(tween(180))
@@ -103,51 +104,64 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  NAVIGATION PANEL (drawer)
+//  NAVIGATION PANEL (drawer) — matches sidebar design language
 // ─────────────────────────────────────────────────────────────
 
 @Composable
 fun NavigationPanel(
-    viewModel    : PcControlViewModel,
-    currentScreen: PcScreen,
-    onNavigate   : (PcScreen) -> Unit,
-    onClose      : () -> Unit
+    viewModel     : PcControlViewModel,
+    currentScreen : PcScreen,
+    onNavigate    : (PcScreen) -> Unit,
+    onClose       : () -> Unit
 ) {
+    val settings         by viewModel.settings.collectAsStateWithLifecycle()
+    val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
+
     ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
         Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
 
-            // Header
+            // Header — same style as top bar
             Box(
-                modifier = Modifier.fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.primaryContainer)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primary)
                     .padding(20.dp)
             ) {
-                Column {
-                    Text("IT Connect", style = MaterialTheme.typography.headlineSmall,
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("IT Connect",
+                        style      = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Text("PC Remote Control by Ritik Saini", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.7f))
+                        color      = MaterialTheme.colorScheme.onPrimary)
+                    Text("PC Remote Control",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(0.75f))
+                    Spacer(Modifier.height(4.dp))
+                    PcConnectionChip(status = connectionStatus, onClick = { viewModel.pingPc() })
                 }
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // Nav items
-            Text("NAVIGATE", style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+            Text("NAVIGATE",
+                style    = MaterialTheme.typography.labelSmall,
+                color    = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
             listOf(
-                Triple(PcScreen.TOUCHPAD,       "Touchpad",    Icons.Default.Mouse),
-                Triple(PcScreen.PLANS,         "Plans",       Icons.Default.List),
-                Triple(PcScreen.KEYBOARD,       "Keyboard",    Icons.Default.Keyboard),
-                Triple(PcScreen.APP_DIRECTORY,  "Apps",        Icons.Default.Apps),
-                Triple(PcScreen.FILE_BROWSER,   "Files",       Icons.Default.Folder),
-                Triple(PcScreen.SETTINGS,       "Settings",    Icons.Default.Settings),
+                Triple(PcScreen.TOUCHPAD,      "Control",  Icons.Default.Mouse),
+                Triple(PcScreen.PLANS,         "Plans",    Icons.Default.List),
+                Triple(PcScreen.KEYBOARD,      "Keyboard", Icons.Default.Keyboard),
+                Triple(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
+                Triple(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder),
+                Triple(PcScreen.SETTINGS,      "Settings", Icons.Default.Settings),
             ).forEach { (screen, label, icon) ->
                 NavigationDrawerItem(
-                    label    = { Text(label, fontWeight = if (currentScreen == screen) FontWeight.Bold else FontWeight.Normal) },
+                    label    = {
+                        Text(label,
+                            fontWeight = if (currentScreen == screen) FontWeight.Bold
+                            else FontWeight.Normal)
+                    },
                     icon     = { Icon(icon, null) },
                     selected = currentScreen == screen,
                     onClick  = { onNavigate(screen) },
@@ -157,38 +171,53 @@ fun NavigationPanel(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            // Quick commands
-            Text("QUICK COMMANDS", style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+            Text("QUICK ACTIONS",
+                style    = MaterialTheme.typography.labelSmall,
+                color    = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
 
-            listOf(
-                Triple("🔒 Lock PC",    PcStep("SYSTEM_CMD", "LOCK"),     Icons.Default.Lock),
-                Triple("😴 Sleep",      PcStep("SYSTEM_CMD", "SLEEP"),    Icons.Default.DarkMode),
-                Triple("📸 Screenshot", PcStep("SYSTEM_CMD","SCREENSHOT"),Icons.Default.Screenshot),
-                Triple("🔇 Mute",       PcStep("SYSTEM_CMD","MUTE"),      Icons.Default.VolumeOff),
-            ).forEach { (label, step, icon) ->
-                ListItem(
-                    headlineContent = { Text(label, style = MaterialTheme.typography.bodyMedium) },
-                    leadingContent  = { Icon(icon, null, modifier = Modifier.size(20.dp)) },
-                    modifier = Modifier.clickable {
-                        viewModel.executeQuickStep(step)
-                        onClose()
-                    }.padding(horizontal = 8.dp)
-                )
+            // Quick action grid — 2 per row
+            val quickActions = listOf(
+                Triple("🔒 Lock",     PcStep("SYSTEM_CMD", "LOCK"),     Icons.Default.Lock),
+                Triple("😴 Sleep",    PcStep("SYSTEM_CMD", "SLEEP"),    Icons.Default.DarkMode),
+                Triple("📸 Screenshot",PcStep("SYSTEM_CMD","SCREENSHOT"),Icons.Default.Screenshot),
+                Triple("🔇 Mute",     PcStep("SYSTEM_CMD","MUTE"),      Icons.Default.VolumeOff),
+                Triple("🔊 Vol+",     PcStep("SYSTEM_CMD","VOLUME_UP"), Icons.Default.VolumeUp),
+                Triple("🔉 Vol-",     PcStep("SYSTEM_CMD","VOLUME_DOWN"),Icons.Default.VolumeDown),
+            )
+            quickActions.chunked(2).forEach { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    row.forEach { (label, step, _) ->
+                        OutlinedButton(
+                            onClick        = { viewModel.executeQuickStep(step); onClose() },
+                            shape          = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            modifier       = Modifier.weight(1f)
+                        ) {
+                            Text(label,
+                                style    = MaterialTheme.typography.labelSmall,
+                                maxLines = 1)
+                        }
+                    }
+                }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             // Connection info
-            val settings by viewModel.settings.collectAsStateWithLifecycle()
             ListItem(
                 headlineContent = {
-                    Text(if (settings.pcIpAddress.isNotBlank())
-                        settings.pcIpAddress else "Not configured",
+                    Text(
+                        if (settings.pcIpAddress.isNotBlank()) settings.pcIpAddress
+                        else "Not configured",
                         style = MaterialTheme.typography.bodySmall)
                 },
-                overlineContent = { Text("PC IP Address") },
+                overlineContent = { Text("PC IP Address",
+                    style = MaterialTheme.typography.labelSmall) },
                 leadingContent  = { Icon(Icons.Default.Computer, null, Modifier.size(20.dp)) },
                 trailingContent = {
                     TextButton(onClick = { onNavigate(PcScreen.SETTINGS) }) {
@@ -196,7 +225,6 @@ fun NavigationPanel(
                     }
                 }
             )
-
             Spacer(Modifier.height(16.dp))
         }
     }
@@ -204,34 +232,35 @@ fun NavigationPanel(
 
 // ─────────────────────────────────────────────────────────────
 //  BOTTOM NAVIGATION
-//  Double-tap Touchpad icon → Keyboard screen
+//  Double-tap Control → Keyboard
+//  Double-tap Files   → toggle execute/transfer mode
 // ─────────────────────────────────────────────────────────────
 
 data class PcNavItem(
-    val screen: PcScreen,
-    val label : String,
-    val icon  : ImageVector,
+    val screen      : PcScreen,
+    val label       : String,
+    val icon        : ImageVector,
     val selectedIcon: ImageVector = icon
 )
 
 private val navItems = listOf(
-    //PcNavItem(PcScreen.PLANS,         "Plans",    Icons.Default.List),
-    PcNavItem(PcScreen.TOUCHPAD,      "Control",  Icons.Default.Mouse),
-    PcNavItem(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
-    PcNavItem(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder,    Icons.Default.FolderOpen),
-    //PcNavItem(PcScreen.SETTINGS,      "Settings", Icons.Default.Settings),
+    PcNavItem(PcScreen.TOUCHPAD,      "Control", Icons.Default.Mouse),
+    PcNavItem(PcScreen.APP_DIRECTORY, "Apps",    Icons.Default.Apps),
+    PcNavItem(PcScreen.FILE_BROWSER,  "Files",   Icons.Default.Folder, Icons.Default.FolderOpen),
 )
 
 @Composable
 fun PcControlBottomNav(
-    currentScreen: PcScreen,
-    onNavigate   : (PcScreen) -> Unit,
-    onOpenDrawer : () -> Unit
+    currentScreen  : PcScreen,
+    browserMode    : FileBrowserMode,
+    onNavigate     : (PcScreen) -> Unit,
+    onFilesDoubleTap : () -> Unit,
+    onOpenDrawer   : () -> Unit
 ) {
-    var lastTouchpadTap by remember { mutableLongStateOf(0L) }
+    var lastTapScreen by remember { mutableStateOf<PcScreen?>(null) }
+    var lastTapTime   by remember { mutableLongStateOf(0L) }
 
     NavigationBar(tonalElevation = 8.dp) {
-        // Menu button (opens drawer)
         NavigationBarItem(
             selected = false,
             onClick  = onOpenDrawer,
@@ -244,33 +273,51 @@ fun PcControlBottomNav(
             NavigationBarItem(
                 selected = selected,
                 onClick  = {
-                    if (item.screen == PcScreen.TOUCHPAD) {
-                        val now = System.currentTimeMillis()
-                        if (selected && now - lastTouchpadTap < 400L) {
+                    val now = System.currentTimeMillis()
+                    val isDoubleTap = lastTapScreen == item.screen && now - lastTapTime < 400L
+
+                    when {
+                        item.screen == PcScreen.TOUCHPAD && selected && isDoubleTap ->
                             onNavigate(PcScreen.KEYBOARD)
-                        } else {
+                        item.screen == PcScreen.FILE_BROWSER && selected && isDoubleTap ->
+                            onFilesDoubleTap()
+                        else ->
                             onNavigate(item.screen)
-                        }
-                        lastTouchpadTap = now
-                    } else {
-                        onNavigate(item.screen)
                     }
+                    lastTapScreen = item.screen
+                    lastTapTime   = now
                 },
                 icon = {
-                    if (item.screen == PcScreen.TOUCHPAD && selected) {
-                        BadgedBox(badge = {
-                            Badge(containerColor = MaterialTheme.colorScheme.primary) {
-                                Text("⌨", fontSize = 7.sp)
-                            }
-                        }) { Icon(item.selectedIcon, item.label) }
-                    } else {
-                        Icon(if (selected) item.selectedIcon else item.icon, item.label)
+                    when {
+                        item.screen == PcScreen.TOUCHPAD && selected -> {
+                            BadgedBox(badge = {
+                                Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                    Text("⌨", fontSize = 7.sp)
+                                }
+                            }) { Icon(item.selectedIcon, item.label) }
+                        }
+                        item.screen == PcScreen.FILE_BROWSER && selected -> {
+                            BadgedBox(badge = {
+                                Badge(
+                                    containerColor = if (browserMode == FileBrowserMode.EXECUTE)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.secondary
+                                ) {
+                                    Text(
+                                        if (browserMode == FileBrowserMode.EXECUTE) "▶" else "↕",
+                                        fontSize = 7.sp
+                                    )
+                                }
+                            }) { Icon(item.selectedIcon, item.label) }
+                        }
+                        else -> Icon(if (selected) item.selectedIcon else item.icon, item.label)
                     }
                 },
                 label = {
                     Text(item.label,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        style = MaterialTheme.typography.labelSmall)
+                        style      = MaterialTheme.typography.labelSmall)
                 }
             )
         }

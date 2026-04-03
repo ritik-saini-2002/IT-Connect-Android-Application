@@ -2,7 +2,6 @@ package com.example.ritik_2.windowscontrol
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -15,90 +14,114 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
 import com.example.ritik_2.windowscontrol.ui.screens.PcControlMainScreen
 
 // ─────────────────────────────────────────────────────────────
-//  PcControlMain — Single entry point for your major project
-//
-//  HOW TO EMBED:
-//
-//  Step 1 — In your Application class or first screen:
-//      PcControlMain.init(context, pcIp = "192.168.1.5")
-//
-//  Step 2 — Anywhere in your Compose NavGraph:
-//      composable("pc_control") { PcControlEntry() }
-//
-//  That's it! Full PC control embedded in 2 steps.
+//  PcControlSettings — single source of truth for connection
+// ─────────────────────────────────────────────────────────────
+
+data class PcControlSettings(
+    val pcIpAddress : String = "",
+    val port        : Int    = 5000,
+    val secretKey   : String = "Ritik@2002"   // matches agent SECRET_KEY
+) {
+    val baseUrl      get() = "http://$pcIpAddress:$port"
+    val isConfigured get() = pcIpAddress.isNotEmpty()
+}
+
+// ─────────────────────────────────────────────────────────────
+//  PcControlMain — singleton entry point
 // ─────────────────────────────────────────────────────────────
 
 @SuppressLint("StaticFieldLeak")
 object PcControlMain {
 
-    private var _context: Context? = null
-    private var _settings: PcControlSettings? = null
-    internal var apiClient: PcControlApiClient? = null
+    private var _context     : Context?               = null
+    private var _settings    : PcControlSettings?     = null
+    internal var apiClient   : PcControlApiClient?    = null
     internal var browseClient: PcControlBrowseClient? = null
-    internal var repository: PcControlRepository? = null
+    internal var repository  : PcControlRepository?   = null
 
     val isInitialized get() = _context != null
 
     /**
-     * Initialize the PC Control package.
-     * Call once — in Application.onCreate() or your main Activity.
+     * Call once in Application.onCreate() or first Activity.
+     * pcIp — leave blank to load from saved prefs.
      */
     @SuppressLint("StaticFieldLeak")
     fun init(
-        context: Context,
-        pcIp: String = "",
-        port: Int = 5000,
-        secretKey: String = "my_secret_123"
+        context   : Context,
+        pcIp      : String = "",
+        port      : Int    = 5000,
+        secretKey : String = "Ritik@2002"
     ) {
         _context = context.applicationContext
         val prefs = context.getSharedPreferences("pccontrol_prefs", Context.MODE_PRIVATE)
 
-        // Use saved IP if not provided
-        val resolvedIp = pcIp.ifEmpty { prefs.getString("pc_ip", "") ?: "" }
+        // Prefer saved IP over the default blank one passed from Application
+        val savedIp    = prefs.getString("pc_ip",      "") ?: ""
+        // Safe read — port may have been stored as String by older versions
+        val savedPort = try {
+            prefs.getInt("pc_port", port)
+        } catch (e: ClassCastException) {
+            prefs.getString("pc_port", port.toString())?.toIntOrNull() ?: port
+        }
+        val savedKey = prefs.getString("pc_key", secretKey)
+            ?.ifBlank { secretKey } ?: secretKey
 
-        _settings = PcControlSettings(
-            pcIpAddress = resolvedIp,
-            port = port,
-            secretKey = secretKey
-        )
+        val resolvedIp  = if (pcIp.isNotEmpty()) pcIp else savedIp
+        val resolvedPort= savedPort
+        val resolvedKey = savedKey
 
-        apiClient = PcControlApiClient(_settings!!)
-        browseClient = PcControlBrowseClient(_settings!!)
+        _settings     = PcControlSettings(resolvedIp, resolvedPort, resolvedKey)
+        apiClient     = PcControlApiClient(_settings!!)
+        browseClient  = PcControlBrowseClient(_settings!!)
 
-        val db = PcControlDatabase.getDatabase(context)
-        repository = PcControlRepository(db.planDao())
+        val db        = PcControlDatabase.getDatabase(context)
+        repository    = PcControlRepository(db.planDao())
+
+        android.util.Log.d("PcControlMain",
+            "Initialized — IP: $resolvedIp  Port: $resolvedPort  Key: $resolvedKey")
     }
 
     /**
-     * Update connection settings at runtime (e.g. user changes IP)
+     * Update connection settings at runtime (called from Settings screen).
+     * Persists all three values to SharedPreferences.
      */
-    fun updateConnection(pcIp: String, port: Int = 5000, secretKey: String = "my_secret_123") {
+    fun updateConnection(
+        pcIp      : String,
+        port      : Int    = 5000,
+        secretKey : String = "Ritik@2002"
+    ) {
         val ctx = _context ?: return
         val newSettings = PcControlSettings(pcIp, port, secretKey)
-        _settings = newSettings
-        apiClient = PcControlApiClient(newSettings)
+        _settings    = newSettings
+        apiClient    = PcControlApiClient(newSettings)
         browseClient = PcControlBrowseClient(newSettings)
 
-        // Persist
+        // Persist all three values so they survive app restart
         ctx.getSharedPreferences("pccontrol_prefs", Context.MODE_PRIVATE)
-            .edit().putString("pc_ip", pcIp).apply()
+            .edit()
+            .putString("pc_ip",   pcIp)
+            .putInt   ("pc_port", port)
+            .putString("pc_key",  secretKey)
+            .apply()
+
+        android.util.Log.d("PcControlMain",
+            "Connection updated — IP: $pcIp  Port: $port  Key: $secretKey")
     }
 
-    /**
-     * Get current settings
-     */
-    fun getSettings(): PcControlSettings {
-        return _settings ?: PcControlSettings()
-    }
+    // No longer store apiClient/browseClient as singletons — ViewModel creates fresh per call
+    fun getSettings(): PcControlSettings =
+        _settings ?: PcControlSettings()
+
+    /** Convenience for callers that need the base URL right now */
+    fun getBaseUrl(): String = getSettings().baseUrl
 
     internal fun requireContext(): Context =
         _context ?: throw IllegalStateException(
-            "PcControlMain not initialized. Call PcControlMain.init(context) first."
-        )
+            "PcControlMain not initialized. Call PcControlMain.init(context) first.")
 }
 
 // ─────────────────────────────────────────────────────────────
-//  PcControlEntry — Drop this anywhere in your Compose NavGraph
+//  PcControlEntry — drop anywhere in Compose NavGraph
 // ─────────────────────────────────────────────────────────────
 
 @Composable
@@ -107,17 +130,4 @@ fun PcControlEntry() {
     val factory = remember { PcControlViewModelFactory(context) }
     val viewModel: PcControlViewModel = viewModel(factory = factory)
     PcControlMainScreen(viewModel = viewModel)
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Settings Data Class
-// ─────────────────────────────────────────────────────────────
-
-data class PcControlSettings(
-    val pcIpAddress: String = "",
-    val port: Int = 5000,
-    val secretKey: String = "my_secret_123"
-) {
-    val baseUrl get() = "http://$pcIpAddress:$port"
-    val isConfigured get() = pcIpAddress.isNotEmpty()
 }

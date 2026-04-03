@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -28,19 +30,34 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
     val settings         by viewModel.settings.collectAsStateWithLifecycle()
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
 
-    var ipText    by remember(settings.pcIpAddress) { mutableStateOf(settings.pcIpAddress) }
-    var portText  by remember(settings.port)        { mutableStateOf(settings.port.toString()) }
-    var keyText   by remember(settings.secretKey)   { mutableStateOf(settings.secretKey) }
-    var saved     by remember { mutableStateOf(false) }
+    // Use LaunchedEffect to populate once on first load only — never reset on recomposition
+    var ipText     by remember { mutableStateOf(settings.pcIpAddress) }
+    var portText   by remember { mutableStateOf(settings.port.toString()) }
+    var keyText    by remember { mutableStateOf(
+        settings.secretKey.ifBlank { "Ritik@2002" }   // never start with empty key
+    ) }
+    var saved      by remember { mutableStateOf(false) }
+    var keyVisible by remember { mutableStateOf(false) }
+
+    // Only sync from settings on first composition, not on every recomposition
+    LaunchedEffect(Unit) {
+        if (ipText.isBlank())  ipText   = settings.pcIpAddress
+        if (keyText.isBlank()) keyText  = settings.secretKey.ifBlank { "Ritik@2002" }
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                ),
-                expandedHeight = 21.dp
+            PcTopBar(
+                title            = "Settings",
+                connectionStatus = connectionStatus,
+                onPing           = { viewModel.pingPc() },
+                actions = {
+                    PcConnectionChip(
+                        status  = connectionStatus,
+                        onClick = { viewModel.pingPc() }
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
             )
         }
     ) { padding ->
@@ -49,27 +66,27 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(15.dp),
-            verticalArrangement = Arrangement.spacedBy(15.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // ── STATUS CARD ──────────────────────────────────
+            // ── STATUS CARD ──────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
+                shape    = RoundedCornerShape(16.dp),
+                colors   = CardDefaults.cardColors(
                     containerColor = when (connectionStatus) {
-                        PcConnectionStatus.ONLINE   -> Color(0xFF4ADE80).copy(0.15f)
+                        PcConnectionStatus.ONLINE   -> Color(0xFF22C55E).copy(0.13f)
                         PcConnectionStatus.OFFLINE  -> MaterialTheme.colorScheme.errorContainer
-                        PcConnectionStatus.CHECKING -> Color(0xFFFBBF24).copy(0.15f)
+                        PcConnectionStatus.CHECKING -> Color(0xFFF59E0B).copy(0.13f)
                         PcConnectionStatus.UNKNOWN  -> MaterialTheme.colorScheme.surfaceVariant
                     }
                 )
             ) {
                 Row(
-                    modifier = Modifier.padding(16.dp),
+                    modifier              = Modifier.padding(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text(
                         when (connectionStatus) {
@@ -84,34 +101,40 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                             when (connectionStatus) {
                                 PcConnectionStatus.ONLINE   -> "Connected to PC"
                                 PcConnectionStatus.OFFLINE  -> "Cannot reach PC"
-                                PcConnectionStatus.CHECKING -> "Checking connection..."
+                                PcConnectionStatus.CHECKING -> "Checking connection…"
                                 PcConnectionStatus.UNKNOWN  -> "Not checked yet"
                             },
                             fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall
+                            style      = MaterialTheme.typography.titleSmall
                         )
-                        if (connectionStatus == PcConnectionStatus.OFFLINE) {
-                            Text(
-                                "Make sure:\n" +
-                                        "1. PC and phone are on same WiFi\n" +
-                                        "2. agent_v5.py is running on PC\n" +
-                                        "3. IP address below is correct",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
-                        if (settings.pcIpAddress.isBlank()) {
-                            Text(
-                                "⚠ No IP set — enter your PC's IP address below",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                                fontWeight = FontWeight.Medium
-                            )
+                        when (connectionStatus) {
+                            PcConnectionStatus.OFFLINE -> {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "• Check PC and phone are on same WiFi\n" +
+                                            "• Make sure agent_v5.py is running on PC\n" +
+                                            "• Verify IP address below is correct\n" +
+                                            "• Check Secret Key matches agent config",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                            PcConnectionStatus.UNKNOWN -> {
+                                if (settings.pcIpAddress.isBlank()) {
+                                    Text(
+                                        "⚠ No IP set — enter your PC's IP below",
+                                        style      = MaterialTheme.typography.bodySmall,
+                                        color      = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            else -> {}
                         }
                     }
                     Button(
-                        onClick = { viewModel.pingPc() },
-                        shape = RoundedCornerShape(10.dp),
+                        onClick        = { viewModel.pingPc() },
+                        shape          = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
@@ -121,77 +144,123 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                 }
             }
 
-            // ── HOW TO FIND IP ──────────────────────────────
+            // ── HOW TO FIND IP ───────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                )
+                shape    = RoundedCornerShape(12.dp),
+                colors   = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer)
             ) {
-                Column(modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier            = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Text("How to find your PC's IP",
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleSmall)
+                        style      = MaterialTheme.typography.titleSmall)
                     Text(
-                        "On your PC: Press Win+R → type cmd → press Enter\n" +
-                                "Then type:  ipconfig\n" +
-                                "Look for:   IPv4 Address (e.g. 192.168.1.5)\n\n" +
-                                "Make sure agent_v5.py is running on your PC first.",
-                        style = MaterialTheme.typography.bodySmall,
+                        "Win+R → type cmd → Enter → type ipconfig\n" +
+                                "Look for: IPv4 Address  e.g. 10.10.201.113\n\n" +
+                                "Make sure agent_v5.py is running on your PC.",
+                        style      = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace
                     )
                 }
             }
 
-            // ── CONNECTION FIELDS ────────────────────────────
-            Text("CONNECTION", style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            // ── CONNECTION FIELDS ────────────────────────
+            Text("CONNECTION",
+                style      = MaterialTheme.typography.labelMedium,
+                color      = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold)
 
+            // IP Address
             OutlinedTextField(
-                value = ipText,
+                value         = ipText,
                 onValueChange = { ipText = it; saved = false },
-                label = { Text("PC IP Address *") },
-                placeholder = { Text("e.g. 192.168.1.5") },
-                leadingIcon = { Icon(Icons.Default.Computer, null) },
-                isError = ipText.isBlank(),
+                label         = { Text("PC IP Address *") },
+                placeholder   = { Text("e.g. 10.10.201.113") },
+                leadingIcon   = { Icon(Icons.Default.Computer, null) },
+                isError       = ipText.isBlank(),
                 supportingText = {
                     if (ipText.isBlank())
-                        Text("Required — app cannot connect without this",
+                        Text("Required — get this from ipconfig on your PC",
                             color = MaterialTheme.colorScheme.error)
                     else
-                        Text("Enter the IPv4 address shown by ipconfig on your PC")
+                        Text("Current: ${settings.pcIpAddress.ifBlank { "not saved yet" }}")
                 },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                singleLine = true,
+                modifier        = Modifier.fillMaxWidth(),
+                shape           = RoundedCornerShape(14.dp),
+                singleLine      = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
 
+            // Port + Secret Key on same row
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
-                    value = portText,
+                    value         = portText,
                     onValueChange = { portText = it; saved = false },
-                    label = { Text("Port") },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp),
-                    singleLine = true,
+                    label         = { Text("Port") },
+                    modifier      = Modifier.weight(1f),
+                    shape         = RoundedCornerShape(14.dp),
+                    singleLine    = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    supportingText = { Text("Default: 5000") }
+                    supportingText  = { Text("Default: 5000") }
                 )
                 OutlinedTextField(
-                    value = keyText,
+                    value         = keyText,
                     onValueChange = { keyText = it; saved = false },
-                    label = { Text("Secret Key") },
-                    modifier = Modifier.weight(1.5f),
-                    shape = RoundedCornerShape(14.dp),
-                    singleLine = true,
+                    label         = { Text("Secret Key") },
+                    modifier      = Modifier.weight(1.6f),
+                    shape         = RoundedCornerShape(14.dp),
+                    singleLine    = true,
+                    visualTransformation = if (keyVisible)
+                        VisualTransformation.None
+                    else
+                        PasswordVisualTransformation(),
+                    trailingIcon  = {
+                        IconButton(onClick = { keyVisible = !keyVisible }) {
+                            Icon(
+                                if (keyVisible) Icons.Default.VisibilityOff
+                                else Icons.Default.Visibility,
+                                contentDescription = if (keyVisible) "Hide" else "Show"
+                            )
+                        }
+                    },
                     supportingText = { Text("Must match agent SECRET_KEY") }
                 )
             }
 
-            // ── SAVE BUTTON ──────────────────────────────────
+            // ── Quick-fill hint if key looks wrong ───────
+            if (keyText != "Ritik@2002" && keyText.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Row(
+                        modifier              = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment     = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Warning, null,
+                            tint     = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp))
+                        Text(
+                            "Agent uses \"Ritik@2002\" — tap to auto-fill",
+                            style  = MaterialTheme.typography.bodySmall,
+                            color  = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { keyText = "Ritik@2002"; saved = false }) {
+                            Text("Fix", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+
+            // ── SAVE BUTTON ──────────────────────────────
             Button(
                 onClick = {
                     val port = portText.toIntOrNull() ?: 5000
@@ -199,15 +268,19 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                     saved = true
                     viewModel.pingPc()
                 },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape   = RoundedCornerShape(14.dp),
                 enabled = ipText.isNotBlank()
             ) {
-                Icon(if (saved) Icons.Default.Check else Icons.Default.Save,
-                    null, Modifier.size(18.dp))
+                Icon(
+                    if (saved) Icons.Default.Check else Icons.Default.Save,
+                    null, Modifier.size(18.dp)
+                )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (saved) "Saved! Testing connection..." else "Save & Connect",
+                    if (saved) "Saved! Testing connection…" else "Save & Connect",
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -216,62 +289,98 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                 Text(
                     "✅ Settings saved. Check status card above.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF4ADE80)
+                    color = Color(0xFF22C55E)
                 )
             }
 
             HorizontalDivider()
 
-            // ── AGENT SETUP GUIDE ────────────────────────────
-            Text("AGENT SETUP ON PC", style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            // ── AGENT SETUP GUIDE ────────────────────────
+            Text("AGENT SETUP ON PC",
+                style      = MaterialTheme.typography.labelMedium,
+                color      = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold)
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+                shape    = RoundedCornerShape(12.dp)
             ) {
-                Column(modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-
+                Column(
+                    modifier            = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     listOf(
-                        "1" to "Install Python on PC (python.org)",
+                        "1" to "Install Python (python.org)",
                         "2" to "Open Command Prompt as Administrator",
-                        "3" to "Run: pip install flask pyautogui pynput psutil pywin32 pystray pillow",
+                        "3" to "pip install flask pyautogui pynput psutil pywin32 pystray pillow",
                         "4" to "Copy agent_v5.py to your PC",
-                        "5" to "Run: python agent_v5.py",
-                        "6" to "Agent will show your PC's IP address",
+                        "5" to "python agent_v5.py",
+                        "6" to "Agent shows IP in tray — click 'Show IP & Details'",
                         "7" to "Enter that IP above and tap Save & Connect"
                     ).forEach { (num, text) ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.Top) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment     = Alignment.Top
+                        ) {
                             Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape    = RoundedCornerShape(6.dp),
+                                color    = MaterialTheme.colorScheme.primaryContainer,
                                 modifier = Modifier.size(22.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
+                                Box(
+                                    modifier         = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(num, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
                             }
-                            Text(text, style = MaterialTheme.typography.bodySmall,
+                            Text(text,
+                                style    = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f))
                         }
                     }
 
                     HorizontalDivider()
 
+                    // Current connection summary
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Column(
+                            modifier            = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text("Current saved connection:",
+                                style      = MaterialTheme.typography.labelSmall,
+                                color      = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold)
+                            Text("IP  : ${settings.pcIpAddress.ifBlank { "not set" }}",
+                                style      = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace)
+                            Text("Port: ${settings.port}",
+                                style      = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace)
+                            Text("Key : ${settings.secretKey}",
+                                style      = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace)
+                        }
+                    }
+
+                    HorizontalDivider()
+
                     Text(
-                        "For auto-start at boot (run as Admin):\n" +
+                        "Auto-start at boot (run as Admin):\n" +
                                 "python agent_v5.py --install",
-                        style = MaterialTheme.typography.bodySmall,
+                        style      = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.primary
+                        color      = MaterialTheme.colorScheme.primary
                     )
                 }
             }
 
-            Spacer(Modifier.height(0.dp))
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

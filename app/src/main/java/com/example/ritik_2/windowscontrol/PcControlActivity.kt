@@ -1,7 +1,9 @@
 package com.example.ritik_2.windowscontrol
 
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -18,19 +20,42 @@ class PcControlActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Install crash handler
         PcControlCrashHandler.install(this)
 
-        // Allow both portrait and landscape
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        // Respect system auto-rotate setting
+        applyRotationPolicy()
 
-        // Start real-time refresh
         viewModel.startRealTimeRefresh(3000L)
 
         setContent {
             ITConnectTheme {
                 PcControlEntry()
             }
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyRotationPolicy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyRotationPolicy()
+    }
+
+    private fun applyRotationPolicy() {
+        val autoRotateOn = Settings.System.getInt(
+            contentResolver,
+            Settings.System.ACCELEROMETER_ROTATION,
+            0
+        ) == 1
+
+        requestedOrientation = if (autoRotateOn) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        } else {
+            // Lock to current orientation — don't override user preference
+            ActivityInfo.SCREEN_ORIENTATION_LOCKED
         }
     }
 
