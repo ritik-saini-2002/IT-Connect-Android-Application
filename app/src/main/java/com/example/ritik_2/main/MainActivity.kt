@@ -13,6 +13,7 @@ import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.auth.SessionStatus
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.login.LoginActivity
+import com.example.ritik_2.macnet.MACNetActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
@@ -66,7 +67,7 @@ class MainActivity : ComponentActivity() {
                 startActivity(Intent(this, AdministratorPanelActivity::class.java))
             }
             4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
-            5 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            5 -> startActivity(Intent(this, MACNetActivity::class.java))
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
             7 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             8 -> {

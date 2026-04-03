@@ -80,6 +80,8 @@
             android:exported="false" android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".winshare.ServerConnectActivity"
             android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".macnet.MACNetActivity"
+            android:exported="false" android:theme="@style/Theme.Ritik_2"/>
 
         <!-- ── Admin ──────────────────────────────────────── -->
         <activity android:name=".administrator.AdministratorPanelActivity"
@@ -92,6 +94,7 @@
             android:exported="false" android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".administrator.newusercreation.CreateUserActivity"
             android:exported="false" android:theme="@style/Theme.Ritik_2" />
+
 
         <!-- ── File Provider ──────────────────────────────── -->
         <provider
