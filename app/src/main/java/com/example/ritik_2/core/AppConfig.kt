@@ -28,7 +28,7 @@ object AppConfig {
      */
     fun avatarUrl(userId: String, filename: String?): String? {
         if (filename.isNullOrBlank()) return null
-        return "$BASE_URL/api/files/_pb_users_auth_/$userId/$filename"
+        return "$BASE_URL/api/files/users/$userId/$filename"
     }
 
     // ── Generic file URL ──────────────────────────────────────

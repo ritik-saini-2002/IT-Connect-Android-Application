@@ -8,14 +8,10 @@ import com.example.ritik_2.core.parseJsonMap
 import com.example.ritik_2.data.model.*
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.data.source.dto.*
-import io.github.agrevster.pocketbaseKotlin.dsl.login
-import io.github.agrevster.pocketbaseKotlin.dsl.logout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,12 +28,13 @@ internal const val COL_SEARCH_INDEX   = "user_search_index"
 
 @Singleton
 class PocketBaseDataSource @Inject constructor(
-    private val http      : OkHttpClient,
-    private val pbProvider: PocketBaseClientProvider
+    private val http: OkHttpClient
 ) : AppDataSource {
 
-    private val pb  get() = pbProvider.client
     private val tag = "PBDataSource"
+
+    // In-memory token store — replaces pb.authStore
+    private var authToken: String = ""
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -58,11 +55,12 @@ class PocketBaseDataSource @Inject constructor(
             val record = json.optJSONObject("record") ?: error("No user record")
             val uid    = record.optString("id").ifEmpty { error("No user ID") }
 
-            pb.login { this.token = token }
+            // Store token in memory
+            authToken = token
 
             val isActive = record.optBoolean("isActive", true)
             if (!isActive) {
-                pb.logout()
+                authToken = ""
                 error("Your account has been disabled. Contact your administrator.")
             }
 
@@ -84,13 +82,19 @@ class PocketBaseDataSource @Inject constructor(
         }
 
     override suspend fun logout() = withContext(Dispatchers.IO) {
-        try { pb.logout() } catch (_: Exception) {}
+        authToken = ""
     }
 
     override suspend fun sendPasswordReset(email: String): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
-                pb.records.requestPasswordReset(COL_USERS, email)
+                val body = JSONObject().apply { put("email", email) }
+                    .toString().toRequestBody("application/json".toMediaType())
+                val req = Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/request-password-reset")
+                    .post(body).build()
+                val res = http.newCall(req).execute()
+                res.close()
                 Result.success(Unit)
             } catch (e: Exception) { Result.failure(e) }
         }
@@ -133,7 +137,6 @@ class PocketBaseDataSource @Inject constructor(
             }
         }
 
-        // Parse validation errors for clear message
         val errorMsg = try {
             val json = JSONObject(resBody)
             val data = json.optJSONObject("data")
@@ -149,7 +152,7 @@ class PocketBaseDataSource @Inject constructor(
     }
 
     override suspend fun restoreSession(token: String) = withContext(Dispatchers.IO) {
-        pb.login { this.token = token }
+        authToken = token
     }
 
     // ── User Profile ──────────────────────────────────────────────────────────
@@ -157,24 +160,40 @@ class PocketBaseDataSource @Inject constructor(
     override suspend fun getUserProfile(userId: String): Result<UserProfile> =
         withContext(Dispatchers.IO) {
             try {
-                val user      = pb.records.getOne<UserRecord>(COL_USERS, userId)
-                val access    = fetchAccessControl(userId).getOrNull()
+                // Direct HTTP — no SDK
+                val req = Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
+                    .addHeader("Authorization", "Bearer ${getAuthToken()}")
+                    .get().build()
+                val res     = http.newCall(req).execute()
+                val resBody = res.body?.string() ?: ""
+                val code    = res.code
+                res.close()
 
-                // profile/workStats/issues stored as JSON objects — use parseJsonElement
-                val profile   = parseJsonElement(user.profile)
-                val workStats = parseJsonElement(user.workStats)
-                val issues    = parseJsonElement(user.issues)
+                if (code !in 200..299) {
+                    return@withContext Result.failure(
+                        Exception("getUserProfile HTTP $code: $resBody")
+                    )
+                }
+
+                val user   = JSONObject(resBody)
+                val access = fetchAccessControl(userId).getOrNull()
+
+                // profile / workStats / issues are stored as JSON strings or objects
+                val profile   = parseJsonFieldSafe(user, "profile")
+                val workStats = parseJsonFieldSafe(user, "workStats")
+                val issues    = parseJsonFieldSafe(user, "issues")
 
                 Result.success(UserProfile(
                     id                       = userId,
-                    name                     = user.name.ifBlank { access?.name ?: "" },
-                    email                    = user.email.ifBlank { access?.email ?: "" },
-                    role                     = if (access?.role.isNullOrBlank()) user.role else access!!.role,
-                    companyName              = user.companyName.ifBlank { access?.companyName ?: "" },
-                    sanitizedCompany         = user.sanitizedCompanyName,
-                    department               = user.department,
-                    sanitizedDept            = user.sanitizedDepartment,
-                    designation              = user.designation,
+                    name                     = user.optString("name").ifBlank { access?.name ?: "" },
+                    email                    = user.optString("email").ifBlank { access?.email ?: "" },
+                    role                     = if (access?.role.isNullOrBlank()) user.optString("role") else access!!.role,
+                    companyName              = user.optString("companyName").ifBlank { access?.companyName ?: "" },
+                    sanitizedCompany         = user.optString("sanitizedCompanyName"),
+                    department               = user.optString("department"),
+                    sanitizedDept            = user.optString("sanitizedDepartment"),
+                    designation              = user.optString("designation"),
                     imageUrl                 = profile["imageUrl"]    ?: "",
                     phoneNumber              = profile["phoneNumber"] ?: "",
                     address                  = profile["address"]     ?: "",
@@ -189,15 +208,16 @@ class PocketBaseDataSource @Inject constructor(
                     totalComplaints          = issues["totalComplaints"]?.toIntOrNull()      ?: 0,
                     resolvedComplaints       = issues["resolvedComplaints"]?.toIntOrNull()   ?: 0,
                     pendingComplaints        = issues["pendingComplaints"]?.toIntOrNull()    ?: 0,
-                    isActive                 = access?.isActive ?: user.isActive,
-                    documentPath             = user.documentPath.ifBlank { access?.documentPath ?: "" },
+                    isActive                 = access?.isActive ?: user.optBoolean("isActive", true),
+                    documentPath             = user.optString("documentPath").ifBlank { access?.documentPath ?: "" },
                     permissions              = parseJsonList(
-                        if (access?.permissions.isNullOrBlank()) user.permissions
+                        if (access?.permissions.isNullOrBlank()) user.optString("permissions", "[]")
                         else access!!.permissions),
                     emergencyContactName     = profile["emergencyContactName"]     ?: "",
                     emergencyContactPhone    = profile["emergencyContactPhone"]    ?: "",
                     emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
-                    needsProfileCompletion   = user.needsProfileCompletion || user.designation.isBlank()
+                    needsProfileCompletion   = user.optBoolean("needsProfileCompletion", true)
+                            || user.optString("designation").isBlank()
                 ))
             } catch (e: Exception) {
                 Log.e(tag, "getUserProfile failed: ${e.message}")
@@ -235,7 +255,8 @@ class PocketBaseDataSource @Inject constructor(
         token   : String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val resolvedToken = token.ifEmpty { getAuthToken() }
+            // Always use admin token for uploads to avoid 403
+            val resolvedToken = getAdminToken()
             val requestBody   = okhttp3.MultipartBody.Builder()
                 .setType(okhttp3.MultipartBody.FORM)
                 .addFormDataPart("avatar", filename,
@@ -283,10 +304,10 @@ class PocketBaseDataSource @Inject constructor(
                 val userId     = createUser(request.email, request.password, request.name, adminToken)
                 createdUserId  = userId
 
-                // Login after creation using the shared helper (handles v0.36 URL)
+                // Login after creation
                 val (loginCode, loginJson) = authWithPassword(request.email, request.password)
                 if (loginCode in 200..299) {
-                    pb.login { this.token = JSONObject(loginJson).optString("token") }
+                    authToken = JSONObject(loginJson).optString("token")
                 }
 
                 val imageUrl = if (request.imageBytes != null) {
@@ -519,7 +540,6 @@ class PocketBaseDataSource @Inject constructor(
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    // Tries both auth-with-password URL forms for PocketBase v0.36 compatibility
     private fun authWithPassword(email: String, password: String): Pair<Int, String> {
         val urlsToTry = listOf(
             "${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-password",
@@ -540,18 +560,22 @@ class PocketBaseDataSource @Inject constructor(
         return Pair(404, """{"message":"Missing or invalid auth collection context."}""")
     }
 
-    // Converts JsonElement (object or string) → Map<String, String>
-    private fun parseJsonElement(
-        element: kotlinx.serialization.json.JsonElement
-    ): Map<String, String> {
+    /**
+     * Safely parses a field that may be stored as a JSON object OR a JSON string.
+     * Returns a flat Map<String, String> either way.
+     */
+    private fun parseJsonFieldSafe(parent: JSONObject, key: String): Map<String, String> {
         return try {
-            when (element) {
-                is JsonObject -> element.entries.associate { (k, v) ->
-                    k to v.toString().trim('"')
-                }
-                is JsonPrimitive -> parseJsonMap(element.content)
-                else             -> emptyMap()
+            val raw = parent.opt(key) ?: return emptyMap()
+            val obj: JSONObject = when (raw) {
+                is JSONObject -> raw
+                is String     -> if (raw.isBlank()) return emptyMap()
+                else JSONObject(raw)
+                else          -> return emptyMap()
             }
+            val map = mutableMapOf<String, String>()
+            obj.keys().forEach { k -> map[k] = obj.opt(k)?.toString() ?: "" }
+            map
         } catch (_: Exception) { emptyMap() }
     }
 
@@ -613,8 +637,7 @@ class PocketBaseDataSource @Inject constructor(
         res.close()
     }
 
-    private fun getAuthToken(): String =
-        try { pb.authStore.token ?: "" } catch (_: Exception) { "" }
+    private fun getAuthToken(): String = authToken
 
     private fun deleteUserSilently(userId: String) {
         try {
