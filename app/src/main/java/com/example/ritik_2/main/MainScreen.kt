@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,168 +46,169 @@ fun MainScreen(
     onProfileClick           : () -> Unit,
     showCompleteProfileBanner: Boolean = false
 ) {
-    val userProfile   = uiState.userProfile
-    val isLoading     = uiState.isLoading
-    var sidebarOpen   by remember { mutableStateOf(false) }
-    var dragStartX    by remember { mutableFloatStateOf(0f) }
+    val userProfile = uiState.userProfile
+    val isLoading   = uiState.isLoading
 
-    // Close sidebar on back gesture
-    if (sidebarOpen) {
-        androidx.activity.compose.BackHandler { sidebarOpen = false }
+    // Drawer state — using official DrawerState so it works in gesture nav mode
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope       = rememberCoroutineScope()
+
+    // Track horizontal drag to open sidebar from ANY position on screen
+    var totalDragX by remember { mutableFloatStateOf(0f) }
+
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch { drawerState.close() }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            // Swipe right from left edge to open, swipe left to close
-            .pointerInput(sidebarOpen) {
-                detectHorizontalDragGestures(
-                    onDragStart = { offset -> dragStartX = offset.x },
-                    onDragEnd   = {},
-                    onHorizontalDrag = { _, dragAmount ->
-                        if (!sidebarOpen && dragStartX < 60f && dragAmount > 20f)
-                            sidebarOpen = true
-                        if (sidebarOpen && dragAmount < -20f)
-                            sidebarOpen = false
-                    }
+    ModalNavigationDrawer(
+        drawerState        = drawerState,
+        gesturesEnabled    = false,           // we handle swipe ourselves
+        scrimColor         = Color.Black.copy(alpha = 0.45f),
+        drawerContent      = {
+            ModalDrawerSheet(
+                drawerShape          = RectangleShape,
+                drawerContainerColor = MaterialTheme.colorScheme.surface,
+                windowInsets         = WindowInsets(0)
+            ) {
+                AppSidebar(
+                    profile        = userProfile,
+                    onProfileClick = { scope.launch { drawerState.close() }; onProfileClick() },
+                    onCardClick    = { id -> scope.launch { drawerState.close() }; onCardClick(id) },
+                    onLogout       = { scope.launch { drawerState.close() }; onLogout() },
+                    onClose        = { scope.launch { drawerState.close() } }
                 )
             }
+        }
     ) {
-        // ── Main content ──────────────────────────────────────────────────────
-        Scaffold { paddingValues ->
-            Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+        // Main content with custom swipe detector (whole screen)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(drawerState.isClosed) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDragX = 0f },
+                        onDragEnd   = {
+                            if (totalDragX > 80f && drawerState.isClosed)
+                                scope.launch { drawerState.open() }
+                            else if (totalDragX < -80f && drawerState.isOpen)
+                                scope.launch { drawerState.close() }
+                            totalDragX = 0f
+                        },
+                        onHorizontalDrag = { _, dragAmount -> totalDragX += dragAmount }
+                    )
+                }
+        ) {
+            Scaffold { paddingValues ->
+                Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
 
-                AnimatedVisibility(visible = isLoading && userProfile == null,
-                    enter = fadeIn(), exit = fadeOut()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(
-                                modifier    = Modifier.size(56.dp),
-                                color       = MaterialTheme.colorScheme.primary,
-                                strokeWidth = 4.dp)
-                            Spacer(Modifier.height(16.dp))
-                            Text("Loading your profile...",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium)
+                    AnimatedVisibility(
+                        visible = isLoading && userProfile == null,
+                        enter   = fadeIn(), exit = fadeOut()
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(
+                                    modifier    = Modifier.size(56.dp),
+                                    color       = MaterialTheme.colorScheme.primary,
+                                    strokeWidth = 4.dp)
+                                Spacer(Modifier.height(16.dp))
+                                Text("Loading your profile...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
-                }
 
-                AnimatedVisibility(
-                    visible = userProfile != null || !isLoading,
-                    enter   = fadeIn(spring()) + slideInVertically(spring()) { it / 10 },
-                    exit    = fadeOut(spring())
-                ) {
-                    val features = listOf(
-                        FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
-                        FeatureItem(2, "Manage Complaints",  Icons.Outlined.List,               Color(0xFF8E24AA)),
-                        FeatureItem(3, "Admin Panel",        Icons.Outlined.AdminPanelSettings,  Color(0xFFFF6F00)),
-                        FeatureItem(4, "Server Connect",     Icons.Outlined.Code,               Color(0xFF6200EA)),
-                        FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,           Color(0xFF00796B)),
-                        FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,           Color(0xFFC51162)),
-                        FeatureItem(7, "Settings",           Icons.Outlined.Settings,           MaterialTheme.colorScheme.tertiary),
-                        FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary)
-                    )
-
-                    LazyVerticalGrid(
-                        columns               = GridCells.Fixed(2),
-                        contentPadding        = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
-                        verticalArrangement   = Arrangement.spacedBy(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier              = Modifier.fillMaxSize()
+                    AnimatedVisibility(
+                        visible = userProfile != null || !isLoading,
+                        enter   = fadeIn(spring()) + slideInVertically(spring()) { it / 10 },
+                        exit    = fadeOut(spring())
                     ) {
-                        if (showCompleteProfileBanner) {
-                            item(span = { GridItemSpan(2) }) {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    shape    = RoundedCornerShape(14.dp),
-                                    colors   = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer)
-                                ) {
-                                    Row(
-                                        Modifier.fillMaxWidth().clickable { onProfileClick() }.padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                        val features = listOf(
+                            FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
+                            FeatureItem(2, "Manage Complaints",  Icons.Outlined.List,               Color(0xFF8E24AA)),
+                            FeatureItem(3, "Admin Panel",        Icons.Outlined.AdminPanelSettings,  Color(0xFFFF6F00)),
+                            FeatureItem(4, "Server Connect",     Icons.Outlined.Code,               Color(0xFF6200EA)),
+                            FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,           Color(0xFF00796B)),
+                            FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,           Color(0xFFC51162)),
+                            FeatureItem(7, "Settings",           Icons.Outlined.Settings,           MaterialTheme.colorScheme.tertiary),
+                            FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary)
+                        )
+
+                        LazyVerticalGrid(
+                            columns               = GridCells.Fixed(2),
+                            contentPadding        = PaddingValues(
+                                start = 16.dp, end = 16.dp, bottom = 32.dp),
+                            verticalArrangement   = Arrangement.spacedBy(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier              = Modifier.fillMaxSize()
+                        ) {
+                            if (showCompleteProfileBanner) {
+                                item(span = { GridItemSpan(2) }) {
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                        shape    = RoundedCornerShape(14.dp),
+                                        colors   = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer)
                                     ) {
-                                        Icon(Icons.Default.Warning, null,
-                                            tint     = MaterialTheme.colorScheme.onErrorContainer,
-                                            modifier = Modifier.size(22.dp))
-                                        Spacer(Modifier.width(10.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Profile Incomplete",
-                                                fontWeight = FontWeight.SemiBold,
-                                                color      = MaterialTheme.colorScheme.onErrorContainer)
-                                            Text("Tap to complete your profile",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onErrorContainer.copy(0.8f))
+                                        Row(
+                                            Modifier.fillMaxWidth()
+                                                .clickable { onProfileClick() }
+                                                .padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.Warning, null,
+                                                tint     = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.size(22.dp))
+                                            Spacer(Modifier.width(10.dp))
+                                            Column(Modifier.weight(1f)) {
+                                                Text("Profile Incomplete",
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer)
+                                                Text("Tap to complete your profile",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(0.8f))
+                                            }
+                                            Icon(Icons.Default.ChevronRight, null,
+                                                tint = MaterialTheme.colorScheme.onErrorContainer)
                                         }
-                                        Icon(Icons.Default.ChevronRight, null,
-                                            tint = MaterialTheme.colorScheme.onErrorContainer)
                                     }
                                 }
                             }
-                        }
 
-                        item(span = { GridItemSpan(2) }) {
-                            Spacer(Modifier.height(8.dp))
-                            UserProfileCard(
-                                profile        = userProfile,
-                                onProfileClick = onProfileClick,
-                                onLogout       = onLogout
-                            )
-                        }
+                            item(span = { GridItemSpan(2) }) {
+                                Spacer(Modifier.height(8.dp))
+                                UserProfileCard(
+                                    profile        = userProfile,
+                                    onProfileClick = onProfileClick,
+                                    onLogout       = onLogout
+                                )
+                            }
 
-                        item(span = { GridItemSpan(2) }) {
-                            Text("Dashboard",
-                                style      = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
-                                modifier   = Modifier.padding(vertical = 4.dp))
-                        }
+                            item(span = { GridItemSpan(2) }) {
+                                Text("Dashboard",
+                                    style      = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier   = Modifier.padding(vertical = 4.dp))
+                            }
 
-                        items(features) { feature ->
-                            FeatureCard(
-                                title   = feature.title,
-                                icon    = feature.icon,
-                                color   = feature.color,
-                                onClick = { onCardClick(feature.id) }
-                            )
-                        }
+                            items(features) { feature ->
+                                FeatureCard(
+                                    title   = feature.title,
+                                    icon    = feature.icon,
+                                    color   = feature.color,
+                                    onClick = { onCardClick(feature.id) }
+                                )
+                            }
 
-                        item(span = { GridItemSpan(2) }) {
-                            Spacer(Modifier.height(8.dp))
-                            CopyrightSection(developerName = "Ritik Saini")
+                            item(span = { GridItemSpan(2) }) {
+                                Spacer(Modifier.height(8.dp))
+                                CopyrightSection(developerName = "Ritik Saini")
+                            }
                         }
                     }
                 }
             }
-        }
-
-        // ── Dim overlay when sidebar open ─────────────────────────────────────
-        AnimatedVisibility(
-            visible = sidebarOpen,
-            enter   = fadeIn(tween(200)),
-            exit    = fadeOut(tween(200))
-        ) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .clickable { sidebarOpen = false }
-            )
-        }
-
-        // ── Sidebar drawer ────────────────────────────────────────────────────
-        AnimatedVisibility(
-            visible = sidebarOpen,
-            enter   = slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it },
-            exit    = slideOutHorizontally(tween(220, easing = FastOutLinearInEasing)) { -it }
-        ) {
-            AppSidebar(
-                profile      = userProfile,
-                onProfileClick = { sidebarOpen = false; onProfileClick() },
-                onCardClick  = { id -> sidebarOpen = false; onCardClick(id) },
-                onLogout     = { sidebarOpen = false; onLogout() },
-                onClose      = { sidebarOpen = false }
-            )
         }
     }
 }
@@ -401,11 +404,11 @@ fun FeatureCard(title: String, icon: ImageVector, color: Color, onClick: () -> U
 
 @Composable
 fun AppSidebar(
-    profile      : UserProfileData?,
-    onProfileClick: () -> Unit,
-    onCardClick  : (Int) -> Unit,
-    onLogout     : () -> Unit,
-    onClose      : () -> Unit
+    profile        : UserProfileData?,
+    onProfileClick : () -> Unit,
+    onCardClick    : (Int) -> Unit,
+    onLogout       : () -> Unit,
+    onClose        : () -> Unit
 ) {
     val sidebarItems = listOf(
         FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
@@ -418,128 +421,123 @@ fun AppSidebar(
         FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       Color(0xFF1976D2))
     )
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxHeight()
             .width(300.dp)
             .background(MaterialTheme.colorScheme.surface)
-            .shadow(16.dp)
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-
-            // ── Header with avatar + user info ────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-                        ))
-                    )
-                    .clickable { onProfileClick() }
-                    .padding(top = 52.dp, bottom = 20.dp, start = 20.dp, end = 20.dp)
-            ) {
-                Column {
-                    // Avatar
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.25f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!profile?.imageUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(profile!!.imageUrl).crossfade(true).build(),
-                                contentDescription = "Avatar",
-                                modifier     = Modifier.fillMaxSize().clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            val initials = (profile?.name ?: "")
-                                .split(" ").take(2)
-                                .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
-                                .joinToString("")
-                            if (initials.isNotBlank())
-                                Text(initials,
-                                    style      = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color      = Color.White)
-                            else
-                                Icon(Icons.Default.Person, null,
-                                    modifier = Modifier.size(34.dp),
-                                    tint     = Color.White)
-                        }
+        // ── Header ────────────────────────────────────────────────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(listOf(
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                    ))
+                )
+                .clickable { onProfileClick() }
+                .padding(top = 52.dp, bottom = 20.dp, start = 20.dp, end = 20.dp)
+        ) {
+            Column {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.25f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (!profile?.imageUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(profile!!.imageUrl).crossfade(true).build(),
+                            contentDescription = "Avatar",
+                            modifier     = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        val initials = (profile?.name ?: "")
+                            .split(" ").take(2)
+                            .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
+                            .joinToString("")
+                        if (initials.isNotBlank())
+                            Text(initials,
+                                style      = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color      = Color.White)
+                        else
+                            Icon(Icons.Default.Person, null,
+                                modifier = Modifier.size(34.dp),
+                                tint     = Color.White)
                     }
+                }
 
-                    Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
 
+                Text(
+                    text       = profile?.name ?: "Loading...",
+                    style      = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color      = Color.White,
+                    maxLines   = 1
+                )
+                if (!profile?.designation.isNullOrBlank()) {
                     Text(
-                        text       = profile?.name ?: "Loading...",
-                        style      = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color      = Color.White,
-                        maxLines   = 1
+                        text     = profile!!.designation,
+                        style    = MaterialTheme.typography.bodySmall,
+                        color    = Color.White.copy(alpha = 0.85f),
+                        maxLines = 1
                     )
-                    if (!profile?.designation.isNullOrBlank()) {
+                }
+                if (!profile?.role.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Surface(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
                         Text(
-                            text  = profile!!.designation,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.85f),
-                            maxLines = 1
+                            text       = profile!!.role,
+                            modifier   = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            style      = MaterialTheme.typography.labelSmall,
+                            color      = Color.White,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
-                    if (!profile?.role.isNullOrBlank()) {
-                        Spacer(Modifier.height(6.dp))
-                        Surface(
-                            color = Color.White.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(20.dp)
-                        ) {
-                            Text(
-                                text     = profile!!.role,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                                style    = MaterialTheme.typography.labelSmall,
-                                color    = Color.White,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
                 }
             }
-
-            // ── Nav items ─────────────────────────────────────────────────────
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(androidx.compose.foundation.rememberScrollState())
-                    .padding(vertical = 8.dp)
-            ) {
-                sidebarItems.forEach { item ->
-                    SidebarNavItem(
-                        icon    = item.icon,
-                        label   = item.title,
-                        color   = item.color,
-                        onClick = { onCardClick(item.id) }
-                    )
-                }
-            }
-
-            // ── Divider + Logout at bottom ────────────────────────────────────
-            HorizontalDivider(
-                color    = MaterialTheme.colorScheme.outlineVariant,
-                modifier = Modifier.padding(horizontal = 16.dp)
-            )
-            Spacer(Modifier.height(4.dp))
-            SidebarNavItem(
-                icon    = Icons.Default.Logout,
-                label   = "Logout",
-                color   = MaterialTheme.colorScheme.error,
-                onClick = onLogout
-            )
-            Spacer(Modifier.height(16.dp))
         }
+
+        // ── Nav items (scrollable) ────────────────────────────────────────────
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 8.dp)
+        ) {
+            sidebarItems.forEach { item ->
+                SidebarNavItem(
+                    icon    = item.icon,
+                    label   = item.title,
+                    color   = item.color,
+                    onClick = { onCardClick(item.id) }
+                )
+            }
+        }
+
+        // ── Logout at bottom ──────────────────────────────────────────────────
+        HorizontalDivider(
+            color    = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        Spacer(Modifier.height(4.dp))
+        SidebarNavItem(
+            icon    = Icons.Default.Logout,
+            label   = "Logout",
+            color   = MaterialTheme.colorScheme.error,
+            onClick = onLogout
+        )
+        Spacer(Modifier.height(16.dp))
     }
 }
 

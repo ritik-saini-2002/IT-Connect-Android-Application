@@ -33,68 +33,137 @@ object PocketBaseInitializer {
         }
         Log.d(TAG, "✅ Admin token obtained")
 
-        // Step 1: Add fields to users auth collection
-        patchUsersCollection(token)
+        // Step 1: users fields must be added MANUALLY in PocketBase UI
+        // (v0.36 does not expose the built-in users auth collection via REST API)
+        Log.d(TAG, "ℹ️ users fields must be added manually in PocketBase UI")
 
-        // Step 2: Create/patch base collections
+        // Step 2: Create base collections
         ensureBaseCollection(token, "companies_metadata",  companiesFields())
         ensureBaseCollection(token, "user_access_control", accessControlFields())
         ensureBaseCollection(token, "user_search_index",   searchIndexFields())
 
-        // Step 3: Open API rules on everything
-        listOf("users", "companies_metadata", "user_access_control", "user_search_index")
+        // Step 3: Open API rules
+        listOf("companies_metadata", "user_access_control", "user_search_index")
             .forEach { openRules(token, it) }
+
+        // Step 4: users rules must be opened MANUALLY in PocketBase UI
+        Log.d(TAG, "ℹ️ Open users API rules manually in PocketBase UI")
 
         Log.d(TAG, "✅ Init complete")
         Log.d(TAG, "========================================")
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // PocketBase v0.36 uses "fields" array (not "schema") for base collections
-    // and still uses "schema" for auth collections.
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── In PB v0.36, list ALL collections and find the auth one named "users" ──
+    // Then use its ID (not name) for all subsequent requests
 
-    private fun patchUsersCollection(token: String) {
+    private fun findUsersCollectionId(token: String): String? {
+        return try {
+            val res  = http.newCall(req("GET",
+                "${AppConfig.BASE_URL}/api/collections?perPage=200", token)).execute()
+            val body = res.body?.string() ?: ""; res.close()
+            if (!res.isSuccessful) {
+                Log.e(TAG, "❌ List collections failed: ${res.code} $body"); return null
+            }
+
+            val json  = JSONObject(body)
+            // PB v0.36 returns { "items": [...] } OR just an array
+            val items = when {
+                json.has("items") -> json.optJSONArray("items")
+                else              -> JSONArray(body)
+            } ?: return null
+
+            for (i in 0 until items.length()) {
+                val col  = items.getJSONObject(i)
+                val name = col.optString("name")
+                val type = col.optString("type")
+                // Match "users" auth collection (type = "auth")
+                if ((name == "users" || name == "_pb_users_auth_") && type == "auth") {
+                    val id = col.optString("id")
+                    Log.d(TAG, "✅ Found users collection: name=$name id=$id")
+                    return id
+                }
+            }
+
+            // Fallback: return first auth collection found
+            for (i in 0 until items.length()) {
+                val col  = items.getJSONObject(i)
+                if (col.optString("type") == "auth") {
+                    val id   = col.optString("id")
+                    val name = col.optString("name")
+                    Log.d(TAG, "✅ Using auth collection: name=$name id=$id")
+                    return id
+                }
+            }
+
+            Log.e(TAG, "❌ No auth collection found in list")
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ findUsersCollectionId: ${e.message}"); null
+        }
+    }
+
+    private fun patchUsersCollectionV036(token: String) {
         try {
-            // GET current users collection
+            val collId = findUsersCollectionId(token) ?: run {
+                Log.e(TAG, "❌ Cannot patch users — collection not found"); return
+            }
+
+            // GET current schema using collection ID
             val getRes  = http.newCall(req("GET",
-                "${AppConfig.BASE_URL}/api/collections/users", token)).execute()
+                "${AppConfig.BASE_URL}/api/collections/$collId", token)).execute()
             val getBody = getRes.body?.string() ?: ""; getRes.close()
 
             if (!getRes.isSuccessful) {
-                Log.e(TAG, "❌ Cannot fetch users: ${getRes.code} $getBody"); return
+                Log.e(TAG, "❌ Cannot fetch users by ID: ${getRes.code} $getBody"); return
             }
 
-            val col         = JSONObject(getBody)
+            val col        = JSONObject(getBody)
             // v0.36 auth collections use "schema" key
-            val existing    = col.optJSONArray("schema") ?: JSONArray()
-            val existNames  = (0 until existing.length())
+            val existing   = col.optJSONArray("schema") ?: JSONArray()
+            val existNames = (0 until existing.length())
                 .map { existing.getJSONObject(it).optString("name") }.toSet()
 
-            val toAdd = usersExtraFields().filter {
-                it.optString("name") !in existNames
+            Log.d(TAG, "Users existing fields: $existNames")
+
+            val toAdd = usersExtraFields().filter { it.optString("name") !in existNames }
+            if (toAdd.isEmpty()) {
+                Log.d(TAG, "✅ users fields already complete"); return
             }
-            if (toAdd.isEmpty()) { Log.d(TAG, "✅ users fields OK"); return }
 
             val merged = JSONArray()
             for (i in 0 until existing.length()) merged.put(existing.getJSONObject(i))
             toAdd.forEach { merged.put(it) }
 
+            // PATCH using collection ID
             val patchRes = http.newCall(req("PATCH",
-                "${AppConfig.BASE_URL}/api/collections/users", token,
+                "${AppConfig.BASE_URL}/api/collections/$collId", token,
                 JSONObject().put("schema", merged).toString())).execute()
+            val patchBody = patchRes.body?.string() ?: ""
             Log.d(TAG, if (patchRes.isSuccessful)
-                "✅ users patched — added ${toAdd.size} fields"
-            else "❌ users patch failed: ${patchRes.code} ${patchRes.body?.string()}")
+                "✅ users patched — added ${toAdd.size} fields: ${toAdd.map { it.optString("name") }}"
+            else
+                "❌ users patch failed: ${patchRes.code} $patchBody")
             patchRes.close()
         } catch (e: Exception) {
-            Log.e(TAG, "❌ patchUsersCollection: ${e.message}", e)
+            Log.e(TAG, "❌ patchUsersCollectionV036: ${e.message}", e)
+        }
+    }
+
+    private fun openUsersRulesV036(token: String) {
+        try {
+            val collId = findUsersCollectionId(token) ?: return
+            val body   = """{"listRule":null,"viewRule":null,"createRule":null,"updateRule":null,"deleteRule":null}"""
+            val res    = http.newCall(req("PATCH",
+                "${AppConfig.BASE_URL}/api/collections/$collId", token, body)).execute()
+            Log.d(TAG, "Rules users (by ID) → ${res.code}")
+            res.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "openUsersRulesV036: ${e.message}")
         }
     }
 
     private fun ensureBaseCollection(token: String, name: String, fields: List<JSONObject>) {
         try {
-            // Check if collection exists
             val checkRes  = http.newCall(req("GET",
                 "${AppConfig.BASE_URL}/api/collections/$name", token)).execute()
             val checkBody = checkRes.body?.string() ?: ""
@@ -102,10 +171,9 @@ object PocketBaseInitializer {
             checkRes.close()
 
             if (exists) {
-                Log.d(TAG, "Collection '$name' exists — patching fields...")
+                Log.d(TAG, "Collection '$name' exists — checking fields...")
                 patchBaseCollectionFields(token, name, fields, checkBody)
             } else {
-                Log.d(TAG, "Creating collection '$name'...")
                 createBaseCollection(token, name, fields)
             }
         } catch (e: Exception) {
@@ -114,12 +182,11 @@ object PocketBaseInitializer {
     }
 
     private fun createBaseCollection(token: String, name: String, fields: List<JSONObject>) {
-        // v0.36 base collections: use "fields" key
         val fieldsArr = JSONArray().also { arr -> fields.forEach { arr.put(it) } }
         val body = JSONObject().apply {
             put("name",       name)
             put("type",       "base")
-            put("fields",     fieldsArr)   // v0.36 uses "fields"
+            put("fields",     fieldsArr)
             put("listRule",   JSONObject.NULL)
             put("viewRule",   JSONObject.NULL)
             put("createRule", JSONObject.NULL)
@@ -127,12 +194,11 @@ object PocketBaseInitializer {
             put("deleteRule", JSONObject.NULL)
         }.toString()
 
-        val res     = http.newCall(req("POST",
+        val res  = http.newCall(req("POST",
             "${AppConfig.BASE_URL}/api/collections", token, body)).execute()
-        val resBody = res.body?.string() ?: ""
-        Log.d(TAG, if (res.isSuccessful)
-            "✅ '$name' created"
-        else "❌ '$name' create failed: ${res.code} $resBody")
+        val body2 = res.body?.string() ?: ""
+        Log.d(TAG, if (res.isSuccessful) "✅ '$name' created"
+        else "❌ '$name' create failed: ${res.code} $body2")
         res.close()
     }
 
@@ -141,11 +207,9 @@ object PocketBaseInitializer {
         newFields: List<JSONObject>, existingJson: String
     ) {
         try {
-            val col = JSONObject(existingJson)
-            // v0.36 base collections return "fields" key
+            val col        = JSONObject(existingJson)
             val existing   = col.optJSONArray("fields")
-                ?: col.optJSONArray("schema")   // fallback
-                ?: JSONArray()
+                ?: col.optJSONArray("schema") ?: JSONArray()
             val existNames = (0 until existing.length())
                 .map { existing.getJSONObject(it).optString("name") }.toSet()
 
@@ -156,27 +220,19 @@ object PocketBaseInitializer {
             for (i in 0 until existing.length()) merged.put(existing.getJSONObject(i))
             toAdd.forEach { merged.put(it) }
 
-            // Try "fields" key first (v0.36), fallback to "schema"
-            val patchBody = JSONObject().put("fields", merged).toString()
-            val res       = http.newCall(req("PATCH",
-                "${AppConfig.BASE_URL}/api/collections/$name", token, patchBody)).execute()
-            val resBody   = res.body?.string() ?: ""
-
-            if (res.isSuccessful) {
-                Log.d(TAG, "✅ '$name' patched — added ${toAdd.size} fields")
-            } else {
-                // Retry with "schema" key for older PB versions
-                res.close()
-                val res2 = http.newCall(req("PATCH",
+            // Try "fields" first (v0.36+), then "schema" (older)
+            for (key in listOf("fields", "schema")) {
+                val res = http.newCall(req("PATCH",
                     "${AppConfig.BASE_URL}/api/collections/$name", token,
-                    JSONObject().put("schema", merged).toString())).execute()
-                Log.d(TAG, if (res2.isSuccessful)
-                    "✅ '$name' patched (schema key) — added ${toAdd.size} fields"
-                else "❌ '$name' patch failed: ${res2.code} ${res2.body?.string()}")
-                res2.close()
-                return
+                    JSONObject().put(key, merged).toString())).execute()
+                val ok  = res.isSuccessful
+                res.close()
+                if (ok) {
+                    Log.d(TAG, "✅ '$name' patched ($key) — added ${toAdd.size} fields")
+                    return
+                }
             }
-            res.close()
+            Log.e(TAG, "❌ '$name' patch failed with both 'fields' and 'schema' keys")
         } catch (e: Exception) {
             Log.e(TAG, "❌ patchBaseCollectionFields '$name': ${e.message}", e)
         }
@@ -194,9 +250,7 @@ object PocketBaseInitializer {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Admin auth
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Admin auth ────────────────────────────────────────────────────────────
 
     private fun getAdminToken(): String? {
         listOf(
@@ -218,20 +272,16 @@ object PocketBaseInitializer {
                 }
             } catch (e: Exception) { Log.w(TAG, "Auth failed $url: ${e.message}") }
         }
-        Log.e(TAG, "EMAIL=${AppConfig.ADMIN_EMAIL} BASE=${AppConfig.BASE_URL}")
         return null
     }
 
     private fun isServerReachable(): Boolean {
         return try {
-            val res = http.newCall(req("GET", "${AppConfig.BASE_URL}/api/health", "")).execute()
-            val ok  = res.isSuccessful; res.close(); ok
+            val res = http.newCall(req("GET",
+                "${AppConfig.BASE_URL}/api/health", "")).execute()
+            val ok = res.isSuccessful; res.close(); ok
         } catch (_: Exception) { false }
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // HTTP helper
-    // ─────────────────────────────────────────────────────────────────────────
 
     private fun req(method: String, url: String, token: String, body: String? = null): Request {
         val builder = Request.Builder().url(url)
@@ -244,30 +294,25 @@ object PocketBaseInitializer {
         return builder.build()
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Schema definitions
-    // v0.36 field format: {"name":"x","type":"text","required":false}
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Schema definitions ────────────────────────────────────────────────────
 
-    // For users (auth collection) — uses "schema" key
     private fun usersExtraFields(): List<JSONObject> = listOf(
-        f("userId",               "text"),
-        f("role",                 "text"),
-        f("companyName",          "text"),
-        f("sanitizedCompanyName", "text"),
-        f("department",           "text"),
-        f("sanitizedDepartment",  "text"),
-        f("designation",          "text"),
-        f("isActive",             "bool"),
-        f("documentPath",         "text"),
-        f("permissions",          "json"),
-        f("profile",              "json"),
-        f("workStats",            "json"),
-        f("issues",               "json"),
+        f("userId",                 "text"),
+        f("role",                   "text"),
+        f("companyName",            "text"),
+        f("sanitizedCompanyName",   "text"),
+        f("department",             "text"),
+        f("sanitizedDepartment",    "text"),
+        f("designation",            "text"),
+        f("isActive",               "bool"),
+        f("documentPath",           "text"),
+        f("permissions",            "json"),
+        f("profile",                "json"),
+        f("workStats",              "json"),
+        f("issues",                 "json"),
         f("needsProfileCompletion", "bool")
     )
 
-    // For base collections — uses "fields" key in v0.36
     private fun companiesFields(): List<JSONObject> = listOf(
         f("originalName",   "text", required = true),
         f("sanitizedName",  "text", required = true),
@@ -278,18 +323,18 @@ object PocketBaseInitializer {
     )
 
     private fun accessControlFields(): List<JSONObject> = listOf(
-        f("userId",               "text", required = true),
-        f("name",                 "text"),
-        f("email",                "email"),
-        f("companyName",          "text"),
-        f("sanitizedCompanyName", "text"),
-        f("department",           "text"),
-        f("sanitizedDepartment",  "text"),
-        f("role",                 "text"),
-        f("designation",          "text"),
-        f("permissions",          "json"),
-        f("isActive",             "bool"),
-        f("documentPath",         "text"),
+        f("userId",                 "text", required = true),
+        f("name",                   "text"),
+        f("email",                  "email"),
+        f("companyName",            "text"),
+        f("sanitizedCompanyName",   "text"),
+        f("department",             "text"),
+        f("sanitizedDepartment",    "text"),
+        f("role",                   "text"),
+        f("designation",            "text"),
+        f("permissions",            "json"),
+        f("isActive",               "bool"),
+        f("documentPath",           "text"),
         f("needsProfileCompletion", "bool")
     )
 
@@ -309,8 +354,6 @@ object PocketBaseInitializer {
     )
 
     private fun f(name: String, type: String, required: Boolean = false) = JSONObject().apply {
-        put("name",     name)
-        put("type",     type)
-        put("required", required)
+        put("name", name); put("type", type); put("required", required)
     }
 }

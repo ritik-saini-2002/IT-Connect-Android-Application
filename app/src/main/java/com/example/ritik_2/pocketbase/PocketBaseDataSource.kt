@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -41,43 +43,43 @@ class PocketBaseDataSource @Inject constructor(
 
     override suspend fun login(email: String, password: String): AuthSession =
         withContext(Dispatchers.IO) {
-            val response = pb.records.authWithPassword<UserRecord>(COL_USERS, email, password)
-            val token    = response.token ?: error("No token received")
-            val uid      = response.record?.id ?: error("No user ID received")
+            val (code, resBody) = authWithPassword(email, password)
+            Log.d(tag, "login HTTP $code")
+
+            if (code !in 200..299) {
+                val msg = try {
+                    JSONObject(resBody).optString("message", "Login failed")
+                } catch (_: Exception) { "Login failed: HTTP $code" }
+                error(msg)
+            }
+
+            val json   = JSONObject(resBody)
+            val token  = json.optString("token").ifEmpty { error("No token received") }
+            val record = json.optJSONObject("record") ?: error("No user record")
+            val uid    = record.optString("id").ifEmpty { error("No user ID") }
+
             pb.login { this.token = token }
 
-            // ── Check isActive from user record directly ──────────────────────
-            // This is the DISABLED check. We read it from the users record
-            // which is always populated (it's a bool field with default true).
-            val userRecord = response.record
-            val isActive   = userRecord?.isActive ?: true
-
+            val isActive = record.optBoolean("isActive", true)
             if (!isActive) {
-                // Account disabled by administrator — reject immediately
                 pb.logout()
                 error("Your account has been disabled. Contact your administrator.")
             }
 
-            // ── Try to get role from access_control ───────────────────────────
-            // If access_control record doesn't exist yet (new registration where
-            // the background write hasn't finished), fall back to the users record.
             val access = fetchAccessControl(uid).getOrNull()
             val role   = when {
-                !access?.role.isNullOrBlank() -> access!!.role
-                !userRecord?.role.isNullOrBlank() -> userRecord!!.role
-                else -> ""   // brand-new user, profile not set up yet — still allow login
+                !access?.role.isNullOrBlank()         -> access!!.role
+                record.optString("role").isNotBlank() -> record.optString("role")
+                else                                  -> ""
             }
 
-            // ── Build session ─────────────────────────────────────────────────
-            // We no longer reject on empty role. SplashActivity will route the
-            // user to ProfileCompletionActivity if needsProfileCompletion = true.
             AuthSession(
                 userId       = uid,
                 token        = token,
                 email        = email,
-                name         = access?.name         ?: userRecord?.name         ?: "",
+                name         = access?.name         ?: record.optString("name"),
                 role         = role,
-                documentPath = access?.documentPath ?: userRecord?.documentPath ?: ""
+                documentPath = access?.documentPath ?: record.optString("documentPath")
             )
         }
 
@@ -100,7 +102,8 @@ class PocketBaseDataSource @Inject constructor(
         adminToken: String
     ): String = withContext(Dispatchers.IO) {
         val token = adminToken.ifEmpty { getAdminToken() }
-        val body  = JSONObject().apply {
+
+        val body = JSONObject().apply {
             put("email",           email)
             put("password",        password)
             put("passwordConfirm", password)
@@ -108,18 +111,41 @@ class PocketBaseDataSource @Inject constructor(
             put("emailVisibility", true)
         }.toString().toRequestBody("application/json".toMediaType())
 
+        val url = "${AppConfig.BASE_URL}/api/collections/$COL_USERS/records"
         val req = Request.Builder()
-            .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records")
+            .url(url)
             .addHeader("Authorization", "Bearer $token")
-            .post(body).build()
+            .post(body)
+            .build()
 
         val res     = http.newCall(req).execute()
-        val resBody = res.body?.string() ?: error("Empty response")
-        val resCode = res.code
+        val resBody = res.body?.string() ?: ""
+        val code    = res.code
         res.close()
 
-        if (!res.isSuccessful) error("createUser failed: HTTP $resCode — $resBody")
-        JSONObject(resBody).optString("id").ifEmpty { error("No user ID in response") }
+        Log.d(tag, "createUser HTTP $code: $resBody")
+
+        if (res.isSuccessful) {
+            val userId = JSONObject(resBody).optString("id")
+            if (userId.isNotEmpty()) {
+                Log.d(tag, "createUser ✅ userId=$userId")
+                return@withContext userId
+            }
+        }
+
+        // Parse validation errors for clear message
+        val errorMsg = try {
+            val json = JSONObject(resBody)
+            val data = json.optJSONObject("data")
+            if (data != null && data.length() > 0) {
+                val fieldErrors = data.keys().asSequence().joinToString(", ") { key ->
+                    "$key: ${data.optJSONObject(key)?.optString("message") ?: "invalid"}"
+                }
+                "Validation failed — $fieldErrors"
+            } else json.optString("message", "HTTP $code")
+        } catch (_: Exception) { "HTTP $code — $resBody" }
+
+        error("createUser failed: $errorMsg")
     }
 
     override suspend fun restoreSession(token: String) = withContext(Dispatchers.IO) {
@@ -133,9 +159,11 @@ class PocketBaseDataSource @Inject constructor(
             try {
                 val user      = pb.records.getOne<UserRecord>(COL_USERS, userId)
                 val access    = fetchAccessControl(userId).getOrNull()
-                val profile   = parseJsonMap(user.profile)
-                val workStats = parseJsonMap(user.workStats)
-                val issues    = parseJsonMap(user.issues)
+
+                // profile/workStats/issues stored as JSON objects — use parseJsonElement
+                val profile   = parseJsonElement(user.profile)
+                val workStats = parseJsonElement(user.workStats)
+                val issues    = parseJsonElement(user.issues)
 
                 Result.success(UserProfile(
                     id                       = userId,
@@ -164,11 +192,11 @@ class PocketBaseDataSource @Inject constructor(
                     isActive                 = access?.isActive ?: user.isActive,
                     documentPath             = user.documentPath.ifBlank { access?.documentPath ?: "" },
                     permissions              = parseJsonList(
-                        if (access?.permissions.isNullOrBlank()) user.permissions else access!!.permissions),
+                        if (access?.permissions.isNullOrBlank()) user.permissions
+                        else access!!.permissions),
                     emergencyContactName     = profile["emergencyContactName"]     ?: "",
                     emergencyContactPhone    = profile["emergencyContactPhone"]    ?: "",
                     emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
-                    // Profile is incomplete if the flag is set OR designation is blank
                     needsProfileCompletion   = user.needsProfileCompletion || user.designation.isBlank()
                 ))
             } catch (e: Exception) {
@@ -222,12 +250,13 @@ class PocketBaseDataSource @Inject constructor(
             val resCode = res.code
             res.close()
 
-            if (!res.isSuccessful) {
+            if (!res.isSuccessful)
                 return@withContext Result.failure(Exception("Upload failed: $resCode — $resBody"))
-            }
+
             val storedFilename = try {
                 JSONObject(resBody).optString("avatar", filename)
             } catch (_: Exception) { filename }
+
             Result.success("${AppConfig.BASE_URL}/api/files/$COL_USERS/$userId/$storedFilename")
         } catch (e: Exception) {
             Log.e(tag, "uploadProfileImage failed: ${e.message}")
@@ -254,17 +283,11 @@ class PocketBaseDataSource @Inject constructor(
                 val userId     = createUser(request.email, request.password, request.name, adminToken)
                 createdUserId  = userId
 
-                // Login to get token for subsequent calls
-                val loginBody = JSONObject().apply {
-                    put("identity", request.email)
-                    put("password", request.password)
-                }.toString().toRequestBody("application/json".toMediaType())
-                val loginRes  = http.newCall(Request.Builder()
-                    .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-password")
-                    .post(loginBody).build()).execute()
-                val loginJson = loginRes.body?.string() ?: ""
-                loginRes.close()
-                pb.login { this.token = JSONObject(loginJson).optString("token") }
+                // Login after creation using the shared helper (handles v0.36 URL)
+                val (loginCode, loginJson) = authWithPassword(request.email, request.password)
+                if (loginCode in 200..299) {
+                    pb.login { this.token = JSONObject(loginJson).optString("token") }
+                }
 
                 val imageUrl = if (request.imageBytes != null) {
                     uploadProfileImage(userId, request.imageBytes, "profile_$userId.jpg", adminToken)
@@ -294,7 +317,9 @@ class PocketBaseDataSource @Inject constructor(
                 }.toString()
 
                 val issuesJson = JSONObject().apply {
-                    put("totalComplaints", 0); put("resolvedComplaints", 0); put("pendingComplaints", 0)
+                    put("totalComplaints", 0)
+                    put("resolvedComplaints", 0)
+                    put("pendingComplaints", 0)
                 }.toString()
 
                 httpPatch(
@@ -390,8 +415,10 @@ class PocketBaseDataSource @Inject constructor(
             } catch (_: Exception) { false }
         }
 
-    private fun upsertCompany(sc: String, companyName: String, role: String,
-                              department: String, adminToken: String) {
+    private fun upsertCompany(
+        sc: String, companyName: String, role: String,
+        department: String, adminToken: String
+    ) {
         val url    = "${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records"
         val getRes = http.newCall(Request.Builder()
             .url("$url?filter=(sanitizedName='$sc')")
@@ -402,10 +429,12 @@ class PocketBaseDataSource @Inject constructor(
             ?.optJSONObject(0)?.optString("id")
 
         val payload = JSONObject().apply {
-            put("sanitizedName",  sc); put("originalName", companyName)
+            put("sanitizedName",  sc)
+            put("originalName",   companyName)
             put("departments",    JSONArray().put(department))
             put("availableRoles", JSONArray().put(role))
-            put("totalUsers",     1); put("activeUsers", 1)
+            put("totalUsers",     1)
+            put("activeUsers",    1)
             put("lastUpdated",    System.currentTimeMillis())
         }.toString()
 
@@ -431,8 +460,8 @@ class PocketBaseDataSource @Inject constructor(
             val totalItems = json.optInt("totalItems", 0)
 
             if (totalItems > 0) {
-                val item = json.getJSONArray("items").getJSONObject(0)
-                val id   = item.optString("id")
+                val item      = json.getJSONArray("items").getJSONObject(0)
+                val id        = item.optString("id")
                 val rolesJson = JSONArray(item.optString("availableRoles", "[]"))
                 val rolesList = ArrayList<String>()
                 for (i in 0 until rolesJson.length()) rolesList.add(rolesJson.getString(i))
@@ -441,21 +470,27 @@ class PocketBaseDataSource @Inject constructor(
                 val deptsList = ArrayList<String>()
                 for (i in 0 until deptsJson.length()) deptsList.add(deptsJson.getString(i))
                 if (department !in deptsList) deptsList.add(department)
-                httpPatch("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records/$id", token,
+                httpPatch(
+                    "${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records/$id", token,
                     JSONObject().apply {
                         put("totalUsers",     item.optInt("totalUsers",  0) + 1)
                         put("activeUsers",    item.optInt("activeUsers", 0) + 1)
                         put("availableRoles", Json.encodeToString(rolesList))
                         put("departments",    Json.encodeToString(deptsList))
-                    }.toString())
+                    }.toString()
+                )
             } else {
-                httpPost("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records", token,
+                httpPost(
+                    "${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records", token,
                     JSONObject().apply {
-                        put("originalName",   originalName); put("sanitizedName", sanitizedName)
-                        put("totalUsers",     1); put("activeUsers", 1)
+                        put("originalName",   originalName)
+                        put("sanitizedName",  sanitizedName)
+                        put("totalUsers",     1)
+                        put("activeUsers",    1)
                         put("availableRoles", Json.encodeToString(listOf(role)))
                         put("departments",    Json.encodeToString(listOf(department)))
-                    }.toString())
+                    }.toString()
+                )
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -464,7 +499,7 @@ class PocketBaseDataSource @Inject constructor(
         }
     }
 
-    // ── Collections Setup ─────────────────────────────────────────────────────
+    // ── Collections setup ─────────────────────────────────────────────────────
 
     override suspend fun ensureCollectionsExist(): Result<Unit> =
         withContext(Dispatchers.IO) {
@@ -483,6 +518,42 @@ class PocketBaseDataSource @Inject constructor(
         }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    // Tries both auth-with-password URL forms for PocketBase v0.36 compatibility
+    private fun authWithPassword(email: String, password: String): Pair<Int, String> {
+        val urlsToTry = listOf(
+            "${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-password",
+            "${AppConfig.BASE_URL}/api/collections/_pb_users_auth_/auth-with-password"
+        )
+        for (url in urlsToTry) {
+            val body = JSONObject().apply {
+                put("identity", email)
+                put("password", password)
+            }.toString().toRequestBody("application/json".toMediaType())
+            val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
+            val resBody = res.body?.string() ?: ""
+            val code    = res.code
+            res.close()
+            Log.d(tag, "authWithPassword $url → HTTP $code")
+            if (code != 404) return Pair(code, resBody)
+        }
+        return Pair(404, """{"message":"Missing or invalid auth collection context."}""")
+    }
+
+    // Converts JsonElement (object or string) → Map<String, String>
+    private fun parseJsonElement(
+        element: kotlinx.serialization.json.JsonElement
+    ): Map<String, String> {
+        return try {
+            when (element) {
+                is JsonObject -> element.entries.associate { (k, v) ->
+                    k to v.toString().trim('"')
+                }
+                is JsonPrimitive -> parseJsonMap(element.content)
+                else             -> emptyMap()
+            }
+        } catch (_: Exception) { emptyMap() }
+    }
 
     private suspend fun fetchAccessControl(userId: String): Result<AccessControlRecord> =
         withContext(Dispatchers.IO) {
