@@ -16,8 +16,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -31,9 +33,10 @@ class DatabaseManagerViewModel @Inject constructor(
     private val _state = MutableStateFlow(DBUiState())
     val state: StateFlow<DBUiState> = _state.asStateFlow()
 
-    private var allRecords: List<DBRecord> = emptyList()
-
-    private fun token(): String = authRepository.getSession()?.token ?: ""
+    private var allRecords  : List<DBRecord> = emptyList()
+    private var adminToken  : String         = ""
+    private var currentRole : String         = ""
+    private var adminCompany: String         = ""
 
     init { loadCurrentUser() }
 
@@ -43,13 +46,39 @@ class DatabaseManagerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val session = authRepository.getSession() ?: return@launch
-                val profile = dataSource.getUserProfile(session.userId).getOrNull() ?: return@launch
-                _state.update { it.copy(adminCompany = profile.sanitizedCompany) }
+                val profile = dataSource.getUserProfile(session.userId).getOrNull()
+                    ?: return@launch
+                currentRole  = profile.role
+                adminCompany = profile.sanitizedCompany
+
+                // Get fresh admin token for collections endpoint
+                adminToken = getAdminToken() ?: session.token ?: ""
+
+                _state.update { it.copy(adminCompany = profile.companyName) }
                 loadTab(DBTab.USERS)
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
             }
         }
+    }
+
+    // Fresh admin token — needed for /api/collections endpoint
+    private suspend fun getAdminToken(): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = org.json.JSONObject().apply {
+                put("identity", AppConfig.ADMIN_EMAIL)
+                put("password", AppConfig.ADMIN_PASS)
+            }.toString().toRequestBody("application/json".toMediaType())
+            val res     = http.newCall(
+                Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password")
+                    .post(body).build()
+            ).execute()
+            val resBody = res.body?.string() ?: ""
+            res.close()
+            if (res.isSuccessful) JSONObject(resBody).optString("token").ifEmpty { null }
+            else null
+        } catch (_: Exception) { null }
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -61,7 +90,7 @@ class DatabaseManagerViewModel @Inject constructor(
 
     fun search(q: String) {
         _state.update { it.copy(searchQuery = q) }
-        val filtered: List<DBRecord> = if (q.isBlank()) allRecords
+        val filtered = if (q.isBlank()) allRecords
         else allRecords.filter { rec ->
             rec.title.contains(q, ignoreCase = true) ||
                     rec.sub1.contains(q,  ignoreCase = true) ||
@@ -76,13 +105,13 @@ class DatabaseManagerViewModel @Inject constructor(
             try {
                 val col = when (_state.value.currentTab) {
                     DBTab.USERS       -> "users"
-                    DBTab.DEPARTMENTS -> "departments_metadata"
+                    DBTab.DEPARTMENTS -> "companies_metadata"  // no dept collection, map to companies
                     DBTab.COMPANIES   -> "companies_metadata"
-                    DBTab.COLLECTIONS -> return@launch   // read-only tab
+                    DBTab.COLLECTIONS -> return@launch
                 }
                 pbDelete(
                     "${AppConfig.BASE_URL}/api/collections/$col/records/${record.id}",
-                    token()
+                    adminToken
                 )
                 _state.update { it.copy(successMsg = "${record.title} deleted") }
                 loadTab(_state.value.currentTab)
@@ -93,7 +122,6 @@ class DatabaseManagerViewModel @Inject constructor(
     }
 
     fun refresh() = loadTab(_state.value.currentTab)
-
     fun clearMessages() = _state.update { it.copy(error = null, successMsg = null) }
 
     // ── Private: load per tab ─────────────────────────────────────────────────
@@ -109,12 +137,14 @@ class DatabaseManagerViewModel @Inject constructor(
                     DBTab.COLLECTIONS -> fetchCollections()
                 }
                 allRecords = records
-                _state.update { it.copy(
-                    isLoading  = false,
-                    records    = records,
-                    totalCount = records.size,
-                    currentTab = tab
-                )}
+                _state.update {
+                    it.copy(
+                        isLoading  = false,
+                        records    = records,
+                        totalCount = records.size,
+                        currentTab = tab
+                    )
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
@@ -124,78 +154,128 @@ class DatabaseManagerViewModel @Inject constructor(
     // ── Fetch helpers ─────────────────────────────────────────────────────────
 
     private suspend fun fetchUsers(): List<DBRecord> {
-        val sc    = _state.value.adminCompany
-        val res   = pbGet(
-            "${AppConfig.BASE_URL}/api/collections/users/records" +
-                    "?filter=(sanitizedCompanyName='$sc')&perPage=200&sort=-created",
-            token()
-        )
+        // Administrator sees all users, Manager/HR see only their company
+        val filter = if (currentRole == "Administrator") ""
+        else "?filter=(sanitizedCompanyName='$adminCompany')&perPage=200&sort=-created"
+
+        val url = if (filter.isEmpty())
+            "${AppConfig.BASE_URL}/api/collections/users/records?perPage=200&sort=-created"
+        else
+            "${AppConfig.BASE_URL}/api/collections/users/records$filter"
+
+        val res   = pbGet(url, adminToken)
         val items = JSONObject(res).optJSONArray("items") ?: return emptyList()
+
         return (0 until items.length()).map { i ->
             val o = items.getJSONObject(i)
             DBRecord(
-                id = o.optString("id"),
-                title = o.optString("name"),
-                sub1 = o.optString("email"),
-                sub2 = "${o.optString("role")} · ${o.optString("department")}",
+                id    = o.optString("id"),
+                title = o.optString("name").ifBlank { o.optString("email") },
+                sub1  = o.optString("email"),
+                sub2  = "${o.optString("role")} · ${o.optString("department")}",
                 badge = if (o.optBoolean("isActive", true)) "Active" else "Inactive",
                 extra = mapOf(
+                    "Company"     to o.optString("companyName"),
                     "Designation" to o.optString("designation"),
-                    "NeedsCompletion" to o.optBoolean("needsProfileCompletion").toString()
+                    "ID"          to o.optString("id")
                 )
             )
         }
     }
 
     private suspend fun fetchDepartments(): List<DBRecord> {
-        val sc    = _state.value.adminCompany
-        val res   = pbGet(
-            "${AppConfig.BASE_URL}/api/collections/departments_metadata/records" +
-                    "?filter=(sanitizedCompanyName='$sc')&perPage=100",
-            token()
-        )
+        // Read departments array from companies_metadata
+        val url = if (currentRole == "Administrator")
+            "${AppConfig.BASE_URL}/api/collections/companies_metadata/records?perPage=100"
+        else
+            "${AppConfig.BASE_URL}/api/collections/companies_metadata/records" +
+                    "?filter=(sanitizedName='$adminCompany')&perPage=100"
+
+        val res   = pbGet(url, adminToken)
         val items = JSONObject(res).optJSONArray("items") ?: return emptyList()
-        return (0 until items.length()).map { i ->
-            val o = items.getJSONObject(i)
-            DBRecord(
-                id = o.optString("id"),
-                title = o.optString("departmentName"),
-                sub1 = "${o.optInt("userCount")} users",
-                sub2 = "${o.optInt("activeUsers")} active",
-                badge = o.optString("sanitizedName")
-            )
+
+        val result = mutableListOf<DBRecord>()
+        for (i in 0 until items.length()) {
+            val company     = items.getJSONObject(i)
+            val companyName = company.optString("originalName")
+            val sc          = company.optString("sanitizedName")
+            val depts = try {
+                org.json.JSONArray(company.optString("departments", "[]"))
+            } catch (_: Exception) { org.json.JSONArray() }
+
+            for (j in 0 until depts.length()) {
+                val dept = depts.optString(j)
+                // Count users in this dept
+                val usersRes   = pbGet(
+                    "${AppConfig.BASE_URL}/api/collections/users/records" +
+                            "?filter=(sanitizedCompanyName='$sc'&&department='$dept')&perPage=1",
+                    adminToken
+                )
+                val totalUsers = JSONObject(usersRes).optInt("totalItems", 0)
+
+                result.add(DBRecord(
+                    id    = "${sc}_$dept",
+                    title = dept,
+                    sub1  = companyName,
+                    sub2  = "$totalUsers users",
+                    badge = sc,
+                    extra = mapOf("Company" to companyName)
+                ))
+            }
         }
+        return result
     }
 
     private suspend fun fetchCompanies(): List<DBRecord> {
         val res   = pbGet(
             "${AppConfig.BASE_URL}/api/collections/companies_metadata/records?perPage=100",
-            token()
+            adminToken
         )
         val items = JSONObject(res).optJSONArray("items") ?: return emptyList()
+
         return (0 until items.length()).map { i ->
-            val o = items.getJSONObject(i)
+            val o     = items.getJSONObject(i)
+            val roles = try {
+                org.json.JSONArray(o.optString("availableRoles", "[]"))
+                    .let { arr -> (0 until arr.length()).map { arr.getString(it) } }
+                    .joinToString(", ")
+            } catch (_: Exception) { "" }
+
             DBRecord(
-                id = o.optString("id"),
+                id    = o.optString("id"),
                 title = o.optString("originalName"),
-                sub1 = "${o.optInt("totalUsers")} total users",
-                sub2 = "${o.optInt("activeUsers")} active",
-                badge = o.optString("sanitizedName")
+                sub1  = "${o.optInt("totalUsers")} total · ${o.optInt("activeUsers")} active",
+                sub2  = o.optString("sanitizedName"),
+                badge = "${o.optInt("totalUsers")} users",
+                extra = mapOf(
+                    "Roles"          to roles,
+                    "Sanitized Name" to o.optString("sanitizedName")
+                )
             )
         }
     }
 
     private suspend fun fetchCollections(): List<DBRecord> {
-        val res   = pbGet("${AppConfig.BASE_URL}/api/collections", token())
+        // Needs admin token — /api/collections lists all collections
+        val res   = pbGet("${AppConfig.BASE_URL}/api/collections?perPage=100", adminToken)
         val items = JSONObject(res).optJSONArray("items") ?: return emptyList()
+
         return (0 until items.length()).map { i ->
-            val o = items.getJSONObject(i)
+            val o      = items.getJSONObject(i)
+            val schema = o.optJSONArray("schema")
+            val fields = schema?.length() ?: 0
             DBRecord(
-                id = o.optString("id"),
+                id    = o.optString("id"),
                 title = o.optString("name"),
-                sub1 = "type: ${o.optString("type")}",
-                sub2 = "${o.optJSONArray("schema")?.length() ?: 0} fields",
-                badge = o.optString("id").take(8)
+                sub1  = "Type: ${o.optString("type")}",
+                sub2  = "$fields fields",
+                badge = o.optString("type"),
+                extra = mapOf(
+                    "Fields"      to fields.toString(),
+                    "List Rule"   to (o.optString("listRule").ifBlank { "public" }),
+                    "Create Rule" to (o.optString("createRule").ifBlank { "public" }),
+                    "Full ID"     to o.optString("id")
+                )
             )
         }
     }
@@ -204,7 +284,7 @@ class DatabaseManagerViewModel @Inject constructor(
 
     private suspend fun pbGet(url: String, token: String): String =
         withContext(Dispatchers.IO) {
-            val res = http.newCall(
+            val res  = http.newCall(
                 Request.Builder().url(url).get()
                     .addHeader("Authorization", "Bearer $token")
                     .build()
