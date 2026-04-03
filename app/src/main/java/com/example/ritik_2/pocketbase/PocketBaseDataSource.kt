@@ -177,7 +177,10 @@ class PocketBaseDataSource @Inject constructor(
                 }
 
                 val user   = JSONObject(resBody)
+                Log.d(tag, "getUserProfile ✅ name=${user.optString("name")} email=${user.optString("email")}")
+
                 val access = fetchAccessControl(userId).getOrNull()
+                Log.d(tag, "accessControl name=${access?.name} role=${access?.role}")
 
                 // profile / workStats / issues are stored as JSON strings or objects
                 val profile   = parseJsonFieldSafe(user, "profile")
