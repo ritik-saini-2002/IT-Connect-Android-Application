@@ -42,6 +42,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
+            // Keeps mapping.txt for deobfuscating crash reports
+            ndk { debugSymbolLevel = "FULL" }
         }
     }
 

@@ -29,8 +29,8 @@ data class MUUser(
     val name              : String,
     val email             : String,
     val role              : String,
-    val companyName       : String,   // sanitized
-    val deptName          : String,   // sanitized
+    val companyName       : String,
+    val deptName          : String,
     val designation       : String,
     val imageUrl          : String,
     val phoneNumber       : String,
@@ -40,19 +40,20 @@ data class MUUser(
     val totalComplaints   : Int,
     val isActive          : Boolean,
     val documentPath      : String,
-    // original (non-sanitized) values for display
     val originalCompany   : String = "",
     val originalDept      : String = ""
 )
 
 data class ManageUserUiState(
-    val isLoading           : Boolean            = false,
-    val currentRole         : String             = "",
-    val companies           : List<MUCompany>    = emptyList(),
-    val users               : List<MUUser>       = emptyList(),
-    val expandedCompanies   : Set<String>        = emptySet(),
-    val expandedDepartments : Set<String>        = emptySet(),
-    val expandedRoles       : Set<String>        = emptySet(),
-    val error               : String?            = null,
-    val successMsg          : String?            = null
+    val isLoading           : Boolean         = false,
+    val currentRole         : String          = "",
+    val companies           : List<MUCompany> = emptyList(),
+    val users               : List<MUUser>    = emptyList(),
+    val filteredUsers       : List<MUUser>    = emptyList(),
+    val searchQuery         : String          = "",
+    val expandedCompanies   : Set<String>     = emptySet(),
+    val expandedDepartments : Set<String>     = emptySet(),
+    val expandedRoles       : Set<String>     = emptySet(),
+    val error               : String?         = null,
+    val successMsg          : String?         = null
 )

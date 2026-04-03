@@ -1,10 +1,11 @@
 package com.example.ritik_2.administrator.manageuser
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -14,135 +15,223 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.ritik_2.administrator.manageuser.models.MUCompany
-import com.example.ritik_2.administrator.manageuser.models.MUDepartment
-import com.example.ritik_2.administrator.manageuser.models.MURoleInfo
-import com.example.ritik_2.administrator.manageuser.models.MUUser
+import com.example.ritik_2.administrator.manageuser.models.*
+import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
+
+// ── Explorer level ────────────────────────────────────────────────────────────
+private sealed class ExplorerLevel {
+    object Companies                                         : ExplorerLevel()
+    data class Departments(val company: MUCompany)           : ExplorerLevel()
+    data class Roles(val company: MUCompany,
+                     val dept   : MUDepartment)              : ExplorerLevel()
+    data class Users(val company: MUCompany,
+                     val dept   : MUDepartment,
+                     val role   : MURoleInfo)                : ExplorerLevel()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManageUserScreen(vm: ManageUserViewModel) {
-    val state by vm.state.collectAsState()
-    val snack  = remember { SnackbarHostState() }
-
+    val state        by vm.state.collectAsState()
+    val snack         = remember { SnackbarHostState() }
+    val context       = LocalContext.current
+    var level        by remember { mutableStateOf<ExplorerLevel>(ExplorerLevel.Companies) }
     var deleteTarget by remember { mutableStateOf<MUUser?>(null) }
     var detailTarget by remember { mutableStateOf<MUUser?>(null) }
 
+    // Back handler — navigate up the explorer
+    BackHandler(enabled = level !is ExplorerLevel.Companies) {
+        level = when (val l = level) {
+            is ExplorerLevel.Departments -> ExplorerLevel.Companies
+            is ExplorerLevel.Roles       -> ExplorerLevel.Departments(l.company)
+            is ExplorerLevel.Users       -> ExplorerLevel.Roles(l.company, l.dept)
+            else                         -> ExplorerLevel.Companies
+        }
+    }
+
     LaunchedEffect(state.successMsg) {
-        state.successMsg?.let { snack.showSnackbar(it); vm.clearMessages() }
+        state.successMsg?.let {
+            snack.showSnackbar(it, duration = SnackbarDuration.Short)
+            vm.clearMessages()
+        }
     }
     LaunchedEffect(state.error) {
-        state.error?.let { snack.showSnackbar("⚠ $it"); vm.clearMessages() }
+        state.error?.let {
+            snack.showSnackbar("⚠ $it", duration = SnackbarDuration.Short)
+            vm.clearMessages()
+        }
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Manage Users", fontWeight = FontWeight.Bold)
-                        Text(
-                            "${state.currentRole} · Folder View",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        },
+        topBar       = { ExplorerTopBar(level, state, onBack = {
+            level = when (val l = level) {
+                is ExplorerLevel.Departments -> ExplorerLevel.Companies
+                is ExplorerLevel.Roles       -> ExplorerLevel.Departments(l.company)
+                is ExplorerLevel.Users       -> ExplorerLevel.Roles(l.company, l.dept)
+                else                         -> ExplorerLevel.Companies
+            }
+        }) },
         snackbarHost = { SnackbarHost(snack) }
     ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
 
-        // ── Loading ───────────────────────────────────────────────────────────
-        if (state.isLoading && state.companies.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator() }
-            return@Scaffold
-        }
-
-        // ── Empty ─────────────────────────────────────────────────────────────
-        if (state.companies.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Business, null,
-                        Modifier.size(56.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "No companies found",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            return@Scaffold
-        }
-
-        // ── Tree ──────────────────────────────────────────────────────────────
-        LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
-            contentPadding      = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            items(
-                items = state.companies,
-                key   = { company: MUCompany -> company.sanitizedName }
-            ) { company: MUCompany ->
-                CompanyNode(
-                    company        = company,
-                    isExpanded     = state.expandedCompanies.contains(company.sanitizedName),
-                    onToggle       = { vm.toggleCompany(company.sanitizedName) },
-                    departments    = vm.getDepts(company.sanitizedName),
-                    expandedDepts  = state.expandedDepartments,
-                    expandedRoles  = state.expandedRoles,
-                    onDeptToggle   = { sd: String ->
-                        vm.toggleDepartment(company.sanitizedName, sd)
-                    },
-                    onRoleToggle   = { sd: String, role: String ->
-                        vm.toggleRole(company.sanitizedName, sd, role)
-                    },
-                    getRoles       = { sd: String ->
-                        vm.getRoles(company.sanitizedName, sd)
-                    },
-                    getUsers       = { sd: String, role: String ->
-                        vm.getUsers(company.sanitizedName, sd, role)
-                    },
-                    onUserClick    = { user: MUUser -> detailTarget = user },
-                    onToggleStatus = { user: MUUser -> vm.toggleUserStatus(user) },
-                    onDelete       = { user: MUUser -> deleteTarget = user }
+            // Search bar
+            OutlinedTextField(
+                value         = state.searchQuery,
+                onValueChange = vm::search,
+                placeholder   = { Text("Search across all users…") },
+                leadingIcon   = { Icon(Icons.Default.Search, null,
+                    tint = MaterialTheme.colorScheme.primary) },
+                trailingIcon  = {
+                    if (state.searchQuery.isNotEmpty())
+                        IconButton(onClick = { vm.search("") }) {
+                            Icon(Icons.Default.Clear, null)
+                        }
+                },
+                modifier   = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                shape      = RoundedCornerShape(14.dp),
+                singleLine = true,
+                colors     = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(0.3f)
                 )
+            )
+
+            // Breadcrumb
+            if (level !is ExplorerLevel.Companies) {
+                BreadcrumbBar(level) { target -> level = target }
+            }
+
+            when {
+                state.isLoading && state.users.isEmpty() -> LoadingView()
+                state.searchQuery.isNotBlank()           -> SearchResultsView(
+                    users         = state.filteredUsers,
+                    currentRole   = state.currentRole,
+                    onUserClick   = { detailTarget = it },
+                    onEditUser    = { user ->
+                        context.startActivity(
+                            ProfileCompletionActivity.createIntent(
+                                context        = context,
+                                userId         = user.id,
+                                isEditMode     = true,
+                                targetUserRole = user.role,
+                                editorRole     = state.currentRole
+                            )
+                        )
+                    },
+                    onToggleStatus = { vm.toggleUserStatus(it) },
+                    onDelete       = { deleteTarget = it }
+                )
+                else -> AnimatedContent(
+                    targetState   = level,
+                    transitionSpec = {
+                        val entering = targetState.depth > initialState.depth
+                        val enter = if (entering)
+                            slideInHorizontally { it } + fadeIn()
+                        else
+                            slideInHorizontally { -it } + fadeIn()
+                        val exit = if (entering)
+                            slideOutHorizontally { -it } + fadeOut()
+                        else
+                            slideOutHorizontally { it } + fadeOut()
+                        enter togetherWith exit
+                    },
+                    label = "explorer"
+                ) { currentLevel ->
+                    when (currentLevel) {
+                        is ExplorerLevel.Companies ->
+                            CompaniesView(
+                                companies = vm.getFilteredCompanies(),
+                                isLoading = state.isLoading,
+                                onClick   = { company ->
+                                    level = ExplorerLevel.Departments(company)
+                                }
+                            )
+                        is ExplorerLevel.Departments ->
+                            DepartmentsView(
+                                company = currentLevel.company,
+                                depts   = vm.getDepts(currentLevel.company.sanitizedName),
+                                onClick = { dept ->
+                                    level = ExplorerLevel.Roles(currentLevel.company, dept)
+                                }
+                            )
+                        is ExplorerLevel.Roles ->
+                            RolesView(
+                                company = currentLevel.company,
+                                dept    = currentLevel.dept,
+                                roles   = vm.getRoles(
+                                    currentLevel.company.sanitizedName,
+                                    currentLevel.dept.sanitizedName
+                                ),
+                                onClick = { role ->
+                                    level = ExplorerLevel.Users(
+                                        currentLevel.company, currentLevel.dept, role)
+                                }
+                            )
+                        is ExplorerLevel.Users ->
+                            UsersView(
+                                users         = vm.getUsers(
+                                    currentLevel.company.sanitizedName,
+                                    currentLevel.dept.sanitizedName,
+                                    currentLevel.role.roleName
+                                ),
+                                currentRole   = state.currentRole,
+                                isLoading     = state.isLoading,
+                                onUserClick   = { detailTarget = it },
+                                onEditUser    = { user ->
+                                    context.startActivity(
+                                        ProfileCompletionActivity.createIntent(
+                                            context        = context,
+                                            userId         = user.id,
+                                            isEditMode     = true,
+                                            targetUserRole = user.role,
+                                            editorRole     = state.currentRole
+                                        )
+                                    )
+                                },
+                                onToggleStatus = { vm.toggleUserStatus(it) },
+                                onDelete       = { deleteTarget = it }
+                            )
+                    }
+                }
             }
         }
     }
 
-    // ── Delete confirm dialog ─────────────────────────────────────────────────
-    deleteTarget?.let { user: MUUser ->
+    // Delete dialog
+    deleteTarget?.let { user ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            icon    = {
-                Icon(Icons.Default.DeleteForever, null,
-                    tint = MaterialTheme.colorScheme.error)
-            },
+            icon    = { Icon(Icons.Default.DeleteForever, null,
+                tint = MaterialTheme.colorScheme.error) },
             title   = { Text("Delete User?", fontWeight = FontWeight.Bold) },
-            text    = { Text("Permanently delete ${user.name}? This cannot be undone.") },
+            text    = {
+                Column {
+                    Text("Permanently delete:")
+                    Spacer(Modifier.height(6.dp))
+                    Text("👤  ${user.name}", fontWeight = FontWeight.SemiBold)
+                    Text(user.email, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(6.dp))
+                    Text("This cannot be undone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+            },
             confirmButton = {
                 Button(
                     onClick = { vm.deleteUser(user); deleteTarget = null },
@@ -156,396 +245,543 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
         )
     }
 
-    // ── Detail dialog ─────────────────────────────────────────────────────────
-    detailTarget?.let { user: MUUser ->
+    // Detail dialog
+    detailTarget?.let { user ->
         UserDetailDialog(
-            user          = user,
-            onDismiss     = { detailTarget = null },
-            onToggleStatus = {
-                vm.toggleUserStatus(user)
+            user           = user,
+            onDismiss      = { detailTarget = null },
+            onToggleStatus = { vm.toggleUserStatus(user); detailTarget = null },
+            onEdit         = {
                 detailTarget = null
+                context.startActivity(
+                    ProfileCompletionActivity.createIntent(
+                        context        = context,
+                        userId         = user.id,
+                        isEditMode     = true,
+                        targetUserRole = user.role,
+                        editorRole     = state.currentRole
+                    )
+                )
             }
         )
     }
 }
 
-// ── Company node ──────────────────────────────────────────────────────────────
+// ── Top bar ───────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExplorerTopBar(
+    level  : ExplorerLevel,
+    state  : ManageUserUiState,
+    onBack : () -> Unit
+) {
+    val title = when (level) {
+        is ExplorerLevel.Companies   -> "Manage Users"
+        is ExplorerLevel.Departments -> level.company.originalName
+        is ExplorerLevel.Roles       -> level.dept.departmentName
+        is ExplorerLevel.Users       -> level.role.roleName
+    }
+    val subtitle = when (level) {
+        is ExplorerLevel.Companies   ->
+            "${state.users.size} users · ${state.users.count { it.isActive }} active"
+        is ExplorerLevel.Departments ->
+            "${level.company.totalUsers} users · ${level.company.activeUsers} active"
+        is ExplorerLevel.Roles       ->
+            "${level.dept.userCount} users across ${level.dept.roles.size} roles"
+        is ExplorerLevel.Users       ->
+            "${level.role.userCount} users · ${level.role.activeUsers} active"
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.horizontalGradient(listOf(Color(0xFF1565C0), Color(0xFF1E88E5)))
+            )
+            .statusBarsPadding()
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (level !is ExplorerLevel.Companies) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                }
+            } else {
+                Spacer(Modifier.width(12.dp))
+            }
+            Box(
+                Modifier.size(38.dp).clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    when (level) {
+                        is ExplorerLevel.Companies   -> Icons.Default.Business
+                        is ExplorerLevel.Departments -> Icons.Default.AccountTree
+                        is ExplorerLevel.Roles       -> Icons.Default.Group
+                        is ExplorerLevel.Users       -> Icons.Default.Person
+                    },
+                    null, tint = Color.White, modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                    color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, fontSize = 11.sp, color = Color.White.copy(0.75f))
+            }
+            if (state.isLoading)
+                CircularProgressIndicator(
+                    modifier    = Modifier.size(18.dp).padding(end = 8.dp),
+                    color       = Color.White,
+                    strokeWidth = 2.dp
+                )
+        }
+    }
+}
+
+// ── Breadcrumb ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CompanyNode(
-    company        : MUCompany,
-    isExpanded     : Boolean,
-    onToggle       : () -> Unit,
-    departments    : List<MUDepartment>,
-    expandedDepts  : Set<String>,
-    expandedRoles  : Set<String>,
-    onDeptToggle   : (String) -> Unit,
-    onRoleToggle   : (String, String) -> Unit,
-    getRoles       : (String) -> List<MURoleInfo>,
-    getUsers       : (String, String) -> List<MUUser>,
-    onUserClick    : (MUUser) -> Unit,
-    onToggleStatus : (MUUser) -> Unit,
-    onDelete       : (MUUser) -> Unit
+private fun BreadcrumbBar(
+    level   : ExplorerLevel,
+    onNavigate: (ExplorerLevel) -> Unit
 ) {
-    Card(
-        Modifier.fillMaxWidth(),
-        shape     = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(2.dp)
-    ) {
-        Column {
-            // Header
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onToggle() }
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null, tint = Color(0xFF2196F3)
-                )
-                Spacer(Modifier.width(8.dp))
-                Icon(
-                    Icons.Default.Business, null,
-                    tint = Color(0xFF2196F3), modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(company.originalName, fontWeight = FontWeight.Bold)
-                    Text(
-                        "${company.totalUsers} users · ${company.activeUsers} active",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Badge(containerColor = Color(0xFF2196F3)) {
-                    Text(
-                        "${departments.size} depts",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White
-                    )
-                }
+    val crumbs: List<Pair<String, ExplorerLevel>> = buildList {
+        add("Companies" to ExplorerLevel.Companies)
+        when (level) {
+            is ExplorerLevel.Departments -> add(level.company.originalName to level)
+            is ExplorerLevel.Roles -> {
+                add(level.company.originalName to ExplorerLevel.Departments(level.company))
+                add(level.dept.departmentName  to level)
             }
+            is ExplorerLevel.Users -> {
+                add(level.company.originalName to ExplorerLevel.Departments(level.company))
+                add(level.dept.departmentName  to ExplorerLevel.Roles(level.company, level.dept))
+                add(level.role.roleName        to level)
+            }
+            else -> {}
+        }
+    }
 
-            // Departments
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter   = fadeIn() + expandVertically(),
-                exit    = fadeOut() + shrinkVertically()
-            ) {
-                Column(
-                    Modifier.padding(start = 18.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    departments.forEach { dept: MUDepartment ->
-                        val deptKey = "${company.sanitizedName}|${dept.sanitizedName}"
-                        DeptNode(
-                            dept           = dept,
-                            companyKey     = company.sanitizedName,
-                            isExpanded     = expandedDepts.contains(deptKey),
-                            onToggle       = { onDeptToggle(dept.sanitizedName) },
-                            roles          = getRoles(dept.sanitizedName),
-                            expandedRoles  = expandedRoles,
-                            onRoleToggle   = { role: String ->
-                                onRoleToggle(dept.sanitizedName, role)
-                            },
-                            getUsers       = { role: String ->
-                                getUsers(dept.sanitizedName, role)
-                            },
-                            onUserClick    = onUserClick,
-                            onToggleStatus = onToggleStatus,
-                            onDelete       = onDelete
-                        )
-                    }
-                }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f))
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        crumbs.forEachIndexed { i, (label, target) ->
+            val isLast = i == crumbs.lastIndex
+            Text(
+                label,
+                style      = MaterialTheme.typography.labelSmall,
+                fontWeight = if (isLast) FontWeight.Bold else FontWeight.Normal,
+                color      = if (isLast) MaterialTheme.colorScheme.primary
+                else        MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier   = Modifier.clickable(enabled = !isLast) { onNavigate(target) }
+            )
+            if (!isLast) {
+                Icon(Icons.Default.ChevronRight, null,
+                    modifier = Modifier.size(14.dp).padding(horizontal = 2.dp),
+                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
             }
         }
     }
 }
 
-// ── Department node ───────────────────────────────────────────────────────────
+// ── Companies view ────────────────────────────────────────────────────────────
 
 @Composable
-private fun DeptNode(
-    dept           : MUDepartment,
-    companyKey     : String,
-    isExpanded     : Boolean,
-    onToggle       : () -> Unit,
-    roles          : List<MURoleInfo>,
-    expandedRoles  : Set<String>,
-    onRoleToggle   : (String) -> Unit,
-    getUsers       : (String) -> List<MUUser>,
-    onUserClick    : (MUUser) -> Unit,
-    onToggleStatus : (MUUser) -> Unit,
-    onDelete       : (MUUser) -> Unit
+private fun CompaniesView(
+    companies: List<MUCompany>,
+    isLoading: Boolean,
+    onClick  : (MUCompany) -> Unit
 ) {
-    Card(
-        Modifier.fillMaxWidth(),
-        shape  = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
+    if (isLoading && companies.isEmpty()) { LoadingView(); return }
+    if (companies.isEmpty()) {
+        EmptyView(Icons.Default.Business, "No companies found")
+        return
+    }
+    LazyColumn(
+        contentPadding      = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onToggle() }
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+        items(companies, key = { it.sanitizedName }) { company ->
+            ExplorerFolderCard(
+                icon       = Icons.Default.Business,
+                iconColor  = Color(0xFF1565C0),
+                title      = company.originalName,
+                meta1      = "${company.totalUsers} users",
+                meta2      = "${company.activeUsers} active",
+                onClick    = { onClick(company) }
+            )
+        }
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+// ── Departments view ──────────────────────────────────────────────────────────
+
+@Composable
+private fun DepartmentsView(
+    company: MUCompany,
+    depts  : List<MUDepartment>,
+    onClick: (MUDepartment) -> Unit
+) {
+    if (depts.isEmpty()) { EmptyView(Icons.Default.AccountTree, "No departments"); return }
+    LazyColumn(
+        contentPadding      = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            SectionHeader(
+                "Departments in ${company.originalName}",
+                "${depts.size} department${if (depts.size != 1) "s" else ""}"
+            )
+        }
+        items(depts, key = { it.sanitizedName }) { dept ->
+            ExplorerFolderCard(
+                icon      = Icons.Default.AccountTree,
+                iconColor = Color(0xFF2E7D32),
+                title     = dept.departmentName,
+                meta1     = "${dept.userCount} users",
+                meta2     = "${dept.roles.size} roles",
+                onClick   = { onClick(dept) }
+            )
+        }
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+// ── Roles view ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun RolesView(
+    company: MUCompany,
+    dept   : MUDepartment,
+    roles  : List<MURoleInfo>,
+    onClick: (MURoleInfo) -> Unit
+) {
+    if (roles.isEmpty()) { EmptyView(Icons.Default.Group, "No roles in this department"); return }
+    LazyColumn(
+        contentPadding      = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            SectionHeader(
+                dept.departmentName,
+                "${roles.size} role${if (roles.size != 1) "s" else ""}"
+            )
+        }
+        items(roles, key = { it.roleName }) { role ->
+            ExplorerFolderCard(
+                icon      = Icons.Default.Group,
+                iconColor = roleColor(role.roleName),
+                title     = role.roleName,
+                meta1     = "${role.userCount} users",
+                meta2     = "${role.activeUsers} active",
+                badge     = if (role.userCount > 0) role.userCount.toString() else null,
+                onClick   = { onClick(role) }
+            )
+        }
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+// ── Users view ────────────────────────────────────────────────────────────────
+
+@Composable
+private fun UsersView(
+    users         : List<MUUser>,
+    currentRole   : String,
+    isLoading     : Boolean,
+    onUserClick   : (MUUser) -> Unit,
+    onEditUser    : (MUUser) -> Unit,
+    onToggleStatus: (MUUser) -> Unit,
+    onDelete      : (MUUser) -> Unit
+) {
+    if (users.isEmpty()) { EmptyView(Icons.Default.PersonSearch, "No users in this role"); return }
+    LazyColumn(
+        contentPadding      = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            SectionHeader(
+                "${users.size} user${if (users.size != 1) "s" else ""}",
+                "${users.count { it.isActive }} active · ${users.count { !it.isActive }} inactive"
+            )
+        }
+        items(users, key = { it.id }) { user ->
+            UserCard(
+                user           = user,
+                canEdit        = canEdit(currentRole, user.role),
+                onUserClick    = { onUserClick(user) },
+                onEditUser     = { onEditUser(user) },
+                onToggleStatus = { onToggleStatus(user) },
+                onDelete       = { onDelete(user) }
+            )
+        }
+        item { Spacer(Modifier.height(80.dp)) }
+    }
+}
+
+// ── Search results view ───────────────────────────────────────────────────────
+
+@Composable
+private fun SearchResultsView(
+    users         : List<MUUser>,
+    currentRole   : String,
+    onUserClick   : (MUUser) -> Unit,
+    onEditUser    : (MUUser) -> Unit,
+    onToggleStatus: (MUUser) -> Unit,
+    onDelete      : (MUUser) -> Unit
+) {
+    if (users.isEmpty()) {
+        EmptyView(Icons.Default.SearchOff, "No results found"); return
+    }
+    LazyColumn(
+        contentPadding      = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            SectionHeader(
+                "${users.size} result${if (users.size != 1) "s" else ""}",
+                "across all departments"
+            )
+        }
+        items(users, key = { it.id }) { user ->
+            // In search mode show company + dept as context
+            UserCard(
+                user           = user,
+                canEdit        = canEdit(currentRole, user.role),
+                showContext    = true,
+                onUserClick    = { onUserClick(user) },
+                onEditUser     = { onEditUser(user) },
+                onToggleStatus = { onToggleStatus(user) },
+                onDelete       = { onDelete(user) }
+            )
+        }
+        item { Spacer(Modifier.height(80.dp)) }
+    }
+}
+
+// ── Explorer folder card ──────────────────────────────────────────────────────
+
+@Composable
+private fun ExplorerFolderCard(
+    icon     : ImageVector,
+    iconColor: Color,
+    title    : String,
+    meta1    : String,
+    meta2    : String,
+    badge    : String?  = null,
+    onClick  : () -> Unit
+) {
+    val scale by animateFloatAsState(1f, spring(), label = "scale")
+
+    Card(
+        modifier  = Modifier.fillMaxWidth().scale(scale).clickable { onClick() },
+        shape     = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(3.dp),
+        colors    = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier          = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Icon box
+            Box(
+                Modifier.size(52.dp).clip(RoundedCornerShape(14.dp))
+                    .background(iconColor.copy(0.12f)),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null,
-                    tint     = Color(0xFF4CAF50),
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(Modifier.width(6.dp))
-                Icon(
-                    Icons.Default.AccountTree, null,
-                    tint     = Color(0xFF4CAF50),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        dept.departmentName,
-                        style      = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        "${dept.userCount} users",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Badge(containerColor = Color(0xFF4CAF50)) {
-                    Text(
-                        "${roles.size}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White
-                    )
+                Icon(icon, null,
+                    tint     = iconColor,
+                    modifier = Modifier.size(26.dp))
+            }
+
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(3.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MiniChip(meta1, iconColor)
+                    MiniChip(meta2, iconColor.copy(0.7f))
                 }
             }
 
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter   = fadeIn() + expandVertically(),
-                exit    = fadeOut() + shrinkVertically()
-            ) {
-                Column(
-                    Modifier.padding(start = 16.dp, bottom = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+            if (badge != null) {
+                Box(
+                    Modifier.size(28.dp).clip(CircleShape)
+                        .background(iconColor.copy(0.15f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    roles.forEach { role: MURoleInfo ->
-                        val roleKey = "$companyKey|${dept.sanitizedName}|${role.roleName}"
-                        RoleNode(
-                            role           = role,
-                            isExpanded     = expandedRoles.contains(roleKey),
-                            onToggle       = { onRoleToggle(role.roleName) },
-                            users          = getUsers(role.roleName),
-                            onUserClick    = onUserClick,
-                            onToggleStatus = onToggleStatus,
-                            onDelete       = onDelete
-                        )
-                    }
+                    Text(badge, fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold, color = iconColor)
                 }
             }
+
+            Icon(Icons.Default.ChevronRight, null,
+                modifier = Modifier.size(20.dp),
+                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f))
         }
     }
 }
 
-// ── Role node ─────────────────────────────────────────────────────────────────
+// ── User card ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun RoleNode(
-    role           : MURoleInfo,
-    isExpanded     : Boolean,
-    onToggle       : () -> Unit,
-    users          : List<MUUser>,
-    onUserClick    : (MUUser) -> Unit,
-    onToggleStatus : (MUUser) -> Unit,
-    onDelete       : (MUUser) -> Unit
-) {
-    Card(
-        Modifier.fillMaxWidth(),
-        shape  = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Column {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onToggle() }
-                    .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null,
-                    tint     = Color(0xFF9C27B0),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(Modifier.width(6.dp))
-                Icon(
-                    Icons.Default.Group, null,
-                    tint     = Color(0xFF9C27B0),
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    role.roleName,
-                    modifier   = Modifier.weight(1f),
-                    style      = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Badge(containerColor = Color(0xFF9C27B0)) {
-                    Text(
-                        "${users.size}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White
-                    )
-                }
-            }
-
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter   = fadeIn() + expandVertically(),
-                exit    = fadeOut() + shrinkVertically()
-            ) {
-                Column(
-                    Modifier.padding(start = 12.dp, bottom = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    if (users.isEmpty()) {
-                        Text(
-                            "No users in this role",
-                            Modifier.padding(8.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        users.forEach { user: MUUser ->
-                            UserRow(
-                                user          = user,
-                                onUserClick   = { onUserClick(user) },
-                                onToggleStatus = { onToggleStatus(user) },
-                                onDelete      = { onDelete(user) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── User row ──────────────────────────────────────────────────────────────────
-
-@Composable
-private fun UserRow(
+private fun UserCard(
     user          : MUUser,
+    canEdit       : Boolean,
+    showContext   : Boolean = false,
     onUserClick   : () -> Unit,
-    onToggleStatus : () -> Unit,
+    onEditUser    : () -> Unit,
+    onToggleStatus: () -> Unit,
     onDelete      : () -> Unit
 ) {
+    var showMenu by remember { mutableStateOf(false) }
+
     Card(
-        Modifier.fillMaxWidth().clickable { onUserClick() },
-        shape  = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(
+        modifier  = Modifier.fillMaxWidth().clickable { onUserClick() },
+        shape     = RoundedCornerShape(14.dp),
+        elevation = CardDefaults.cardElevation(2.dp),
+        colors    = CardDefaults.cardColors(
             containerColor = if (user.isActive)
                 MaterialTheme.colorScheme.surface
             else
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                MaterialTheme.colorScheme.surfaceVariant.copy(0.6f)
         )
     ) {
         Row(
-            Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier          = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Avatar
             Box(
-                Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
+                Modifier.size(48.dp).clip(CircleShape)
+                    .background(roleColor(user.role).copy(0.15f)),
                 contentAlignment = Alignment.Center
             ) {
                 if (user.imageUrl.isNotBlank()) {
                     AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
+                        model              = ImageRequest.Builder(LocalContext.current)
                             .data(user.imageUrl).crossfade(true).build(),
                         contentDescription = "avatar",
-                        modifier     = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        modifier           = Modifier.fillMaxSize(),
+                        contentScale       = ContentScale.Crop
                     )
                 } else {
-                    Text(
-                        user.name.take(2).uppercase(),
+                    Text(user.name.take(2).uppercase(),
+                        fontSize   = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        style      = MaterialTheme.typography.labelSmall,
-                        color      = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                        color      = roleColor(user.role))
                 }
             }
 
-            Spacer(Modifier.width(10.dp))
-
-            // Info
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        user.name,
-                        style      = MaterialTheme.typography.bodySmall,
+                Row(
+                    verticalAlignment      = Alignment.CenterVertically,
+                    horizontalArrangement  = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(user.name,
                         fontWeight = FontWeight.SemiBold,
+                        fontSize   = 14.sp,
                         maxLines   = 1,
                         overflow   = TextOverflow.Ellipsis,
-                        modifier   = Modifier.weight(1f, fill = false)
-                    )
-                    Spacer(Modifier.width(4.dp))
+                        modifier   = Modifier.weight(1f, fill = false))
+                    // Active / Inactive pill
                     Surface(
-                        color = if (user.isActive)
-                            Color(0xFF4CAF50).copy(alpha = 0.15f)
-                        else
-                            Color(0xFFF44336).copy(alpha = 0.15f),
+                        color = if (user.isActive) Color(0xFF4CAF50).copy(0.15f)
+                        else               Color(0xFFF44336).copy(0.15f),
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
                             if (user.isActive) "Active" else "Inactive",
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                            style    = MaterialTheme.typography.labelSmall,
-                            color    = if (user.isActive) Color(0xFF4CAF50)
-                            else Color(0xFFF44336)
+                            modifier   = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                            fontSize   = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = if (user.isActive) Color(0xFF2E7D32)
+                            else               Color(0xFFC62828)
                         )
                     }
                 }
-                Text(
-                    "${user.designation} · ${user.experience}y exp",
-                    style    = MaterialTheme.typography.labelSmall,
+                Text(user.email,
+                    fontSize = 11.sp,
                     color    = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                    overflow = TextOverflow.Ellipsis)
+                if (user.designation.isNotBlank() || user.experience > 0) {
+                    Text(
+                        buildString {
+                            if (user.designation.isNotBlank()) append(user.designation)
+                            if (user.experience > 0) append(" · ${user.experience}y exp")
+                            if (user.activeProjects > 0) append(" · ${user.activeProjects} proj")
+                        },
+                        fontSize = 11.sp,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                // Show company + dept in search mode
+                if (showContext) {
+                    Spacer(Modifier.height(2.dp))
+                    Text("${user.originalCompany} › ${user.originalDept}",
+                        fontSize = 10.sp,
+                        color    = MaterialTheme.colorScheme.primary.copy(0.7f))
+                }
             }
 
             // Actions
-            IconButton(onClick = onToggleStatus, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    if (user.isActive) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    null,
-                    modifier = Modifier.size(16.dp),
-                    tint     = if (user.isActive) Color(0xFFF57C00) else Color(0xFF4CAF50)
-                )
-            }
-            IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    Icons.Default.Delete, null,
-                    modifier = Modifier.size(16.dp),
-                    tint     = MaterialTheme.colorScheme.error
-                )
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.MoreVert, null,
+                        modifier = Modifier.size(18.dp),
+                        tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(
+                    expanded         = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    if (canEdit) {
+                        DropdownMenuItem(
+                            text        = { Text("Edit Profile") },
+                            leadingIcon = { Icon(Icons.Default.Edit, null,
+                                tint = Color(0xFF1976D2)) },
+                            onClick     = { showMenu = false; onEditUser() }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text        = {
+                            Text(if (user.isActive) "Deactivate" else "Activate")
+                        },
+                        leadingIcon = {
+                            Icon(
+                                if (user.isActive) Icons.Default.Pause
+                                else               Icons.Default.PlayArrow,
+                                null,
+                                tint = if (user.isActive) Color(0xFFF57C00)
+                                else               Color(0xFF4CAF50)
+                            )
+                        },
+                        onClick = { showMenu = false; onToggleStatus() }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text        = { Text("Delete",
+                            color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null,
+                            tint = MaterialTheme.colorScheme.error) },
+                        onClick     = { showMenu = false; onDelete() }
+                    )
+                }
             }
         }
     }
@@ -557,95 +793,170 @@ private fun UserRow(
 private fun UserDetailDialog(
     user          : MUUser,
     onDismiss     : () -> Unit,
-    onToggleStatus : () -> Unit
+    onToggleStatus: () -> Unit,
+    onEdit        : () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    Modifier.size(50.dp).clip(CircleShape)
+                        .background(roleColor(user.role).copy(0.15f)),
                     contentAlignment = Alignment.Center
                 ) {
                     if (user.imageUrl.isNotBlank()) {
                         AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
+                            model              = ImageRequest.Builder(LocalContext.current)
                                 .data(user.imageUrl).crossfade(true).build(),
                             contentDescription = "avatar",
-                            modifier     = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                            modifier           = Modifier.fillMaxSize(),
+                            contentScale       = ContentScale.Crop
                         )
                     } else {
-                        Text(
-                            user.name.take(2).uppercase(),
+                        Text(user.name.take(2).uppercase(),
+                            fontSize   = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color      = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                            color      = roleColor(user.role))
                     }
                 }
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
                 Column {
                     Text(user.name, fontWeight = FontWeight.Bold)
-                    Text(
-                        user.email,
+                    Text(user.email,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                DetailLine("Designation",     user.designation)
-                DetailLine("Role",            user.role)
-                DetailLine("Phone",           user.phoneNumber)
-                DetailLine("Experience",      "${user.experience} years")
-                DetailLine("Active Projects", user.activeProjects.toString())
-                DetailLine("Completed",       user.completedProjects.toString())
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                DialogRow(Icons.Default.Badge,           "Designation", user.designation)
+                DialogRow(Icons.Default.ManageAccounts,  "Role",        user.role)
+                DialogRow(Icons.Default.Groups,          "Department",  user.originalDept)
+                DialogRow(Icons.Default.Business,        "Company",     user.originalCompany)
+                DialogRow(Icons.Default.Phone,           "Phone",       user.phoneNumber)
+                DialogRow(Icons.Default.Timeline,        "Experience",
+                    if (user.experience > 0) "${user.experience} yrs" else "—")
+                DialogRow(Icons.Default.Folder,          "Projects",
+                    "${user.completedProjects} done · ${user.activeProjects} active")
                 if (user.totalComplaints > 0)
-                    DetailLine("Issues", user.totalComplaints.toString(), isRed = true)
-                DetailLine("Status", if (user.isActive) "Active" else "Inactive")
-                DetailLine("Path", user.documentPath)
+                    DialogRow(Icons.Default.Warning, "Issues",
+                        "${user.totalComplaints}", isWarning = true)
             }
         },
         confirmButton = {
-            Button(
-                onClick = onToggleStatus,
-                colors  = ButtonDefaults.buttonColors(
-                    containerColor = if (user.isActive) Color(0xFFF57C00)
-                    else Color(0xFF4CAF50)
-                )
-            ) { Text(if (user.isActive) "Deactivate" else "Activate") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, null, Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Edit")
+                }
+                Button(
+                    onClick = onToggleStatus,
+                    colors  = ButtonDefaults.buttonColors(
+                        containerColor = if (user.isActive) Color(0xFFF57C00)
+                        else               Color(0xFF2E7D32)
+                    )
+                ) { Text(if (user.isActive) "Deactivate" else "Activate") }
+            }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text("Close") }
         }
     )
 }
 
+// ── Reusable small composables ────────────────────────────────────────────────
+
 @Composable
-private fun DetailLine(label: String, value: String, isRed: Boolean = false) {
-    if (value.isBlank()) return
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            "$label:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            value,
-            style      = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            color      = if (isRed) MaterialTheme.colorScheme.error
-            else MaterialTheme.colorScheme.onSurface,
-            textAlign  = TextAlign.End,
-            modifier   = Modifier.weight(1f).padding(start = 8.dp)
-        )
+private fun LoadingView() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = Color(0xFF1565C0))
+            Spacer(Modifier.height(12.dp))
+            Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
+}
+
+@Composable
+private fun EmptyView(icon: ImageVector, message: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, null, Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f))
+            Spacer(Modifier.height(12.dp))
+            Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, subtitle: String) {
+    Column(Modifier.padding(bottom = 6.dp)) {
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun MiniChip(label: String, color: Color) {
+    Surface(color = color.copy(0.1f), shape = RoundedCornerShape(6.dp)) {
+        Text(label,
+            modifier   = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            fontSize   = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color      = color)
+    }
+}
+
+@Composable
+private fun DialogRow(
+    icon     : ImageVector,
+    label    : String,
+    value    : String,
+    isWarning: Boolean = false
+) {
+    if (value.isBlank() || value == "—") return
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(14.dp),
+            tint = if (isWarning) MaterialTheme.colorScheme.error
+            else           MaterialTheme.colorScheme.primary.copy(0.65f))
+        Spacer(Modifier.width(8.dp))
+        Text("$label: ",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value,
+            style      = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color      = if (isWarning) MaterialTheme.colorScheme.error
+            else           MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+private fun canEdit(editorRole: String, targetRole: String): Boolean = when (editorRole) {
+    "Administrator" -> true
+    "Manager", "HR" -> targetRole in setOf("Employee", "Intern", "Team Lead")
+    else            -> false
+}
+
+private fun roleColor(role: String): Color = when (role) {
+    "Administrator" -> Color(0xFFD32F2F)
+    "Manager"       -> Color(0xFF1976D2)
+    "HR"            -> Color(0xFF388E3C)
+    "Team Lead"     -> Color(0xFFF57C00)
+    "Employee"      -> Color(0xFF7B1FA2)
+    "Intern"        -> Color(0xFF455A64)
+    else            -> Color(0xFF616161)
+}
+
+private val ExplorerLevel.depth: Int get() = when (this) {
+    is ExplorerLevel.Companies   -> 0
+    is ExplorerLevel.Departments -> 1
+    is ExplorerLevel.Roles       -> 2
+    is ExplorerLevel.Users       -> 3
 }

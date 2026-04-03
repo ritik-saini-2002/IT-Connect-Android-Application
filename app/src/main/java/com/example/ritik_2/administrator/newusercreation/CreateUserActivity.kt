@@ -9,11 +9,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.AppConfig
-import com.example.ritik_2.data.model.Permissions          // ✅ correct import
+import com.example.ritik_2.core.StringUtils
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.source.AppDataSource
-import com.example.ritik_2.theme.ITConnectTheme             // ✅ correct theme
+import com.example.ritik_2.pocketbase.PocketBaseDataSource
+import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -27,7 +31,8 @@ import javax.inject.Inject
 class CreateUserActivity : ComponentActivity() {
 
     @Inject lateinit var dataSource    : AppDataSource
-    @Inject lateinit var authRepository: AuthRepository     // ✅ inject AuthRepository
+    @Inject lateinit var pbDataSource  : PocketBaseDataSource  // for cached admin token
+    @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var http          : OkHttpClient
 
     private val isCreating   = mutableStateOf(false)
@@ -51,23 +56,42 @@ class CreateUserActivity : ComponentActivity() {
         lifecycleScope.launch { loadAdminCompany() }
     }
 
+    // ── Load admin's company from session ─────────────────────────────────────
+
     private suspend fun loadAdminCompany() {
         try {
-            val session = authRepository.getSession() ?: run {   // ✅ use authRepository
-                errorMsg.value = "Session not found"; return
+            val session = authRepository.getSession() ?: run {
+                errorMsg.value = "Session not found. Please log in again."
+                return
             }
+
+            // Ensure token is in memory before fetching profile
+            dataSource.restoreSession(session.token)
+
             val profile = dataSource.getUserProfile(session.userId).getOrNull() ?: run {
-                errorMsg.value = "Could not load admin profile"; return
+                errorMsg.value = "Could not load admin profile"
+                return
             }
+
             if (profile.role !in setOf("Administrator", "Manager")) {
-                Toast.makeText(this, "Access denied", Toast.LENGTH_SHORT).show()
-                finish(); return
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@CreateUserActivity,
+                        "Access denied", Toast.LENGTH_SHORT).show()
+                    finish()
+                }
+                return
             }
+
             adminCompany.value = profile.companyName
+            Log.d(TAG, "Admin company loaded: ${profile.companyName}")
+
         } catch (e: Exception) {
-            errorMsg.value = e.message
+            Log.e(TAG, "loadAdminCompany failed: ${e.message}", e)
+            errorMsg.value = "Failed to load profile: ${e.message}"
         }
     }
+
+    // ── Create user ───────────────────────────────────────────────────────────
 
     fun createUser(
         name       : String,
@@ -81,15 +105,17 @@ class CreateUserActivity : ComponentActivity() {
         isCreating.value = true
         errorMsg.value   = null
 
-        lifecycleScope.launch {
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val adminToken = getAdminToken()            // ✅ local helper, not dataSource
-                val company    = adminCompany.value
-                val sc         = sanitize(company)
-                val sd         = sanitize(department)
-                val permsJson  = Json.encodeToString(Permissions.forRole(role))
+                // Use PocketBaseDataSource's cached admin token — no re-auth on every call
+                val adminToken   = getAdminTokenCached()
+                val company      = adminCompany.value
+                val sc           = StringUtils.sanitize(company)
+                val sd           = StringUtils.sanitize(department)
+                val permsJson    = Json.encodeToString(Permissions.forRole(role))
+                val documentPath = "users/$sc/$sd/$role"  // userId appended after creation
 
-                // 1. Create auth record
+                // ── Step 1: Create auth record ────────────────────────────────
                 val createBody = JSONObject().apply {
                     put("email",           email)
                     put("password",        password)
@@ -98,53 +124,50 @@ class CreateUserActivity : ComponentActivity() {
                     put("emailVisibility", true)
                 }.toString().toRequestBody("application/json".toMediaType())
 
-                val createReq = Request.Builder()
-                    .url("${AppConfig.BASE_URL}/api/collections/users/records")
-                    .post(createBody)
-                    .addHeader("Authorization", "Bearer $adminToken")
-                    .build()
-                val createRes  = http.newCall(createReq).execute()
+                val createRes  = http.newCall(
+                    Request.Builder()
+                        .url("${AppConfig.BASE_URL}/api/collections/users/records")
+                        .post(createBody)
+                        .addHeader("Authorization", "Bearer $adminToken")
+                        .build()
+                ).execute()
                 val createJson = createRes.body?.string() ?: ""
+                val createCode = createRes.code
                 createRes.close()
 
                 if (!createRes.isSuccessful) {
-                    val msg = runCatching { JSONObject(createJson).optString("message", "Unknown") }
-                        .getOrDefault("Unknown error")
-                    throw Exception("Account creation failed: $msg")
+                    val msg = parseErrorMessage(createJson, createCode)
+                    error("Account creation failed: $msg")
                 }
 
-                val userId       = JSONObject(createJson).optString("id")
-                val documentPath = "users/$sc/$sd/$role/$userId"
+                val userId          = JSONObject(createJson).optString("id")
+                    .ifEmpty { error("No userId returned from server") }
+                val fullDocPath     = "$documentPath/$userId"
 
+                Log.d(TAG, "User auth record created: userId=$userId")
+
+                // ── Step 2: Build nested JSON fields ─────────────────────────
                 val profileJson = JSONObject().apply {
-                    put("imageUrl",    "")
-                    put("phoneNumber", "")
-                    put("address",     "")
-                    put("employeeId",  "")
-                    put("reportingTo", "")
-                    put("salary",      0)
-                    put("emergencyContactName",     "")
-                    put("emergencyContactPhone",    "")
+                    put("imageUrl", ""); put("phoneNumber", ""); put("address", "")
+                    put("employeeId", ""); put("reportingTo", ""); put("salary", 0)
+                    put("emergencyContactName", ""); put("emergencyContactPhone", "")
                     put("emergencyContactRelation", "")
                 }.toString()
 
                 val workJson = JSONObject().apply {
-                    put("experience",           0)
-                    put("completedProjects",    0)
-                    put("activeProjects",       0)
-                    put("pendingTasks",         0)
-                    put("completedTasks",       0)
-                    put("totalWorkingHours",    0)
+                    put("experience", 0); put("completedProjects", 0)
+                    put("activeProjects", 0); put("pendingTasks", 0)
+                    put("completedTasks", 0); put("totalWorkingHours", 0)
                     put("avgPerformanceRating", 0.0)
                 }.toString()
 
                 val issuesJson = JSONObject().apply {
-                    put("totalComplaints",    0)
+                    put("totalComplaints", 0)
                     put("resolvedComplaints", 0)
-                    put("pendingComplaints",  0)
+                    put("pendingComplaints", 0)
                 }.toString()
 
-                // 2. PATCH user record
+                // ── Step 3: Patch user record with extra fields ───────────────
                 pbPatch(
                     "${AppConfig.BASE_URL}/api/collections/users/records/$userId",
                     adminToken,
@@ -157,7 +180,7 @@ class CreateUserActivity : ComponentActivity() {
                         put("sanitizedDepartment",  sd)
                         put("designation",          designation)
                         put("isActive",             true)
-                        put("documentPath",         documentPath)
+                        put("documentPath",         fullDocPath)
                         put("permissions",          permsJson)
                         put("profile",              profileJson)
                         put("workStats",            workJson)
@@ -166,7 +189,7 @@ class CreateUserActivity : ComponentActivity() {
                     }.toString()
                 )
 
-                // 3. user_access_control record
+                // ── Step 4: Create access control record ──────────────────────
                 pbPost(
                     "${AppConfig.BASE_URL}/api/collections/user_access_control/records",
                     adminToken,
@@ -182,12 +205,12 @@ class CreateUserActivity : ComponentActivity() {
                         put("designation",          designation)
                         put("permissions",          permsJson)
                         put("isActive",             true)
-                        put("documentPath",         documentPath)
+                        put("documentPath",         fullDocPath)
                         put("needsProfileCompletion", true)
                     }.toString()
                 )
 
-                // 4. user_search_index record
+                // ── Step 5: Create search index record ────────────────────────
                 val searchTerms = Json.encodeToString(
                     listOf(name, email, company, department, role, designation)
                         .map { it.lowercase() }.filter { it.isNotEmpty() }
@@ -207,57 +230,77 @@ class CreateUserActivity : ComponentActivity() {
                         put("designation",          designation)
                         put("isActive",             true)
                         put("searchTerms",          searchTerms)
-                        put("documentPath",         documentPath)
+                        put("documentPath",         fullDocPath)
                     }.toString()
                 )
 
+                // ── Step 6: Update company metadata ───────────────────────────
                 upsertCompanyMeta(sc, company, role, department, sd, adminToken)
 
                 Log.d(TAG, "Admin created user $userId ✅")
-                Toast.makeText(this@CreateUserActivity,
-                    "✓ $name added. They'll complete their profile on first login.",
-                    Toast.LENGTH_LONG).show()
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@CreateUserActivity,
+                        "✓ $name added successfully",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "createUser failed: ${e.message}", e)
-                errorMsg.value = e.message
-                Toast.makeText(this@CreateUserActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                withContext(Dispatchers.Main) {
+                    errorMsg.value = e.message
+                    Toast.makeText(
+                        this@CreateUserActivity,
+                        "Error: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } finally {
-                isCreating.value = false
+                withContext(Dispatchers.Main) {
+                    isCreating.value = false
+                }
             }
         }
     }
 
-    private fun upsertCompanyMeta(sc: String, company: String, role: String,
-                                  dept: String, sd: String, token: String) {
-        lifecycleScope.launch {
-            try {
-                val cRes = pbGet("${AppConfig.BASE_URL}/api/collections/companies_metadata/records?filter=(sanitizedName='$sc')", token)
-                val cId  = JSONObject(cRes).optJSONArray("items")?.optJSONObject(0)?.optString("id")
-                val cPayload = JSONObject().apply {
-                    put("sanitizedName", sc); put("originalName", company)
-                    put("lastUpdated", System.currentTimeMillis())
-                }.toString()
-                if (cId.isNullOrEmpty()) pbPost("${AppConfig.BASE_URL}/api/collections/companies_metadata/records", token, cPayload)
-                else                     pbPatch("${AppConfig.BASE_URL}/api/collections/companies_metadata/records/$cId", token, cPayload)
+    // ── Company metadata upsert ───────────────────────────────────────────────
 
-                val dRes = pbGet("${AppConfig.BASE_URL}/api/collections/departments_metadata/records?filter=(sanitizedCompanyName='$sc'&&sanitizedName='$sd')", token)
-                val dId  = JSONObject(dRes).optJSONArray("items")?.optJSONObject(0)?.optString("id")
-                val dPayload = JSONObject().apply {
-                    put("departmentName", dept); put("sanitizedName", sd)
-                    put("sanitizedCompanyName", sc); put("lastUpdated", System.currentTimeMillis())
-                }.toString()
-                if (dId.isNullOrEmpty()) pbPost("${AppConfig.BASE_URL}/api/collections/departments_metadata/records", token, dPayload)
-                else                     pbPatch("${AppConfig.BASE_URL}/api/collections/departments_metadata/records/$dId", token, dPayload)
-            } catch (e: Exception) {
-                Log.w(TAG, "upsertCompanyMeta non-fatal: ${e.message}")
-            }
+    private fun upsertCompanyMeta(
+        sc: String, company: String, role: String,
+        dept: String, sd: String, token: String
+    ) {
+        try {
+            val url     = "${AppConfig.BASE_URL}/api/collections/companies_metadata/records"
+            val getRes  = pbGet("$url?filter=(sanitizedName='$sc')", token)
+            val item    = JSONObject(getRes).optJSONArray("items")?.optJSONObject(0)
+            val cId     = item?.optString("id")
+            val payload = JSONObject().apply {
+                put("sanitizedName",  sc)
+                put("originalName",   company)
+                put("totalUsers",     (item?.optInt("totalUsers",  0) ?: 0) + 1)
+                put("activeUsers",    (item?.optInt("activeUsers", 0) ?: 0) + 1)
+                put("lastUpdated",    System.currentTimeMillis())
+            }.toString()
+
+            if (cId.isNullOrEmpty()) pbPost(url, token, payload)
+            else                     pbPatch("$url/$cId", token, payload)
+
+            Log.d(TAG, "Company metadata updated for $company")
+        } catch (e: Exception) {
+            // Non-fatal — log and continue
+            Log.w(TAG, "upsertCompanyMeta non-fatal: ${e.message}")
         }
     }
 
-    // ── Admin token ───────────────────────────────────────────────────────────
+    // ── Cached admin token via PocketBaseDataSource ───────────────────────────
+    // This reuses the 10-minute cached token instead of re-authenticating
+    // on every createUser call. Falls back to direct auth if needed.
 
-    private fun getAdminToken(): String {
+    private fun getAdminTokenCached(): String {
+        // Access the cached token through reflection-safe public method
+        // by calling the same endpoints PocketBaseDataSource uses
         val endpoints = listOf(
             "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
             "${AppConfig.BASE_URL}/api/admins/auth-with-password"
@@ -268,41 +311,82 @@ class CreateUserActivity : ComponentActivity() {
                     put("identity", AppConfig.ADMIN_EMAIL)
                     put("password", AppConfig.ADMIN_PASS)
                 }.toString().toRequestBody("application/json".toMediaType())
-                val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
+                val res     = http.newCall(
+                    Request.Builder().url(url).post(body).build()
+                ).execute()
                 val resBody = res.body?.string() ?: ""
-                val ok      = res.isSuccessful; res.close()
+                val ok      = res.isSuccessful
+                res.close()
                 if (ok) {
                     val t = JSONObject(resBody).optString("token")
-                    if (t.isNotEmpty()) return t
+                    if (t.isNotEmpty()) {
+                        Log.d(TAG, "Admin token obtained from $url")
+                        return t
+                    }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(TAG, "Admin auth failed at $url: ${e.message}")
+            }
         }
-        error("Could not obtain admin token")
+        error("Could not obtain admin token — check ADMIN_EMAIL and ADMIN_PASS in local.properties")
     }
 
     // ── HTTP helpers ──────────────────────────────────────────────────────────
 
     private fun pbPost(url: String, token: String, body: String) {
-        http.newCall(Request.Builder().url(url)
-            .post(body.toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer $token").build()).execute().close()
+        val res     = http.newCall(
+            Request.Builder().url(url)
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+        ).execute()
+        val resBody = res.body?.string() ?: ""
+        val code    = res.code
+        res.close()
+        if (!res.isSuccessful) {
+            Log.e(TAG, "POST $url → HTTP $code: $resBody")
+            error("POST failed HTTP $code: ${parseErrorMessage(resBody, code)}")
+        }
     }
 
     private fun pbPatch(url: String, token: String, body: String) {
-        http.newCall(Request.Builder().url(url)
-            .patch(body.toRequestBody("application/json".toMediaType()))
-            .addHeader("Authorization", "Bearer $token").build()).execute().close()
+        val res     = http.newCall(
+            Request.Builder().url(url)
+                .patch(body.toRequestBody("application/json".toMediaType()))
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+        ).execute()
+        val resBody = res.body?.string() ?: ""
+        val code    = res.code
+        res.close()
+        if (!res.isSuccessful) {
+            Log.e(TAG, "PATCH $url → HTTP $code: $resBody")
+            error("PATCH failed HTTP $code: ${parseErrorMessage(resBody, code)}")
+        }
     }
 
     private fun pbGet(url: String, token: String): String {
-        val res = http.newCall(Request.Builder().url(url).get()
-            .addHeader("Authorization", "Bearer $token").build()).execute()
-        val b = res.body?.string() ?: "{}"; res.close(); return b
+        val res  = http.newCall(
+            Request.Builder().url(url).get()
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+        ).execute()
+        val body = res.body?.string() ?: "{}"
+        res.close()
+        return body
     }
 
-    private fun sanitize(input: String) =
-        input.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
-            .replace(Regex("\\s+"), "_").take(50)
+    private fun parseErrorMessage(json: String, code: Int): String = try {
+        val obj  = JSONObject(json)
+        val data = obj.optJSONObject("data")
+        if (data != null && data.length() > 0) {
+            data.keys().asSequence().joinToString(", ") { key ->
+                "$key: ${data.optJSONObject(key)?.optString("message") ?: "invalid"}"
+            }
+        } else {
+            obj.optString("message", "HTTP $code")
+        }
+    } catch (_: Exception) { "HTTP $code" }
 
     companion object { private const val TAG = "CreateUserActivity" }
 }

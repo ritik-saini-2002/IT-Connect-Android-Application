@@ -5,23 +5,17 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
-import com.example.ritik_2.administrator.AdministratorPanelActivity
+import com.example.ritik_2.administrator.manageuser.ManageUserActivity
+import com.example.ritik_2.administrator.newusercreation.CreateUserActivity
+import com.example.ritik_2.administrator.rolemanagement.RoleManagementActivity
 import com.example.ritik_2.auth.AuthRepository
-import com.example.ritik_2.contact.ContactActivity
+import com.example.ritik_2.auth.SessionStatus
 import com.example.ritik_2.login.LoginActivity
-import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.PcControlActivity
-import com.example.ritik_2.winshare.ServerConnectActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -30,108 +24,102 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+
     @Inject lateinit var authRepository: AuthRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
 
-        if (!authRepository.isLoggedIn) { navigateToLogin(); return }
-
-        val needsProfileCompletion = intent.getBooleanExtra("SHOW_COMPLETE_PROFILE_TOGGLE", false)
-
-        val session = authRepository.getSession()
-        val userId  = session?.userId
-        userId?.let { viewModel.loadUserProfile(it) }
-
-        // Refresh profile in background every time MainActivity resumes
-        lifecycleScope.launch {
-            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
-                userId?.let { viewModel.loadUserProfile(it, forceRefresh = true) }
-            }
-        }
+        val showProfileBanner = intent.getBooleanExtra(
+            "SHOW_COMPLETE_PROFILE_TOGGLE", false)
 
         setContent {
             ITConnectTheme {
-                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-
-                // Show profile completion toast once on entry
-                LaunchedEffect(Unit) {
-                    if (needsProfileCompletion) {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "Please complete your profile",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }
-
-                LaunchedEffect(uiState.error) {
-                    uiState.error?.let { error ->
-                        if (error.contains("deactivated") || error.contains("not authenticated")) {
-                            authRepository.logout()
-                            navigateToLogin()
-                        } else {
-                            Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
-                            viewModel.clearError()
-                        }
-                    }
-                }
+                val uiState = viewModel.uiState
 
                 MainScreen(
-                    uiState                  = uiState,
-                    onLogout                 = { performLogout() },
-                    onCardClick              = { handleCardClick(it) },
-                    onProfileClick = {
-                        val uid = uiState.userProfile?.id ?: return@MainScreen
-                        // Always go to ProfileActivity — edit button visibility
-                        // is controlled by role inside ProfileActivity itself
-                        navigateToProfile(uid)
-                    },
-                    showCompleteProfileBanner = needsProfileCompletion
+                    uiState                   = uiState,
+                    onLogout                  = { handleLogout() },
+                    onCardClick               = { id -> handleCardClick(id) },
+                    onProfileClick            = { handleProfileClick() },
+                    showCompleteProfileBanner = showProfileBanner
                 )
             }
         }
     }
 
-    private fun performLogout() {
-        lifecycleScope.launch {
-            authRepository.logout()
-            navigateToLogin()
-        }
-    }
-
-    private fun handleCardClick(cardId: Int) {
-        val intent = when (cardId) {
-            3    -> Intent(this, AdministratorPanelActivity::class.java)
-            4    -> Intent(this, ServerConnectActivity::class.java)
-            6    -> Intent(this, PcControlActivity::class.java)
-            8    -> Intent(this, ContactActivity::class.java)
-            else -> null
-        }
-        if (intent != null) startActivity(intent)
-        else toast("Feature coming soon!")
-    }
-
-    private fun navigateToProfile(userId: String) {
-        startActivity(Intent(this, ProfileActivity::class.java).putExtra("userId", userId))
-    }
-
-    private fun navigateToProfileCompletion(userId: String) {
-        startActivity(ProfileCompletionActivity.createIntent(this, userId))
-    }
-
-    private fun navigateToLogin() {
-        startActivity(Intent(this, LoginActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        })
-        finish()
-    }
-
     override fun onResume() {
         super.onResume()
-        if (!authRepository.isLoggedIn) navigateToLogin()
+        // Refresh profile in case admin changed something
+        viewModel.reload()
+        // Check if account was deactivated
+        lifecycleScope.launch { checkActiveStatus() }
     }
 
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    private fun handleCardClick(id: Int) {
+        when (id) {
+            3 -> {
+                // Admin Panel — open manage users for admins, role management for managers
+                val role = authRepository.getSession()?.role ?: ""
+                when (role) {
+                    "Administrator" -> startActivity(ManageUserActivity.createIntent(this))
+                    "Manager", "HR" -> startActivity(ManageUserActivity.createIntent(this))
+                    else -> Toast.makeText(this,
+                        "Access denied", Toast.LENGTH_SHORT).show()
+                }
+            }
+            6 -> startActivity(Intent(this, PcControlActivity::class.java))
+            7 -> {
+                // Settings — open own profile edit
+                handleProfileClick()
+            }
+            else -> {
+                // Handle other feature cards
+                Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun handleProfileClick() {
+        val userId = authRepository.getSession()?.userId ?: return
+        startActivity(
+            ProfileCompletionActivity.createIntent(
+                context    = this,
+                userId     = userId,
+                isEditMode = true
+            )
+        )
+    }
+
+    private fun handleLogout() {
+        lifecycleScope.launch {
+            authRepository.logout()
+            startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            })
+            finish()
+        }
+    }
+
+    private suspend fun checkActiveStatus() {
+        when (authRepository.validateSession()) {
+            is SessionStatus.Deactivated -> forceLogout(
+                "Your account has been deactivated. Contact your administrator.")
+            is SessionStatus.TokenInvalid -> forceLogout(
+                "Session expired. Please log in again.")
+            is SessionStatus.NoSession -> forceLogout("Please log in.")
+            is SessionStatus.Valid -> { /* all good */ }
+        }
+    }
+
+    private fun forceLogout(message: String) {
+        lifecycleScope.launch {
+            authRepository.logout()
+            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+            startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            })
+            finish()
+        }
+    }
 }

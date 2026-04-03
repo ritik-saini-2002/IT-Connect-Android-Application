@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -26,7 +28,6 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
 private data class FormState(
-    // Editable by everyone
     val address                  : String = "",
     val employeeId               : String = "",
     val reportingTo              : String = "",
@@ -36,7 +37,7 @@ private data class FormState(
     val emergencyContactPhone    : String = "",
     val emergencyContactRelation : String = "",
     val imageUri                 : Uri?   = null,
-    // Admin-only editable
+    // Admin editable
     val name                     : String = "",
     val phoneNumber              : String = "",
     val designation              : String = "",
@@ -66,27 +67,37 @@ private fun FormState.toSaveData(existingImageUrl: String) = ProfileSaveData(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileCompletionScreen(
-    viewModel        : ProfileCompletionViewModel,
-    onImagePickClick : () -> Unit,
-    onSaveProfile    : (ProfileSaveData) -> Unit,
-    onNavigateBack   : () -> Unit,
-    isEditMode       : Boolean = false,
-    isAdmin          : Boolean = false,
-    userId           : String  = ""
+    viewModel       : ProfileCompletionViewModel,
+    onImagePickClick: () -> Unit,
+    onSaveProfile   : (ProfileSaveData) -> Unit,
+    onNavigateBack  : () -> Unit,
+    isEditMode      : Boolean = false,
+    isAdmin         : Boolean = false,
+    isManager       : Boolean = false,   // Manager or HR editing another user
+    userId          : String  = ""
 ) {
-    val uiState     by viewModel.uiState.collectAsState()
-    val scrollState  = rememberLazyListState()
-    var form        by remember { mutableStateOf(FormState()) }
-    val isEditing    = uiState.isEditing
+    val uiState    by viewModel.uiState.collectAsState()
+    val scrollState = rememberLazyListState()
+    var form       by remember { mutableStateOf(FormState()) }
+    val isEditing   = uiState.isEditing
 
-    // Pre-fill from existing profile
+    // Determine screen title
+    val title = when {
+        !isEditMode -> "Complete Your Profile"
+        isAdmin     -> "Edit User Profile (Admin)"
+        isManager   -> "Edit User Profile"
+        else        -> "My Profile"
+    }
+
+    // Pre-fill form from loaded profile
     LaunchedEffect(uiState.userProfile) {
         uiState.userProfile?.let { p ->
             form = FormState(
                 address                  = p.address,
                 employeeId               = p.employeeId,
                 reportingTo              = p.reportingTo,
-                salary                   = if (p.salary > 0) p.salary.toBigDecimal().stripTrailingZeros().toPlainString() else "",
+                salary                   = if (p.salary > 0) p.salary.toBigDecimal()
+                    .stripTrailingZeros().toPlainString() else "",
                 experience               = if (p.experience > 0) p.experience.toString() else "",
                 emergencyContactName     = p.emergencyContactName,
                 emergencyContactPhone    = p.emergencyContactPhone,
@@ -107,57 +118,77 @@ fun ProfileCompletionScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        when {
-                            !isEditMode          -> "Complete Your Profile"
-                            isAdmin              -> "Edit User Profile"
-                            else                 -> "My Profile"
-                        },
-                        fontWeight = FontWeight.Bold
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                            )
+                        )
                     )
-                },
-                navigationIcon = {
-                    if (isEditMode) {
-                        IconButton(onClick = onNavigateBack) {
-                            Icon(Icons.Default.ArrowBack, "Back")
-                        }
-                    }
-                },
-                actions = {
-                    if (isEditMode) {
-                        if (isEditing) {
-                            // Save button when editing
-                            TextButton(
-                                onClick = {
-                                    onSaveProfile(form.toSaveData(uiState.userProfile?.imageUrl ?: ""))
-                                },
-                                enabled = !uiState.isLoading
-                            ) {
-                                if (uiState.isLoading)
-                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                else
-                                    Text("Save", fontWeight = FontWeight.SemiBold)
+                    .statusBarsPadding()
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+            ) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(title, fontWeight = FontWeight.Bold,
+                                color = Color.White, fontSize = 16.sp)
+                            uiState.userProfile?.let { p ->
+                                if (isEditMode)
+                                    Text("${p.name} · ${p.role}",
+                                        fontSize = 12.sp,
+                                        color    = Color.White.copy(0.8f))
                             }
                         }
-                        // Edit button — only shown if isAdmin or it's the user's own profile
-                        if (!isEditing && (isAdmin || !isEditMode)) {
-                            IconButton(onClick = { viewModel.toggleEditing() }) {
-                                Icon(Icons.Default.Edit, "Edit")
+                    },
+                    navigationIcon = {
+                        if (isEditMode) {
+                            IconButton(onClick = onNavigateBack) {
+                                Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
                             }
                         }
-                        if (isEditing && isEditMode) {
-                            IconButton(onClick = { viewModel.setEditing(false) }) {
-                                Icon(Icons.Default.Close, "Cancel")
+                    },
+                    actions = {
+                        if (isEditMode) {
+                            if (isEditing) {
+                                TextButton(
+                                    onClick = {
+                                        onSaveProfile(
+                                            form.toSaveData(uiState.userProfile?.imageUrl ?: "")
+                                        )
+                                    },
+                                    enabled = !uiState.isLoading
+                                ) {
+                                    if (uiState.isLoading)
+                                        CircularProgressIndicator(
+                                            Modifier.size(18.dp),
+                                            color       = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                    else
+                                        Text("Save",
+                                            fontWeight = FontWeight.Bold,
+                                            color      = Color.White)
+                                }
+                                IconButton(onClick = { viewModel.setEditing(false) }) {
+                                    Icon(Icons.Default.Close, "Cancel", tint = Color.White)
+                                }
+                            } else {
+                                IconButton(onClick = { viewModel.toggleEditing() }) {
+                                    Icon(Icons.Default.Edit, "Edit", tint = Color.White)
+                                }
                             }
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent
+                    )
                 )
-            )
+            }
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
@@ -167,7 +198,8 @@ fun ProfileCompletionScreen(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(Modifier.size(48.dp), strokeWidth = 3.dp)
                         Spacer(Modifier.height(14.dp))
-                        Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Loading…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 return@Box
@@ -176,8 +208,8 @@ fun ProfileCompletionScreen(
             LazyColumn(
                 state               = scrollState,
                 modifier            = Modifier.fillMaxSize(),
-                contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                contentPadding      = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
 
                 // Welcome banner (first-time only)
@@ -200,16 +232,42 @@ fun ProfileCompletionScreen(
                                         fontWeight = FontWeight.SemiBold,
                                         color      = MaterialTheme.colorScheme.onPrimaryContainer)
                                     Spacer(Modifier.height(3.dp))
-                                    Text("Just a few more details to complete your profile.",
+                                    Text("Fill in the details below to complete your profile.",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.8f))
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            .copy(0.8f))
                                 }
                             }
                         }
                     }
                 }
 
-                // Avatar — editable only when isEditing
+                // Permission banner for Manager/HR
+                if (isManager && isEditMode) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFFF57C00).copy(0.1f)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Info, null,
+                                    tint     = Color(0xFFF57C00),
+                                    modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "You can update designation, department, " +
+                                            "experience and emergency contact.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFE65100)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Avatar
                 item {
                     AvatarSection(
                         imageUrl     = uiState.userProfile?.imageUrl ?: "",
@@ -221,76 +279,126 @@ fun ProfileCompletionScreen(
                 }
 
                 // ── Account Info ─────────────────────────────────────────────
-                // Admin can edit all, others see read-only
                 item {
                     PCCard("Account Info", Icons.Default.Person) {
-                        if (isAdmin && isEditing) {
-                            PCField(form.name,        { form = form.copy(name = it) },
-                                "Full Name",   Icons.Default.Person)
-                            PCField(form.phoneNumber, { form = form.copy(phoneNumber = it) },
-                                "Phone",       Icons.Default.Phone,
-                                keyboardType = KeyboardType.Phone)
-                            PCField(form.designation, { form = form.copy(designation = it) },
-                                "Designation", Icons.Default.Badge)
-                            PCField(form.role,        { form = form.copy(role = it) },
-                                "Role",        Icons.Default.ManageAccounts)
-                            PCField(form.companyName, { form = form.copy(companyName = it) },
-                                "Company",     Icons.Default.Business)
-                            PCField(form.department,  { form = form.copy(department = it) },
-                                "Department",  Icons.Default.Groups)
-                        } else {
-                            uiState.userProfile?.let { p ->
-                                ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
-                                ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
-                                ReadOnlyRow("Phone",       p.phoneNumber, Icons.Default.Phone)
-                                ReadOnlyRow("Designation", p.designation, Icons.Default.Badge)
-                                ReadOnlyRow("Role",        p.role,        Icons.Default.ManageAccounts)
-                                ReadOnlyRow("Company",     p.companyName, Icons.Default.Business)
-                                ReadOnlyRow("Department",  p.department,  Icons.Default.Groups)
+                        when {
+                            isAdmin && isEditing -> {
+                                // Admin edits all account fields
+                                PCField(form.name,        { form = form.copy(name = it) },
+                                    "Full Name",   Icons.Default.Person)
+                                PCField(form.phoneNumber, { form = form.copy(phoneNumber = it) },
+                                    "Phone",       Icons.Default.Phone, KeyboardType.Phone)
+                                PCField(form.designation, { form = form.copy(designation = it) },
+                                    "Designation", Icons.Default.Badge)
+                                PCField(form.role,        { form = form.copy(role = it) },
+                                    "Role",        Icons.Default.ManageAccounts)
+                                PCField(form.companyName, { form = form.copy(companyName = it) },
+                                    "Company",     Icons.Default.Business)
+                                PCField(form.department,  { form = form.copy(department = it) },
+                                    "Department",  Icons.Default.Groups)
+                            }
+                            isManager && isEditing -> {
+                                // Manager/HR can edit designation and department
+                                uiState.userProfile?.let { p ->
+                                    ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
+                                    ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
+                                    ReadOnlyRow("Phone",       p.phoneNumber, Icons.Default.Phone)
+                                    ReadOnlyRow("Role",        p.role,        Icons.Default.ManageAccounts)
+                                    ReadOnlyRow("Company",     p.companyName, Icons.Default.Business)
+                                }
+                                PCField(form.designation, { form = form.copy(designation = it) },
+                                    "Designation", Icons.Default.Badge)
+                                PCField(form.department,  { form = form.copy(department = it) },
+                                    "Department",  Icons.Default.Groups)
+                            }
+                            else -> {
+                                // Read-only view or own-profile non-admin
+                                uiState.userProfile?.let { p ->
+                                    ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
+                                    ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
+                                    ReadOnlyRow("Phone",       p.phoneNumber, Icons.Default.Phone)
+                                    ReadOnlyRow("Designation", p.designation, Icons.Default.Badge)
+                                    ReadOnlyRow("Role",        p.role,        Icons.Default.ManageAccounts)
+                                    ReadOnlyRow("Company",     p.companyName, Icons.Default.Business)
+                                    ReadOnlyRow("Department",  p.department,  Icons.Default.Groups)
+                                }
                             }
                         }
                     }
                 }
 
-                // ── Professional Details — READ ONLY for everyone ────────────
+                // ── Professional Details ─────────────────────────────────────
                 item {
                     PCCard("Professional Details", Icons.Default.Work) {
-                        if (isEditing && !isAdmin) {
-                            // Only experience is editable for non-admins
-                            PCField(form.experience, { form = form.copy(experience = it) },
-                                "Years of Experience", Icons.Default.Timeline,
-                                keyboardType = KeyboardType.Number)
-                            uiState.userProfile?.let { p ->
-                                ReadOnlyRow("Employee ID",  p.employeeId,  Icons.Default.Badge)
-                                ReadOnlyRow("Reporting To", p.reportingTo, Icons.Default.SupervisorAccount)
-                                ReadOnlyRow("Salary",       if (p.salary > 0) p.salary.toString() else "—",
-                                    Icons.Default.CurrencyRupee)
+                        when {
+                            isAdmin && isEditing -> {
+                                PCField(form.experience,  { form = form.copy(experience = it) },
+                                    "Years of Experience", Icons.Default.Timeline, KeyboardType.Number)
+                                PCField(form.employeeId,  { form = form.copy(employeeId = it) },
+                                    "Employee ID",  Icons.Default.Badge)
+                                PCField(form.reportingTo, { form = form.copy(reportingTo = it) },
+                                    "Reporting To", Icons.Default.SupervisorAccount)
+                                PCField(form.salary,      { form = form.copy(salary = it) },
+                                    "Salary",       Icons.Default.CurrencyRupee, KeyboardType.Number)
                             }
-                        } else if (isEditing && isAdmin) {
-                            // Admin can edit all professional details
-                            PCField(form.experience,  { form = form.copy(experience = it) },
-                                "Years of Experience", Icons.Default.Timeline,
-                                keyboardType = KeyboardType.Number)
-                            PCField(form.employeeId,  { form = form.copy(employeeId = it) },
-                                "Employee ID",  Icons.Default.Badge)
-                            PCField(form.reportingTo, { form = form.copy(reportingTo = it) },
-                                "Reporting To", Icons.Default.SupervisorAccount)
-                            PCField(form.salary,      { form = form.copy(salary = it) },
-                                "Salary",       Icons.Default.CurrencyRupee,
-                                keyboardType = KeyboardType.Number)
-                        } else {
-                            uiState.userProfile?.let { p ->
-                                ReadOnlyRow("Experience",   "${p.experience} yrs", Icons.Default.Timeline)
-                                ReadOnlyRow("Employee ID",  p.employeeId,          Icons.Default.Badge)
-                                ReadOnlyRow("Reporting To", p.reportingTo,         Icons.Default.SupervisorAccount)
-                                ReadOnlyRow("Salary",       if (p.salary > 0) p.salary.toString() else "—",
-                                    Icons.Default.CurrencyRupee)
+                            isEditing -> {
+                                // Manager, HR or own profile — only experience is editable
+                                PCField(form.experience, { form = form.copy(experience = it) },
+                                    "Years of Experience", Icons.Default.Timeline, KeyboardType.Number)
+                                uiState.userProfile?.let { p ->
+                                    ReadOnlyRow("Employee ID",  p.employeeId,  Icons.Default.Badge)
+                                    ReadOnlyRow("Reporting To", p.reportingTo, Icons.Default.SupervisorAccount)
+                                    if (isAdmin)
+                                        ReadOnlyRow("Salary",
+                                            if (p.salary > 0) p.salary.toString() else "—",
+                                            Icons.Default.CurrencyRupee)
+                                }
+                            }
+                            else -> {
+                                uiState.userProfile?.let { p ->
+                                    ReadOnlyRow("Experience",
+                                        if (p.experience > 0) "${p.experience} yrs" else "—",
+                                        Icons.Default.Timeline)
+                                    ReadOnlyRow("Employee ID",  p.employeeId,  Icons.Default.Badge)
+                                    ReadOnlyRow("Reporting To", p.reportingTo, Icons.Default.SupervisorAccount)
+                                    ReadOnlyRow("Salary",
+                                        if (p.salary > 0) p.salary.toString() else "—",
+                                        Icons.Default.CurrencyRupee)
+                                }
                             }
                         }
                     }
                 }
 
-                // ── Personal Details — editable by everyone ──────────────────
+                // ── Work Stats (read-only for everyone) ──────────────────────
+                item {
+                    PCCard("Work Stats", Icons.Default.BarChart) {
+                        uiState.userProfile?.let { p ->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                StatBox("${p.completedProjects}", "Completed",  Color(0xFF2E7D32))
+                                StatBox("${p.activeProjects}",    "Active",     Color(0xFF1565C0))
+                                StatBox("${p.pendingTasks}",      "Pending",    Color(0xFFF57C00))
+                                StatBox("${p.completedTasks}",    "Tasks Done", Color(0xFF6A1B9A))
+                            }
+                            if (p.totalComplaints > 0) {
+                                Spacer(Modifier.height(8.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                ) {
+                                    StatBox("${p.totalComplaints}",    "Complaints",  Color(0xFFC62828))
+                                    StatBox("${p.resolvedComplaints}", "Resolved",    Color(0xFF2E7D32))
+                                    StatBox("${p.pendingComplaints}",  "Pending",     Color(0xFFF57C00))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Personal Details ─────────────────────────────────────────
                 item {
                     PCCard("Personal Details", Icons.Default.PersonPin) {
                         if (isEditing) {
@@ -304,7 +412,7 @@ fun ProfileCompletionScreen(
                     }
                 }
 
-                // ── Emergency Contact — editable by everyone ─────────────────
+                // ── Emergency Contact ────────────────────────────────────────
                 item {
                     PCCard("Emergency Contact", Icons.Default.ContactEmergency) {
                         if (isEditing) {
@@ -313,16 +421,21 @@ fun ProfileCompletionScreen(
                                 "Contact Name",  Icons.Default.Person)
                             PCField(form.emergencyContactPhone,
                                 { form = form.copy(emergencyContactPhone = it) },
-                                "Contact Phone", Icons.Default.Phone,
-                                keyboardType = KeyboardType.Phone)
+                                "Contact Phone", Icons.Default.Phone, KeyboardType.Phone)
                             PCField(form.emergencyContactRelation,
                                 { form = form.copy(emergencyContactRelation = it) },
                                 "Relationship",  Icons.Default.People)
                         } else {
                             uiState.userProfile?.let { p ->
-                                ReadOnlyRow("Name",         p.emergencyContactName.ifBlank { "—" },    Icons.Default.Person)
-                                ReadOnlyRow("Phone",        p.emergencyContactPhone.ifBlank { "—" },   Icons.Default.Phone)
-                                ReadOnlyRow("Relationship", p.emergencyContactRelation.ifBlank { "—" }, Icons.Default.People)
+                                ReadOnlyRow("Name",
+                                    p.emergencyContactName.ifBlank { "—" },
+                                    Icons.Default.Person)
+                                ReadOnlyRow("Phone",
+                                    p.emergencyContactPhone.ifBlank { "—" },
+                                    Icons.Default.Phone)
+                                ReadOnlyRow("Relationship",
+                                    p.emergencyContactRelation.ifBlank { "—" },
+                                    Icons.Default.People)
                             }
                         }
                     }
@@ -334,25 +447,28 @@ fun ProfileCompletionScreen(
                         Card(
                             colors = CardDefaults.cardColors(
                                 containerColor = MaterialTheme.colorScheme.errorContainer),
-                            shape  = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp)
                         ) {
                             Row(Modifier.padding(14.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Error, null,
                                     tint = MaterialTheme.colorScheme.onErrorContainer)
                                 Spacer(Modifier.width(10.dp))
-                                Text(err, color = MaterialTheme.colorScheme.onErrorContainer)
+                                Text(err,
+                                    color = MaterialTheme.colorScheme.onErrorContainer)
                             }
                         }
                     }
                 }
 
-                // Save button — first-time mode
+                // Save button (first-time only)
                 if (!isEditMode) {
                     item {
                         Button(
                             onClick  = {
-                                onSaveProfile(form.toSaveData(uiState.userProfile?.imageUrl ?: ""))
+                                onSaveProfile(
+                                    form.toSaveData(uiState.userProfile?.imageUrl ?: "")
+                                )
                             },
                             modifier = Modifier.fillMaxWidth().height(56.dp),
                             enabled  = !uiState.isLoading,
@@ -382,15 +498,15 @@ fun ProfileCompletionScreen(
     }
 }
 
-// ── Shared helper composables ─────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 @Composable
 private fun AvatarSection(
-    imageUrl     : String,
-    imageUri     : Uri?,
-    userName     : String,
-    isEditing    : Boolean,
-    onImageClick : () -> Unit
+    imageUrl    : String,
+    imageUri    : Uri?,
+    userName    : String,
+    isEditing   : Boolean,
+    onImageClick: () -> Unit
 ) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box {
@@ -403,12 +519,16 @@ private fun AvatarSection(
                 contentAlignment = Alignment.Center
             ) {
                 when {
-                    imageUri != null      -> AsyncImage(
-                        ImageRequest.Builder(LocalContext.current).data(imageUri).crossfade(true).build(),
-                        "Avatar", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    imageUri != null -> AsyncImage(
+                        ImageRequest.Builder(LocalContext.current)
+                            .data(imageUri).crossfade(true).build(),
+                        "Avatar", Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop)
                     imageUrl.isNotBlank() -> AsyncImage(
-                        ImageRequest.Builder(LocalContext.current).data(imageUrl).crossfade(true).build(),
-                        "Avatar", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        ImageRequest.Builder(LocalContext.current)
+                            .data(imageUrl).crossfade(true).build(),
+                        "Avatar", Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop)
                     else -> {
                         val initials = userName.split(" ").take(2)
                             .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
@@ -445,21 +565,23 @@ private fun AvatarSection(
 
 @Composable
 private fun PCCard(
-    title   : String,
-    icon    : ImageVector,
-    content : @Composable ColumnScope.() -> Unit
+    title  : String,
+    icon   : ImageVector,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Card(
         Modifier.fillMaxWidth(),
         shape     = RoundedCornerShape(14.dp),
-        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors    = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.padding(bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, null,
-                    tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    tint     = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(title,
                     style      = MaterialTheme.typography.titleSmall,
@@ -471,14 +593,23 @@ private fun PCCard(
 }
 
 @Composable
+private fun StatBox(value: String, label: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(label, fontSize = 10.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
 private fun ReadOnlyRow(label: String, value: String, icon: ImageVector) {
-    if (value.isBlank()) return
+    if (value.isBlank() || value == "—") return
     Row(
         Modifier.fillMaxWidth().padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, null,
-            tint     = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f),
+            tint     = MaterialTheme.colorScheme.primary.copy(0.65f),
             modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(10.dp))
         Column {
@@ -492,17 +623,17 @@ private fun ReadOnlyRow(label: String, value: String, icon: ImageVector) {
     }
     HorizontalDivider(
         Modifier.padding(top = 4.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        color = MaterialTheme.colorScheme.outlineVariant.copy(0.35f))
 }
 
 @Composable
 private fun PCField(
-    value         : String,
-    onValueChange : (String) -> Unit,
-    label         : String,
-    icon          : ImageVector,
-    keyboardType  : KeyboardType = KeyboardType.Text,
-    maxLines      : Int          = 1
+    value        : String,
+    onValueChange: (String) -> Unit,
+    label        : String,
+    icon         : ImageVector,
+    keyboardType : KeyboardType = KeyboardType.Text,
+    maxLines     : Int          = 1
 ) {
     OutlinedTextField(
         value           = value,
@@ -513,9 +644,6 @@ private fun PCField(
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         maxLines        = maxLines,
         singleLine      = maxLines == 1,
-        shape           = RoundedCornerShape(10.dp),
-        colors          = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor   = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline)
+        shape           = RoundedCornerShape(10.dp)
     )
 }

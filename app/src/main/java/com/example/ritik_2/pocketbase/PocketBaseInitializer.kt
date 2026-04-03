@@ -33,134 +33,110 @@ object PocketBaseInitializer {
         }
         Log.d(TAG, "✅ Admin token obtained")
 
-        // Step 1: users fields must be added MANUALLY in PocketBase UI
-        // (v0.36 does not expose the built-in users auth collection via REST API)
-        Log.d(TAG, "ℹ️ users fields must be added manually in PocketBase UI")
+        // Step 1: Fix users collection API rules — this is the key fix.
+        // PocketBase does NOT allow patching the users auth collection by name,
+        // so we find its ID first and patch by ID.
+        openUsersRules(token)
 
-        // Step 2: Create base collections
+        // Step 2: Create/verify base collections
         ensureBaseCollection(token, "companies_metadata",  companiesFields())
         ensureBaseCollection(token, "user_access_control", accessControlFields())
         ensureBaseCollection(token, "user_search_index",   searchIndexFields())
 
-        // Step 3: Open API rules
+        // Step 3: Open API rules for base collections
         listOf("companies_metadata", "user_access_control", "user_search_index")
             .forEach { openRules(token, it) }
-
-        // Step 4: users rules must be opened MANUALLY in PocketBase UI
-        Log.d(TAG, "ℹ️ Open users API rules manually in PocketBase UI")
 
         Log.d(TAG, "✅ Init complete")
         Log.d(TAG, "========================================")
     }
 
-    // ── In PB v0.36, list ALL collections and find the auth one named "users" ──
-    // Then use its ID (not name) for all subsequent requests
+    // ── Fix for 403 on users collection ──────────────────────────────────────
+    // Finds the users auth collection by listing all collections,
+    // then patches its API rules using the collection ID (not name).
+    // This runs on every app start so rules can never drift back to locked.
 
-    private fun findUsersCollectionId(token: String): String? {
-        return try {
-            val res  = http.newCall(req("GET",
+    private fun openUsersRules(token: String) {
+        try {
+            // List all collections to find the users auth collection ID
+            val listRes  = http.newCall(req("GET",
                 "${AppConfig.BASE_URL}/api/collections?perPage=200", token)).execute()
-            val body = res.body?.string() ?: ""; res.close()
-            if (!res.isSuccessful) {
-                Log.e(TAG, "❌ List collections failed: ${res.code} $body"); return null
+            val listBody = listRes.body?.string() ?: ""
+            val listCode = listRes.code
+            listRes.close()
+
+            if (listCode !in 200..299) {
+                Log.e(TAG, "❌ Cannot list collections: HTTP $listCode $listBody")
+                return
             }
 
-            val json  = JSONObject(body)
-            // PB v0.36 returns { "items": [...] } OR just an array
-            val items = when {
-                json.has("items") -> json.optJSONArray("items")
-                else              -> JSONArray(body)
-            } ?: return null
+            val json  = JSONObject(listBody)
+            val items = json.optJSONArray("items") ?: JSONArray()
 
+            // Find the users auth collection — could be named "users" or "_pb_users_auth_"
+            var usersId   = ""
+            var usersName = ""
             for (i in 0 until items.length()) {
                 val col  = items.getJSONObject(i)
                 val name = col.optString("name")
                 val type = col.optString("type")
-                // Match "users" auth collection (type = "auth")
-                if ((name == "users" || name == "_pb_users_auth_") && type == "auth") {
-                    val id = col.optString("id")
-                    Log.d(TAG, "✅ Found users collection: name=$name id=$id")
-                    return id
+                if (type == "auth" && (name == "users" || name == "_pb_users_auth_")) {
+                    usersId   = col.optString("id")
+                    usersName = name
+                    break
                 }
             }
 
-            // Fallback: return first auth collection found
-            for (i in 0 until items.length()) {
-                val col  = items.getJSONObject(i)
-                if (col.optString("type") == "auth") {
-                    val id   = col.optString("id")
-                    val name = col.optString("name")
-                    Log.d(TAG, "✅ Using auth collection: name=$name id=$id")
-                    return id
+            // Fallback: use the first auth collection found
+            if (usersId.isEmpty()) {
+                for (i in 0 until items.length()) {
+                    val col = items.getJSONObject(i)
+                    if (col.optString("type") == "auth") {
+                        usersId   = col.optString("id")
+                        usersName = col.optString("name")
+                        Log.w(TAG, "⚠️ 'users' not found by name, using first auth collection: $usersName")
+                        break
+                    }
                 }
             }
 
-            Log.e(TAG, "❌ No auth collection found in list")
-            null
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ findUsersCollectionId: ${e.message}"); null
-        }
-    }
-
-    private fun patchUsersCollectionV036(token: String) {
-        try {
-            val collId = findUsersCollectionId(token) ?: run {
-                Log.e(TAG, "❌ Cannot patch users — collection not found"); return
+            if (usersId.isEmpty()) {
+                Log.e(TAG, "❌ No auth collection found — cannot open users rules")
+                return
             }
 
-            // GET current schema using collection ID
-            val getRes  = http.newCall(req("GET",
-                "${AppConfig.BASE_URL}/api/collections/$collId", token)).execute()
-            val getBody = getRes.body?.string() ?: ""; getRes.close()
+            Log.d(TAG, "Found users collection: name=$usersName id=$usersId")
 
-            if (!getRes.isSuccessful) {
-                Log.e(TAG, "❌ Cannot fetch users by ID: ${getRes.code} $getBody"); return
-            }
+            // Patch rules using collection ID — this works even for built-in auth collections
+            // Rule: any authenticated user can list/view their own data
+            // Create is open (needed for registration)
+            // Update only by the record owner
+            // Delete only by superusers (null = locked to admins only)
+            val rulesBody = JSONObject().apply {
+                put("listRule",   "@request.auth.id != \"\"")
+                put("viewRule",   "@request.auth.id != \"\"")
+                put("createRule", "")          // open — needed for registration
+                put("updateRule", "@request.auth.id = id")
+                put("deleteRule", JSONObject.NULL)
+            }.toString()
 
-            val col        = JSONObject(getBody)
-            // v0.36 auth collections use "schema" key
-            val existing   = col.optJSONArray("schema") ?: JSONArray()
-            val existNames = (0 until existing.length())
-                .map { existing.getJSONObject(it).optString("name") }.toSet()
-
-            Log.d(TAG, "Users existing fields: $existNames")
-
-            val toAdd = usersExtraFields().filter { it.optString("name") !in existNames }
-            if (toAdd.isEmpty()) {
-                Log.d(TAG, "✅ users fields already complete"); return
-            }
-
-            val merged = JSONArray()
-            for (i in 0 until existing.length()) merged.put(existing.getJSONObject(i))
-            toAdd.forEach { merged.put(it) }
-
-            // PATCH using collection ID
-            val patchRes = http.newCall(req("PATCH",
-                "${AppConfig.BASE_URL}/api/collections/$collId", token,
-                JSONObject().put("schema", merged).toString())).execute()
+            val patchRes  = http.newCall(req("PATCH",
+                "${AppConfig.BASE_URL}/api/collections/$usersId", token, rulesBody)).execute()
+            val patchCode = patchRes.code
             val patchBody = patchRes.body?.string() ?: ""
-            Log.d(TAG, if (patchRes.isSuccessful)
-                "✅ users patched — added ${toAdd.size} fields: ${toAdd.map { it.optString("name") }}"
-            else
-                "❌ users patch failed: ${patchRes.code} $patchBody")
             patchRes.close()
+
+            if (patchCode in 200..299) {
+                Log.d(TAG, "✅ users API rules opened (id=$usersId)")
+            } else {
+                Log.e(TAG, "❌ Failed to open users rules: HTTP $patchCode $patchBody")
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "❌ patchUsersCollectionV036: ${e.message}", e)
+            Log.e(TAG, "❌ openUsersRules: ${e.message}", e)
         }
     }
 
-    private fun openUsersRulesV036(token: String) {
-        try {
-            val collId = findUsersCollectionId(token) ?: return
-            val body   = """{"listRule":null,"viewRule":null,"createRule":null,"updateRule":null,"deleteRule":null}"""
-            val res    = http.newCall(req("PATCH",
-                "${AppConfig.BASE_URL}/api/collections/$collId", token, body)).execute()
-            Log.d(TAG, "Rules users (by ID) → ${res.code}")
-            res.close()
-        } catch (e: Exception) {
-            Log.w(TAG, "openUsersRulesV036: ${e.message}")
-        }
-    }
+    // ── Existing helpers (unchanged) ──────────────────────────────────────────
 
     private fun ensureBaseCollection(token: String, name: String, fields: List<JSONObject>) {
         try {
@@ -194,7 +170,7 @@ object PocketBaseInitializer {
             put("deleteRule", JSONObject.NULL)
         }.toString()
 
-        val res  = http.newCall(req("POST",
+        val res   = http.newCall(req("POST",
             "${AppConfig.BASE_URL}/api/collections", token, body)).execute()
         val body2 = res.body?.string() ?: ""
         Log.d(TAG, if (res.isSuccessful) "✅ '$name' created"
@@ -220,7 +196,6 @@ object PocketBaseInitializer {
             for (i in 0 until existing.length()) merged.put(existing.getJSONObject(i))
             toAdd.forEach { merged.put(it) }
 
-            // Try "fields" first (v0.36+), then "schema" (older)
             for (key in listOf("fields", "schema")) {
                 val res = http.newCall(req("PATCH",
                     "${AppConfig.BASE_URL}/api/collections/$name", token,
@@ -240,7 +215,13 @@ object PocketBaseInitializer {
 
     private fun openRules(token: String, name: String) {
         try {
-            val body = """{"listRule":null,"viewRule":null,"createRule":null,"updateRule":null,"deleteRule":null}"""
+            val body = JSONObject().apply {
+                put("listRule",   JSONObject.NULL)
+                put("viewRule",   JSONObject.NULL)
+                put("createRule", JSONObject.NULL)
+                put("updateRule", JSONObject.NULL)
+                put("deleteRule", JSONObject.NULL)
+            }.toString()
             val res  = http.newCall(req("PATCH",
                 "${AppConfig.BASE_URL}/api/collections/$name", token, body)).execute()
             Log.d(TAG, "Rules '$name' → ${res.code}")
@@ -249,8 +230,6 @@ object PocketBaseInitializer {
             Log.w(TAG, "openRules '$name': ${e.message}")
         }
     }
-
-    // ── Admin auth ────────────────────────────────────────────────────────────
 
     private fun getAdminToken(): String? {
         listOf(
@@ -294,24 +273,7 @@ object PocketBaseInitializer {
         return builder.build()
     }
 
-    // ── Schema definitions ────────────────────────────────────────────────────
-
-    private fun usersExtraFields(): List<JSONObject> = listOf(
-        f("userId",                 "text"),
-        f("role",                   "text"),
-        f("companyName",            "text"),
-        f("sanitizedCompanyName",   "text"),
-        f("department",             "text"),
-        f("sanitizedDepartment",    "text"),
-        f("designation",            "text"),
-        f("isActive",               "bool"),
-        f("documentPath",           "text"),
-        f("permissions",            "json"),
-        f("profile",                "json"),
-        f("workStats",              "json"),
-        f("issues",                 "json"),
-        f("needsProfileCompletion", "bool")
-    )
+    // ── Schema definitions (unchanged) ────────────────────────────────────────
 
     private fun companiesFields(): List<JSONObject> = listOf(
         f("originalName",   "text", required = true),
