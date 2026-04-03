@@ -9,11 +9,10 @@ import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.administrator.AdministratorPanelActivity
 import com.example.ritik_2.administrator.manageuser.ManageUserActivity
-import com.example.ritik_2.administrator.newusercreation.CreateUserActivity
-import com.example.ritik_2.administrator.rolemanagement.RoleManagementActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.auth.SessionStatus
 import com.example.ritik_2.login.LoginActivity
+import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.PcControlActivity
@@ -37,7 +36,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             ITConnectTheme {
                 val uiState = viewModel.uiState
-
                 MainScreen(
                     uiState                   = uiState,
                     onLogout                  = { handleLogout() },
@@ -51,47 +49,40 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Refresh profile in case admin changed something
         viewModel.reload()
-        // Check if account was deactivated
         lifecycleScope.launch { checkActiveStatus() }
     }
 
     private fun handleCardClick(id: Int) {
         when (id) {
+            1 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            2 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             3 -> {
-                val role = authRepository.getSession()?.role ?: ""
-                when (role) {
-                    "Administrator" -> startActivity(
-                        Intent(this, AdministratorPanelActivity::class.java)
-                    )
-                    "Manager", "HR" -> startActivity(
-                        Intent(this, AdministratorPanelActivity::class.java)                    )
-                    else -> Toast.makeText(this,
-                        "Access denied", Toast.LENGTH_SHORT).show()
-                }
+                // Open AdministratorPanelActivity for everyone —
+                // it handles role verification and shows the animated
+                // AccessDeniedScreen with auto-redirect for unauthorized users
+                startActivity(Intent(this, AdministratorPanelActivity::class.java))
             }
+            4 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            5 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
             7 -> {
-                // Settings — open own profile edit
-                handleProfileClick()
+                // Settings → view own profile (ProfileActivity)
+                val userId = authRepository.getSession()?.userId ?: return
+                startActivity(Intent(this, ProfileActivity::class.java).apply {
+                    putExtra("userId", userId)
+                })
             }
-            else -> {
-                // Handle other feature cards
-                Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
-            }
+            8 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
         }
     }
 
+    // Profile card tap + sidebar header tap → view own profile
     private fun handleProfileClick() {
         val userId = authRepository.getSession()?.userId ?: return
-        startActivity(
-            ProfileCompletionActivity.createIntent(
-                context    = this,
-                userId     = userId,
-                isEditMode = true
-            )
-        )
+        startActivity(Intent(this, ProfileActivity::class.java).apply {
+            putExtra("userId", userId)
+        })
     }
 
     private fun handleLogout() {
@@ -106,12 +97,12 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun checkActiveStatus() {
         when (authRepository.validateSession()) {
-            is SessionStatus.Deactivated -> forceLogout(
+            is SessionStatus.Deactivated  -> forceLogout(
                 "Your account has been deactivated. Contact your administrator.")
             is SessionStatus.TokenInvalid -> forceLogout(
                 "Session expired. Please log in again.")
-            is SessionStatus.NoSession -> forceLogout("Please log in.")
-            is SessionStatus.Valid -> { /* all good */ }
+            is SessionStatus.NoSession    -> forceLogout("Please log in.")
+            is SessionStatus.Valid        -> { /* all good */ }
         }
     }
 
