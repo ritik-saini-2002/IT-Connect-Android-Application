@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
+import com.example.ritik_2.administrator.AdministratorPanelActivity
 import com.example.ritik_2.administrator.manageuser.ManageUserActivity
 import com.example.ritik_2.administrator.newusercreation.CreateUserActivity
 import com.example.ritik_2.administrator.rolemanagement.RoleManagementActivity
@@ -59,11 +60,13 @@ class MainActivity : ComponentActivity() {
     private fun handleCardClick(id: Int) {
         when (id) {
             3 -> {
-                // Admin Panel — open manage users for admins, role management for managers
                 val role = authRepository.getSession()?.role ?: ""
                 when (role) {
-                    "Administrator" -> startActivity(ManageUserActivity.createIntent(this))
-                    "Manager", "HR" -> startActivity(ManageUserActivity.createIntent(this))
+                    "Administrator" -> startActivity(
+                        Intent(this, AdministratorPanelActivity::class.java)
+                    )
+                    "Manager", "HR" -> startActivity(
+                        Intent(this, AdministratorPanelActivity::class.java)                    )
                     else -> Toast.makeText(this,
                         "Access denied", Toast.LENGTH_SHORT).show()
                 }
