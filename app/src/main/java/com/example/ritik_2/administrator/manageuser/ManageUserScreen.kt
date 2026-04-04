@@ -15,7 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -30,15 +29,21 @@ import coil.request.ImageRequest
 import com.example.ritik_2.administrator.manageuser.models.*
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 
-// ── Explorer level ────────────────────────────────────────────────────────────
 private sealed class ExplorerLevel {
-    object Companies                                         : ExplorerLevel()
-    data class Departments(val company: MUCompany)           : ExplorerLevel()
+    object Companies                                        : ExplorerLevel()
+    data class Departments(val company: MUCompany)          : ExplorerLevel()
     data class Roles(val company: MUCompany,
-                     val dept   : MUDepartment)              : ExplorerLevel()
+                     val dept: MUDepartment)                : ExplorerLevel()
     data class Users(val company: MUCompany,
-                     val dept   : MUDepartment,
-                     val role   : MURoleInfo)                : ExplorerLevel()
+                     val dept: MUDepartment,
+                     val role: MURoleInfo)                  : ExplorerLevel()
+}
+
+private val ExplorerLevel.depth: Int get() = when (this) {
+    is ExplorerLevel.Companies   -> 0
+    is ExplorerLevel.Departments -> 1
+    is ExplorerLevel.Roles       -> 2
+    is ExplorerLevel.Users       -> 3
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,10 +54,8 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
     val context       = LocalContext.current
     var level        by remember { mutableStateOf<ExplorerLevel>(ExplorerLevel.Companies) }
     var deleteTarget by remember { mutableStateOf<MUUser?>(null) }
-    var detailTarget by remember { mutableStateOf<MUUser?>(null) }
 
-    // Back handler — navigate up the explorer
-    BackHandler(enabled = level !is ExplorerLevel.Companies) {
+    BackHandler(level !is ExplorerLevel.Companies) {
         level = when (val l = level) {
             is ExplorerLevel.Departments -> ExplorerLevel.Companies
             is ExplorerLevel.Roles       -> ExplorerLevel.Departments(l.company)
@@ -63,31 +66,117 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
 
     LaunchedEffect(state.successMsg) {
         state.successMsg?.let {
-            snack.showSnackbar(it, duration = SnackbarDuration.Short)
-            vm.clearMessages()
+            snack.showSnackbar(it, duration = SnackbarDuration.Short); vm.clearMessages()
         }
     }
     LaunchedEffect(state.error) {
         state.error?.let {
-            snack.showSnackbar("⚠ $it", duration = SnackbarDuration.Short)
-            vm.clearMessages()
+            snack.showSnackbar("⚠ $it", duration = SnackbarDuration.Short); vm.clearMessages()
         }
     }
 
+    fun openProfile(user: MUUser) {
+        context.startActivity(
+            ProfileCompletionActivity.createIntent(
+                context        = context,
+                userId         = user.id,
+                isEditMode     = true,
+                targetUserRole = user.role,
+                editorRole     = state.currentRole
+            )
+        )
+    }
+
     Scaffold(
-        topBar       = { ExplorerTopBar(level, state, onBack = {
-            level = when (val l = level) {
-                is ExplorerLevel.Departments -> ExplorerLevel.Companies
-                is ExplorerLevel.Roles       -> ExplorerLevel.Departments(l.company)
-                is ExplorerLevel.Users       -> ExplorerLevel.Roles(l.company, l.dept)
-                else                         -> ExplorerLevel.Companies
+        topBar = {
+            // ── Unified gradient top bar matching DepartmentScreen / others ──
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Brush.horizontalGradient(listOf(
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                    )))
+                    .statusBarsPadding()
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (level !is ExplorerLevel.Companies) {
+                        IconButton(onClick = {
+                            level = when (val l = level) {
+                                is ExplorerLevel.Departments -> ExplorerLevel.Companies
+                                is ExplorerLevel.Roles       -> ExplorerLevel.Departments(l.company)
+                                is ExplorerLevel.Users       -> ExplorerLevel.Roles(l.company, l.dept)
+                                else                         -> ExplorerLevel.Companies
+                            }
+                        }) {
+                            Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
+                        }
+                    } else {
+                        Spacer(Modifier.width(12.dp))
+                    }
+
+                    Box(
+                        Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(0.18f)),
+                        Alignment.Center
+                    ) {
+                        Icon(
+                            when (level) {
+                                is ExplorerLevel.Companies   -> Icons.Default.Business
+                                is ExplorerLevel.Departments -> Icons.Default.AccountTree
+                                is ExplorerLevel.Roles       -> Icons.Default.Group
+                                is ExplorerLevel.Users       -> Icons.Default.Person
+                            },
+                            null, tint = Color.White, modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(10.dp))
+
+                    Column(Modifier.weight(1f)) {
+                        val title = when (level) {
+                            is ExplorerLevel.Companies   -> "Manage Users"
+                            is ExplorerLevel.Departments -> (level as ExplorerLevel.Departments).company.originalName
+                            is ExplorerLevel.Roles       -> (level as ExplorerLevel.Roles).dept.departmentName
+                            is ExplorerLevel.Users       -> (level as ExplorerLevel.Users).role.roleName
+                        }
+                        val subtitle = when (level) {
+                            is ExplorerLevel.Companies   ->
+                                "${state.users.size} users · ${state.users.count { it.isActive }} active"
+                            is ExplorerLevel.Departments -> {
+                                val c = (level as ExplorerLevel.Departments).company
+                                "${c.totalUsers} users · ${c.activeUsers} active"
+                            }
+                            is ExplorerLevel.Roles -> {
+                                val d = (level as ExplorerLevel.Roles).dept
+                                "${d.userCount} users across ${d.roles.size} roles"
+                            }
+                            is ExplorerLevel.Users -> {
+                                val r = (level as ExplorerLevel.Users).role
+                                "${r.userCount} users · ${r.activeUsers} active"
+                            }
+                        }
+                        Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                            color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(subtitle, fontSize = 11.sp, color = Color.White.copy(0.75f))
+                    }
+
+                    if (state.isLoading)
+                        CircularProgressIndicator(
+                            modifier    = Modifier.size(18.dp).padding(end = 4.dp),
+                            color       = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                }
             }
-        }) },
+        },
         snackbarHost = { SnackbarHost(snack) }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
 
-            // Search bar
             OutlinedTextField(
                 value         = state.searchQuery,
                 onValueChange = vm::search,
@@ -100,9 +189,7 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
                             Icon(Icons.Default.Clear, null)
                         }
                 },
-                modifier   = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier   = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                 shape      = RoundedCornerShape(14.dp),
                 singleLine = true,
                 colors     = OutlinedTextFieldDefaults.colors(
@@ -111,98 +198,56 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
                 )
             )
 
-            // Breadcrumb
-            if (level !is ExplorerLevel.Companies) {
-                BreadcrumbBar(level) { target -> level = target }
-            }
+            if (level !is ExplorerLevel.Companies) BreadcrumbBar(level) { level = it }
 
             when {
                 state.isLoading && state.users.isEmpty() -> LoadingView()
-                state.searchQuery.isNotBlank()           -> SearchResultsView(
-                    users         = state.filteredUsers,
-                    currentRole   = state.currentRole,
-                    onUserClick   = { detailTarget = it },
-                    onEditUser    = { user ->
-                        context.startActivity(
-                            ProfileCompletionActivity.createIntent(
-                                context        = context,
-                                userId         = user.id,
-                                isEditMode     = true,
-                                targetUserRole = user.role,
-                                editorRole     = state.currentRole
-                            )
-                        )
-                    },
+                state.searchQuery.isNotBlank() -> SearchResultsView(
+                    users          = state.filteredUsers,
+                    currentRole    = state.currentRole,
+                    onUserClick    = { openProfile(it) },
+                    onEditUser     = { openProfile(it) },
                     onToggleStatus = { vm.toggleUserStatus(it) },
                     onDelete       = { deleteTarget = it }
                 )
                 else -> AnimatedContent(
-                    targetState   = level,
+                    targetState = level,
                     transitionSpec = {
                         val entering = targetState.depth > initialState.depth
-                        val enter = if (entering)
-                            slideInHorizontally { it } + fadeIn()
-                        else
-                            slideInHorizontally { -it } + fadeIn()
-                        val exit = if (entering)
-                            slideOutHorizontally { -it } + fadeOut()
-                        else
-                            slideOutHorizontally { it } + fadeOut()
-                        enter togetherWith exit
+                        (if (entering) slideInHorizontally { it } + fadeIn()
+                        else slideInHorizontally { -it } + fadeIn()) togetherWith
+                                (if (entering) slideOutHorizontally { -it } + fadeOut()
+                                else slideOutHorizontally { it } + fadeOut())
                     },
                     label = "explorer"
-                ) { currentLevel ->
-                    when (currentLevel) {
+                ) { cur ->
+                    when (cur) {
                         is ExplorerLevel.Companies ->
-                            CompaniesView(
-                                companies = vm.getFilteredCompanies(),
-                                isLoading = state.isLoading,
-                                onClick   = { company ->
-                                    level = ExplorerLevel.Departments(company)
-                                }
-                            )
+                            CompaniesView(vm.getFilteredCompanies(), state.isLoading) {
+                                level = ExplorerLevel.Departments(it)
+                            }
                         is ExplorerLevel.Departments ->
-                            DepartmentsView(
-                                company = currentLevel.company,
-                                depts   = vm.getDepts(currentLevel.company.sanitizedName),
-                                onClick = { dept ->
-                                    level = ExplorerLevel.Roles(currentLevel.company, dept)
-                                }
-                            )
+                            DepartmentsView(cur.company,
+                                vm.getDepts(cur.company.sanitizedName)) {
+                                level = ExplorerLevel.Roles(cur.company, it)
+                            }
                         is ExplorerLevel.Roles ->
-                            RolesView(
-                                company = currentLevel.company,
-                                dept    = currentLevel.dept,
-                                roles   = vm.getRoles(
-                                    currentLevel.company.sanitizedName,
-                                    currentLevel.dept.sanitizedName
-                                ),
-                                onClick = { role ->
-                                    level = ExplorerLevel.Users(
-                                        currentLevel.company, currentLevel.dept, role)
-                                }
-                            )
+                            RolesView(cur.company, cur.dept,
+                                vm.getRoles(cur.company.sanitizedName,
+                                    cur.dept.sanitizedName)) {
+                                level = ExplorerLevel.Users(cur.company, cur.dept, it)
+                            }
                         is ExplorerLevel.Users ->
                             UsersView(
-                                users         = vm.getUsers(
-                                    currentLevel.company.sanitizedName,
-                                    currentLevel.dept.sanitizedName,
-                                    currentLevel.role.roleName
+                                users          = vm.getUsers(
+                                    cur.company.sanitizedName,
+                                    cur.dept.sanitizedName,
+                                    cur.role.roleName
                                 ),
-                                currentRole   = state.currentRole,
-                                isLoading     = state.isLoading,
-                                onUserClick   = { detailTarget = it },
-                                onEditUser    = { user ->
-                                    context.startActivity(
-                                        ProfileCompletionActivity.createIntent(
-                                            context        = context,
-                                            userId         = user.id,
-                                            isEditMode     = true,
-                                            targetUserRole = user.role,
-                                            editorRole     = state.currentRole
-                                        )
-                                    )
-                                },
+                                currentRole    = state.currentRole,
+                                isLoading      = state.isLoading,
+                                onUserClick    = { openProfile(it) },
+                                onEditUser     = { openProfile(it) },
                                 onToggleStatus = { vm.toggleUserStatus(it) },
                                 onDelete       = { deleteTarget = it }
                             )
@@ -212,7 +257,6 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
         }
     }
 
-    // Delete dialog
     deleteTarget?.let { user ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
@@ -244,110 +288,12 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
             }
         )
     }
-
-    // Detail dialog
-    detailTarget?.let { user ->
-        UserDetailDialog(
-            user           = user,
-            onDismiss      = { detailTarget = null },
-            onToggleStatus = { vm.toggleUserStatus(user); detailTarget = null },
-            onEdit         = {
-                detailTarget = null
-                context.startActivity(
-                    ProfileCompletionActivity.createIntent(
-                        context        = context,
-                        userId         = user.id,
-                        isEditMode     = true,
-                        targetUserRole = user.role,
-                        editorRole     = state.currentRole
-                    )
-                )
-            }
-        )
-    }
-}
-
-// ── Top bar ───────────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ExplorerTopBar(
-    level  : ExplorerLevel,
-    state  : ManageUserUiState,
-    onBack : () -> Unit
-) {
-    val title = when (level) {
-        is ExplorerLevel.Companies   -> "Manage Users"
-        is ExplorerLevel.Departments -> level.company.originalName
-        is ExplorerLevel.Roles       -> level.dept.departmentName
-        is ExplorerLevel.Users       -> level.role.roleName
-    }
-    val subtitle = when (level) {
-        is ExplorerLevel.Companies   ->
-            "${state.users.size} users · ${state.users.count { it.isActive }} active"
-        is ExplorerLevel.Departments ->
-            "${level.company.totalUsers} users · ${level.company.activeUsers} active"
-        is ExplorerLevel.Roles       ->
-            "${level.dept.userCount} users across ${level.dept.roles.size} roles"
-        is ExplorerLevel.Users       ->
-            "${level.role.userCount} users · ${level.role.activeUsers} active"
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                Brush.horizontalGradient(listOf(Color(0xFF1565C0), Color(0xFF1E88E5)))
-            )
-            .statusBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 6.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (level !is ExplorerLevel.Companies) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
-                }
-            } else {
-                Spacer(Modifier.width(12.dp))
-            }
-            Box(
-                Modifier.size(38.dp).clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(0.18f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    when (level) {
-                        is ExplorerLevel.Companies   -> Icons.Default.Business
-                        is ExplorerLevel.Departments -> Icons.Default.AccountTree
-                        is ExplorerLevel.Roles       -> Icons.Default.Group
-                        is ExplorerLevel.Users       -> Icons.Default.Person
-                    },
-                    null, tint = Color.White, modifier = Modifier.size(20.dp)
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                    color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(subtitle, fontSize = 11.sp, color = Color.White.copy(0.75f))
-            }
-            if (state.isLoading)
-                CircularProgressIndicator(
-                    modifier    = Modifier.size(18.dp).padding(end = 8.dp),
-                    color       = Color.White,
-                    strokeWidth = 2.dp
-                )
-        }
-    }
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun BreadcrumbBar(
-    level   : ExplorerLevel,
-    onNavigate: (ExplorerLevel) -> Unit
-) {
+private fun BreadcrumbBar(level: ExplorerLevel, onNavigate: (ExplorerLevel) -> Unit) {
     val crumbs: List<Pair<String, ExplorerLevel>> = buildList {
         add("Companies" to ExplorerLevel.Companies)
         when (level) {
@@ -364,9 +310,8 @@ private fun BreadcrumbBar(
             else -> {}
         }
     }
-
     Row(
-        modifier = Modifier
+        Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f))
@@ -380,14 +325,12 @@ private fun BreadcrumbBar(
                 style      = MaterialTheme.typography.labelSmall,
                 fontWeight = if (isLast) FontWeight.Bold else FontWeight.Normal,
                 color      = if (isLast) MaterialTheme.colorScheme.primary
-                else        MaterialTheme.colorScheme.onSurfaceVariant,
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier   = Modifier.clickable(enabled = !isLast) { onNavigate(target) }
             )
-            if (!isLast) {
-                Icon(Icons.Default.ChevronRight, null,
-                    modifier = Modifier.size(14.dp).padding(horizontal = 2.dp),
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
-            }
+            if (!isLast) Icon(Icons.Default.ChevronRight, null,
+                Modifier.size(14.dp).padding(horizontal = 2.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
         }
     }
 }
@@ -396,28 +339,17 @@ private fun BreadcrumbBar(
 
 @Composable
 private fun CompaniesView(
-    companies: List<MUCompany>,
-    isLoading: Boolean,
-    onClick  : (MUCompany) -> Unit
+    companies: List<MUCompany>, isLoading: Boolean, onClick: (MUCompany) -> Unit
 ) {
     if (isLoading && companies.isEmpty()) { LoadingView(); return }
-    if (companies.isEmpty()) {
-        EmptyView(Icons.Default.Business, "No companies found")
-        return
-    }
+    if (companies.isEmpty()) { EmptyView(Icons.Default.Business, "No companies found"); return }
     LazyColumn(
-        contentPadding      = PaddingValues(14.dp),
+        contentPadding      = PaddingValues(14.dp),  // ← named param — fixes ClassCastException
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        items(companies, key = { it.sanitizedName }) { company ->
-            ExplorerFolderCard(
-                icon       = Icons.Default.Business,
-                iconColor  = Color(0xFF1565C0),
-                title      = company.originalName,
-                meta1      = "${company.totalUsers} users",
-                meta2      = "${company.activeUsers} active",
-                onClick    = { onClick(company) }
-            )
+        items(items = companies, key = { c -> c.sanitizedName }) { c ->
+            ExplorerFolderCard(Icons.Default.Business, Color(0xFF1565C0),
+                c.originalName, "${c.totalUsers} users", "${c.activeUsers} active") { onClick(c) }
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -427,30 +359,18 @@ private fun CompaniesView(
 
 @Composable
 private fun DepartmentsView(
-    company: MUCompany,
-    depts  : List<MUDepartment>,
-    onClick: (MUDepartment) -> Unit
+    company: MUCompany, depts: List<MUDepartment>, onClick: (MUDepartment) -> Unit
 ) {
     if (depts.isEmpty()) { EmptyView(Icons.Default.AccountTree, "No departments"); return }
     LazyColumn(
         contentPadding      = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            SectionHeader(
-                "Departments in ${company.originalName}",
-                "${depts.size} department${if (depts.size != 1) "s" else ""}"
-            )
-        }
-        items(depts, key = { it.sanitizedName }) { dept ->
-            ExplorerFolderCard(
-                icon      = Icons.Default.AccountTree,
-                iconColor = Color(0xFF2E7D32),
-                title     = dept.departmentName,
-                meta1     = "${dept.userCount} users",
-                meta2     = "${dept.roles.size} roles",
-                onClick   = { onClick(dept) }
-            )
+        item { SectionHeader("Departments in ${company.originalName}",
+            "${depts.size} department${if (depts.size != 1) "s" else ""}") }
+        items(items = depts, key = { d -> d.sanitizedName }) { d ->
+            ExplorerFolderCard(Icons.Default.AccountTree, Color(0xFF2E7D32),
+                d.departmentName, "${d.userCount} users", "${d.roles.size} roles") { onClick(d) }
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -460,32 +380,20 @@ private fun DepartmentsView(
 
 @Composable
 private fun RolesView(
-    company: MUCompany,
-    dept   : MUDepartment,
-    roles  : List<MURoleInfo>,
-    onClick: (MURoleInfo) -> Unit
+    company: MUCompany, dept: MUDepartment,
+    roles: List<MURoleInfo>, onClick: (MURoleInfo) -> Unit
 ) {
     if (roles.isEmpty()) { EmptyView(Icons.Default.Group, "No roles in this department"); return }
     LazyColumn(
         contentPadding      = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            SectionHeader(
-                dept.departmentName,
-                "${roles.size} role${if (roles.size != 1) "s" else ""}"
-            )
-        }
-        items(roles, key = { it.roleName }) { role ->
-            ExplorerFolderCard(
-                icon      = Icons.Default.Group,
-                iconColor = roleColor(role.roleName),
-                title     = role.roleName,
-                meta1     = "${role.userCount} users",
-                meta2     = "${role.activeUsers} active",
-                badge     = if (role.userCount > 0) role.userCount.toString() else null,
-                onClick   = { onClick(role) }
-            )
+        item { SectionHeader(dept.departmentName,
+            "${roles.size} role${if (roles.size != 1) "s" else ""}") }
+        items(items = roles, key = { r -> r.roleName }) { r ->
+            ExplorerFolderCard(Icons.Default.Group, roleColor(r.roleName),
+                r.roleName, "${r.userCount} users", "${r.activeUsers} active",
+                badge = if (r.userCount > 0) r.userCount.toString() else null) { onClick(r) }
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
@@ -495,141 +403,51 @@ private fun RolesView(
 
 @Composable
 private fun UsersView(
-    users         : List<MUUser>,
-    currentRole   : String,
-    isLoading     : Boolean,
-    onUserClick   : (MUUser) -> Unit,
-    onEditUser    : (MUUser) -> Unit,
-    onToggleStatus: (MUUser) -> Unit,
-    onDelete      : (MUUser) -> Unit
+    users: List<MUUser>, currentRole: String, isLoading: Boolean,
+    onUserClick: (MUUser) -> Unit, onEditUser: (MUUser) -> Unit,
+    onToggleStatus: (MUUser) -> Unit, onDelete: (MUUser) -> Unit
 ) {
     if (users.isEmpty()) { EmptyView(Icons.Default.PersonSearch, "No users in this role"); return }
     LazyColumn(
         contentPadding      = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            SectionHeader(
-                "${users.size} user${if (users.size != 1) "s" else ""}",
-                "${users.count { it.isActive }} active · ${users.count { !it.isActive }} inactive"
-            )
-        }
-        items(users, key = { it.id }) { user ->
-            UserCard(
-                user           = user,
-                canEdit        = canEdit(currentRole, user.role),
+        item { SectionHeader("${users.size} user${if (users.size != 1) "s" else ""}",
+            "${users.count { it.isActive }} active · ${users.count { !it.isActive }} inactive") }
+        items(items = users, key = { u -> u.id }) { user ->
+            UserCard(user, canEdit(currentRole, user.role),
                 onUserClick    = { onUserClick(user) },
                 onEditUser     = { onEditUser(user) },
                 onToggleStatus = { onToggleStatus(user) },
-                onDelete       = { onDelete(user) }
-            )
+                onDelete       = { onDelete(user) })
         }
         item { Spacer(Modifier.height(80.dp)) }
     }
 }
 
-// ── Search results view ───────────────────────────────────────────────────────
+// ── Search results ────────────────────────────────────────────────────────────
 
 @Composable
 private fun SearchResultsView(
-    users         : List<MUUser>,
-    currentRole   : String,
-    onUserClick   : (MUUser) -> Unit,
-    onEditUser    : (MUUser) -> Unit,
-    onToggleStatus: (MUUser) -> Unit,
-    onDelete      : (MUUser) -> Unit
+    users: List<MUUser>, currentRole: String,
+    onUserClick: (MUUser) -> Unit, onEditUser: (MUUser) -> Unit,
+    onToggleStatus: (MUUser) -> Unit, onDelete: (MUUser) -> Unit
 ) {
-    if (users.isEmpty()) {
-        EmptyView(Icons.Default.SearchOff, "No results found"); return
-    }
+    if (users.isEmpty()) { EmptyView(Icons.Default.SearchOff, "No results found"); return }
     LazyColumn(
         contentPadding      = PaddingValues(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            SectionHeader(
-                "${users.size} result${if (users.size != 1) "s" else ""}",
-                "across all departments"
-            )
-        }
-        items(users, key = { it.id }) { user ->
-            // In search mode show company + dept as context
-            UserCard(
-                user           = user,
-                canEdit        = canEdit(currentRole, user.role),
-                showContext    = true,
+        item { SectionHeader("${users.size} result${if (users.size != 1) "s" else ""}",
+            "across all departments") }
+        items(items = users, key = { u -> u.id }) { user ->
+            UserCard(user, canEdit(currentRole, user.role), showContext = true,
                 onUserClick    = { onUserClick(user) },
                 onEditUser     = { onEditUser(user) },
                 onToggleStatus = { onToggleStatus(user) },
-                onDelete       = { onDelete(user) }
-            )
+                onDelete       = { onDelete(user) })
         }
         item { Spacer(Modifier.height(80.dp)) }
-    }
-}
-
-// ── Explorer folder card ──────────────────────────────────────────────────────
-
-@Composable
-private fun ExplorerFolderCard(
-    icon     : ImageVector,
-    iconColor: Color,
-    title    : String,
-    meta1    : String,
-    meta2    : String,
-    badge    : String?  = null,
-    onClick  : () -> Unit
-) {
-    val scale by animateFloatAsState(1f, spring(), label = "scale")
-
-    Card(
-        modifier  = Modifier.fillMaxWidth().scale(scale).clickable { onClick() },
-        shape     = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(3.dp),
-        colors    = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(
-            modifier          = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Icon box
-            Box(
-                Modifier.size(52.dp).clip(RoundedCornerShape(14.dp))
-                    .background(iconColor.copy(0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, null,
-                    tint     = iconColor,
-                    modifier = Modifier.size(26.dp))
-            }
-
-            Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(3.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MiniChip(meta1, iconColor)
-                    MiniChip(meta2, iconColor.copy(0.7f))
-                }
-            }
-
-            if (badge != null) {
-                Box(
-                    Modifier.size(28.dp).clip(CircleShape)
-                        .background(iconColor.copy(0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(badge, fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold, color = iconColor)
-                }
-            }
-
-            Icon(Icons.Default.ChevronRight, null,
-                modifier = Modifier.size(20.dp),
-                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f))
-        }
     }
 }
 
@@ -637,37 +455,28 @@ private fun ExplorerFolderCard(
 
 @Composable
 private fun UserCard(
-    user          : MUUser,
-    canEdit       : Boolean,
-    showContext   : Boolean = false,
-    onUserClick   : () -> Unit,
-    onEditUser    : () -> Unit,
-    onToggleStatus: () -> Unit,
-    onDelete      : () -> Unit
+    user: MUUser, canEdit: Boolean, showContext: Boolean = false,
+    onUserClick: () -> Unit, onEditUser: () -> Unit,
+    onToggleStatus: () -> Unit, onDelete: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-
     Card(
-        modifier  = Modifier.fillMaxWidth().clickable { onUserClick() },
+        Modifier.fillMaxWidth().clickable { onUserClick() },
         shape     = RoundedCornerShape(14.dp),
         elevation = CardDefaults.cardElevation(2.dp),
         colors    = CardDefaults.cardColors(
-            containerColor = if (user.isActive)
-                MaterialTheme.colorScheme.surface
-            else
-                MaterialTheme.colorScheme.surfaceVariant.copy(0.6f)
-        )
+            containerColor = if (user.isActive) MaterialTheme.colorScheme.surface
+            else MaterialTheme.colorScheme.surfaceVariant.copy(0.6f))
     ) {
         Row(
-            modifier          = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier.padding(12.dp),
+            verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Avatar
             Box(
                 Modifier.size(48.dp).clip(CircleShape)
                     .background(roleColor(user.role).copy(0.15f)),
-                contentAlignment = Alignment.Center
+                Alignment.Center
             ) {
                 if (user.imageUrl.isNotBlank()) {
                     AsyncImage(
@@ -678,105 +487,66 @@ private fun UserCard(
                         contentScale       = ContentScale.Crop
                     )
                 } else {
-                    Text(user.name.take(2).uppercase(),
-                        fontSize   = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color      = roleColor(user.role))
+                    Text(user.name.take(2).uppercase(), fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold, color = roleColor(user.role))
                 }
             }
-
             Column(Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment      = Alignment.CenterVertically,
-                    horizontalArrangement  = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(user.name,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize   = 14.sp,
-                        maxLines   = 1,
-                        overflow   = TextOverflow.Ellipsis,
-                        modifier   = Modifier.weight(1f, fill = false))
-                    // Active / Inactive pill
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(user.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, false))
                     Surface(
                         color = if (user.isActive) Color(0xFF4CAF50).copy(0.15f)
-                        else               Color(0xFFF44336).copy(0.15f),
+                        else Color(0xFFF44336).copy(0.15f),
                         shape = RoundedCornerShape(4.dp)
                     ) {
-                        Text(
-                            if (user.isActive) "Active" else "Inactive",
-                            modifier   = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                            fontSize   = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color      = if (user.isActive) Color(0xFF2E7D32)
-                            else               Color(0xFFC62828)
-                        )
+                        Text(if (user.isActive) "Active" else "Inactive",
+                            Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = if (user.isActive) Color(0xFF2E7D32) else Color(0xFFC62828))
                     }
                 }
-                Text(user.email,
-                    fontSize = 11.sp,
-                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
-                if (user.designation.isNotBlank() || user.experience > 0) {
-                    Text(
-                        buildString {
-                            if (user.designation.isNotBlank()) append(user.designation)
-                            if (user.experience > 0) append(" · ${user.experience}y exp")
-                            if (user.activeProjects > 0) append(" · ${user.activeProjects} proj")
-                        },
-                        fontSize = 11.sp,
-                        color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                // Show company + dept in search mode
-                if (showContext) {
-                    Spacer(Modifier.height(2.dp))
+                Text(user.email, fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (user.designation.isNotBlank() || user.experience > 0)
+                    Text(buildString {
+                        if (user.designation.isNotBlank()) append(user.designation)
+                        if (user.experience > 0) append(" · ${user.experience}y exp")
+                        if (user.activeProjects > 0) append(" · ${user.activeProjects} proj")
+                    }, fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (showContext)
                     Text("${user.originalCompany} › ${user.originalDept}",
-                        fontSize = 10.sp,
-                        color    = MaterialTheme.colorScheme.primary.copy(0.7f))
-                }
+                        fontSize = 10.sp, color = MaterialTheme.colorScheme.primary.copy(0.7f))
             }
-
-            // Actions
             Box {
-                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.MoreVert, null,
-                        modifier = Modifier.size(18.dp),
-                        tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+                IconButton(onClick = { showMenu = true }, Modifier.size(32.dp)) {
+                    Icon(Icons.Default.MoreVert, null, Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                DropdownMenu(
-                    expanded         = showMenu,
-                    onDismissRequest = { showMenu = false }
-                ) {
-                    if (canEdit) {
-                        DropdownMenuItem(
-                            text        = { Text("Edit Profile") },
-                            leadingIcon = { Icon(Icons.Default.Edit, null,
-                                tint = Color(0xFF1976D2)) },
-                            onClick     = { showMenu = false; onEditUser() }
-                        )
-                    }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    if (canEdit) DropdownMenuItem(
+                        text        = { Text("Edit Profile") },
+                        leadingIcon = { Icon(Icons.Default.Edit, null, tint = Color(0xFF1976D2)) },
+                        onClick     = { showMenu = false; onEditUser() }
+                    )
                     DropdownMenuItem(
-                        text        = {
-                            Text(if (user.isActive) "Deactivate" else "Activate")
-                        },
+                        text = { Text(if (user.isActive) "Deactivate" else "Activate") },
                         leadingIcon = {
-                            Icon(
-                                if (user.isActive) Icons.Default.Pause
-                                else               Icons.Default.PlayArrow,
-                                null,
+                            Icon(if (user.isActive) Icons.Default.Pause
+                            else Icons.Default.PlayArrow, null,
                                 tint = if (user.isActive) Color(0xFFF57C00)
-                                else               Color(0xFF4CAF50)
-                            )
+                                else Color(0xFF4CAF50))
                         },
                         onClick = { showMenu = false; onToggleStatus() }
                     )
                     HorizontalDivider()
                     DropdownMenuItem(
-                        text        = { Text("Delete",
-                            color = MaterialTheme.colorScheme.error) },
+                        text        = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Default.Delete, null,
                             tint = MaterialTheme.colorScheme.error) },
                         onClick     = { showMenu = false; onDelete() }
@@ -787,91 +557,55 @@ private fun UserCard(
     }
 }
 
-// ── User detail dialog ────────────────────────────────────────────────────────
+// ── Explorer folder card ──────────────────────────────────────────────────────
 
 @Composable
-private fun UserDetailDialog(
-    user          : MUUser,
-    onDismiss     : () -> Unit,
-    onToggleStatus: () -> Unit,
-    onEdit        : () -> Unit
+private fun ExplorerFolderCard(
+    icon: ImageVector, iconColor: Color, title: String,
+    meta1: String, meta2: String, badge: String? = null, onClick: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(50.dp).clip(CircleShape)
-                        .background(roleColor(user.role).copy(0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (user.imageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model              = ImageRequest.Builder(LocalContext.current)
-                                .data(user.imageUrl).crossfade(true).build(),
-                            contentDescription = "avatar",
-                            modifier           = Modifier.fillMaxSize(),
-                            contentScale       = ContentScale.Crop
-                        )
-                    } else {
-                        Text(user.name.take(2).uppercase(),
-                            fontSize   = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color      = roleColor(user.role))
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(user.name, fontWeight = FontWeight.Bold)
-                    Text(user.email,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Card(
+        Modifier.fillMaxWidth().clickable { onClick() },
+        shape     = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(3.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            Modifier.padding(16.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                Modifier.size(52.dp).clip(RoundedCornerShape(14.dp))
+                    .background(iconColor.copy(0.12f)),
+                Alignment.Center
+            ) {
+                Icon(icon, null, tint = iconColor, modifier = Modifier.size(26.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(3.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MiniChip(meta1, iconColor); MiniChip(meta2, iconColor.copy(0.7f))
                 }
             }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                DialogRow(Icons.Default.Badge,           "Designation", user.designation)
-                DialogRow(Icons.Default.ManageAccounts,  "Role",        user.role)
-                DialogRow(Icons.Default.Groups,          "Department",  user.originalDept)
-                DialogRow(Icons.Default.Business,        "Company",     user.originalCompany)
-                DialogRow(Icons.Default.Phone,           "Phone",       user.phoneNumber)
-                DialogRow(Icons.Default.Timeline,        "Experience",
-                    if (user.experience > 0) "${user.experience} yrs" else "—")
-                DialogRow(Icons.Default.Folder,          "Projects",
-                    "${user.completedProjects} done · ${user.activeProjects} active")
-                if (user.totalComplaints > 0)
-                    DialogRow(Icons.Default.Warning, "Issues",
-                        "${user.totalComplaints}", isWarning = true)
-            }
-        },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, null, Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Edit")
+            if (badge != null)
+                Box(Modifier.size(28.dp).clip(CircleShape).background(iconColor.copy(0.15f)),
+                    Alignment.Center) {
+                    Text(badge, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = iconColor)
                 }
-                Button(
-                    onClick = onToggleStatus,
-                    colors  = ButtonDefaults.buttonColors(
-                        containerColor = if (user.isActive) Color(0xFFF57C00)
-                        else               Color(0xFF2E7D32)
-                    )
-                ) { Text(if (user.isActive) "Deactivate" else "Activate") }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            Icon(Icons.Default.ChevronRight, null, Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f))
         }
-    )
+    }
 }
 
-// ── Reusable small composables ────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 @Composable
 private fun LoadingView() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize(), Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(color = Color(0xFF1565C0))
             Spacer(Modifier.height(12.dp))
@@ -882,7 +616,7 @@ private fun LoadingView() {
 
 @Composable
 private fun EmptyView(icon: ImageVector, message: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize(), Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, null, Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f))
@@ -904,41 +638,12 @@ private fun SectionHeader(title: String, subtitle: String) {
 @Composable
 private fun MiniChip(label: String, color: Color) {
     Surface(color = color.copy(0.1f), shape = RoundedCornerShape(6.dp)) {
-        Text(label,
-            modifier   = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-            fontSize   = 10.sp,
-            fontWeight = FontWeight.SemiBold,
-            color      = color)
+        Text(label, Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = color)
     }
 }
 
-@Composable
-private fun DialogRow(
-    icon     : ImageVector,
-    label    : String,
-    value    : String,
-    isWarning: Boolean = false
-) {
-    if (value.isBlank() || value == "—") return
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(14.dp),
-            tint = if (isWarning) MaterialTheme.colorScheme.error
-            else           MaterialTheme.colorScheme.primary.copy(0.65f))
-        Spacer(Modifier.width(8.dp))
-        Text("$label: ",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value,
-            style      = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            color      = if (isWarning) MaterialTheme.colorScheme.error
-            else           MaterialTheme.colorScheme.onSurface)
-    }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-private fun canEdit(editorRole: String, targetRole: String): Boolean = when (editorRole) {
+private fun canEdit(editorRole: String, targetRole: String) = when (editorRole) {
     "Administrator" -> true
     "Manager", "HR" -> targetRole in setOf("Employee", "Intern", "Team Lead")
     else            -> false
@@ -951,12 +656,5 @@ private fun roleColor(role: String): Color = when (role) {
     "Team Lead"     -> Color(0xFFF57C00)
     "Employee"      -> Color(0xFF7B1FA2)
     "Intern"        -> Color(0xFF455A64)
-    else            -> Color(0xFF616161)
-}
-
-private val ExplorerLevel.depth: Int get() = when (this) {
-    is ExplorerLevel.Companies   -> 0
-    is ExplorerLevel.Departments -> 1
-    is ExplorerLevel.Roles       -> 2
-    is ExplorerLevel.Users       -> 3
+    else            -> Color(0xFF00796B)
 }

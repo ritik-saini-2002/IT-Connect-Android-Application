@@ -24,36 +24,58 @@ class AuthRepository @Inject constructor(
             dataSource.restoreSession(session.token)
             Log.d(TAG, "Session restored for ${session.email}")
         } catch (e: Exception) {
-            Log.w(TAG, "Session restore failed: ${e.message}")
-            sessionManager.clear()
+            // Don't clear session on restore failure — we may be offline
+            Log.w(TAG, "Session restore failed (possibly offline): ${e.message}")
         }
     }
 
     /**
-     * Validates the current session token AND checks isActive on the server.
-     * Returns [SessionStatus] so the caller knows exactly what to do.
-     * Called on every app resume / SplashActivity launch.
+     * Validates token + isActive. Returns [SessionStatus].
+     *
+     * If a network error occurs (server unreachable), returns [SessionStatus.Valid]
+     * optimistically so the app doesn't force-logout when offline.
+     * The ConnectivityMonitor + MainActivity handle showing the offline banner.
      */
     suspend fun validateSession(): SessionStatus {
         val session = sessionManager.get() ?: return SessionStatus.NoSession
 
-        // 1. Validate token is still accepted by PocketBase
-        val tokenValid = pbDataSource.validateCurrentToken()
-        if (!tokenValid) {
-            Log.w(TAG, "Token rejected — forcing logout")
-            logout()
-            return SessionStatus.TokenInvalid
-        }
+        return try {
+            // 1. Validate token — if network fails, assume valid
+            val tokenValid = try {
+                pbDataSource.validateCurrentToken()
+            } catch (e: Exception) {
+                Log.w(TAG, "Token validation failed (network?): ${e.message}")
+                // Network error — assume token is still valid, go offline
+                return SessionStatus.Valid(session)
+            }
 
-        // 2. Check isActive on the server — catches deactivation by admin
-        val isActive = pbDataSource.checkIsActive(session.userId)
-        if (!isActive) {
-            Log.w(TAG, "Account deactivated — forcing logout")
-            logout()
-            return SessionStatus.Deactivated
-        }
+            if (!tokenValid) {
+                Log.w(TAG, "Token rejected — forcing logout")
+                logout()
+                return SessionStatus.TokenInvalid
+            }
 
-        return SessionStatus.Valid(session)
+            // 2. Check isActive — if network fails, assume active
+            val isActive = try {
+                pbDataSource.checkIsActive(session.userId)
+            } catch (e: Exception) {
+                Log.w(TAG, "isActive check failed (network?): ${e.message}")
+                true  // optimistic — don't deactivate offline users
+            }
+
+            if (!isActive) {
+                Log.w(TAG, "Account deactivated — forcing logout")
+                logout()
+                return SessionStatus.Deactivated
+            }
+
+            SessionStatus.Valid(session)
+
+        } catch (e: Exception) {
+            // Catch-all for unexpected errors — go offline rather than force logout
+            Log.w(TAG, "validateSession unexpected error: ${e.message}")
+            SessionStatus.Valid(session)
+        }
     }
 
     suspend fun login(email: String, password: String): Result<Unit> =
@@ -71,7 +93,7 @@ class AuthRepository @Inject constructor(
         dataSource.sendPasswordReset(email)
 
     suspend fun logout() {
-        dataSource.logout()
+        try { dataSource.logout() } catch (_: Exception) {}
         sessionManager.clear()
         Log.d(TAG, "Logged out ✅")
     }

@@ -34,14 +34,10 @@ class ProfileViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, error = null) }
             dataSource.getUserProfile(userId)
                 .onSuccess { profile ->
-                    _uiState.update { s ->
-                        s.copy(isLoading = false, profile = profile.toUiModel())
-                    }
+                    _uiState.update { it.copy(isLoading = false, profile = profile.toUiModel()) }
                 }
                 .onFailure { e ->
-                    _uiState.update { s ->
-                        s.copy(isLoading = false, error = e.message)
-                    }
+                    _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
         }
     }
@@ -51,8 +47,8 @@ class ProfileViewModel @Inject constructor(
     }
 }
 
-// Extension function that converts UserProfile → UserProfileData
-// Defined here so both ProfileViewModel and MainViewModel can use it
+// Extension: UserProfile → UserProfileData
+// UserProfileData is now defined in MainViewModel.kt (same package: com.example.ritik_2.main)
 fun UserProfile.toUiModel() = UserProfileData(
     id                       = id,
     name                     = name,

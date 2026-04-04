@@ -28,12 +28,13 @@ class ManageUserActivity : ComponentActivity() {
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var dataSource    : AppDataSource
 
-    private val editUserLauncher = registerForActivityResult(
+    // Result launcher — called when ProfileCompletionActivity finishes
+    private val editLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val userId = result.data?.getStringExtra(EXTRA_EDITED_USER_ID)
-            if (!userId.isNullOrBlank()) vm.refreshUser(userId)
+            val uid = result.data?.getStringExtra(EXTRA_EDITED_USER_ID)
+            if (!uid.isNullOrBlank()) vm.refreshUser(uid)
         }
     }
 
@@ -43,18 +44,16 @@ class ManageUserActivity : ComponentActivity() {
             ITConnectTheme {
                 val session = remember { authRepository.getSession() }
                 var profile by remember { mutableStateOf<UserProfile?>(null) }
-
                 LaunchedEffect(session?.userId) {
                     session?.userId?.let { uid ->
                         dataSource.getUserProfile(uid).onSuccess { profile = it }
                     }
                 }
-
                 AppDrawerWrapper(
                     session     = session,
                     profile     = profile,
                     currentItem = "manage_users",
-                    onNavigate  = { id -> handleDrawerNav(id) }
+                    onNavigate  = { handleDrawerNav(it) }
                 ) {
                     ManageUserScreen(vm)
                 }
@@ -64,28 +63,21 @@ class ManageUserActivity : ComponentActivity() {
 
     private fun handleDrawerNav(id: String) {
         when (id) {
-            "manage_users" -> { /* already here */ }
-            "logout" -> {
-                CoroutineScope(Dispatchers.Main).launch {
-                    authRepository.logout()
-                    startActivity(
-                        Intent(this@ManageUserActivity,
-                            com.example.ritik_2.login.LoginActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                        }
-                    )
-                    finish()
+            "manage_users" -> {}
+            "logout" -> CoroutineScope(Dispatchers.Main).launch {
+                authRepository.logout()
+                startActivity(Intent(this@ManageUserActivity,
+                    com.example.ritik_2.login.LoginActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                })
+                finish()
+            }
+            else -> startActivity(
+                Intent(this, com.example.ritik_2.main.MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra("navigate_to", id)
                 }
-            }
-            else -> {
-                // Delegate to MainActivity for other destinations
-                startActivity(
-                    Intent(this, com.example.ritik_2.main.MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        putExtra("navigate_to", id)
-                    }
-                )
-            }
+            )
         }
     }
 

@@ -49,22 +49,19 @@ fun MainScreen(
     val userProfile = uiState.userProfile
     val isLoading   = uiState.isLoading
 
-    // Drawer state — using official DrawerState so it works in gesture nav mode
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope       = rememberCoroutineScope()
-
-    // Track horizontal drag to open sidebar from ANY position on screen
-    var totalDragX by remember { mutableFloatStateOf(0f) }
+    var totalDragX  by remember { mutableFloatStateOf(0f) }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
     }
 
     ModalNavigationDrawer(
-        drawerState        = drawerState,
-        gesturesEnabled    = false,           // we handle swipe ourselves
-        scrimColor         = Color.Black.copy(alpha = 0.45f),
-        drawerContent      = {
+        drawerState   = drawerState,
+        gesturesEnabled = false,
+        scrimColor    = Color.Black.copy(alpha = 0.45f),
+        drawerContent = {
             ModalDrawerSheet(
                 drawerShape          = RectangleShape,
                 drawerContainerColor = MaterialTheme.colorScheme.surface,
@@ -80,7 +77,6 @@ fun MainScreen(
             }
         }
     ) {
-        // Main content with custom swipe detector (whole screen)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -94,23 +90,21 @@ fun MainScreen(
                                 scope.launch { drawerState.close() }
                             totalDragX = 0f
                         },
-                        onHorizontalDrag = { _, dragAmount -> totalDragX += dragAmount }
+                        onHorizontalDrag = { _, d -> totalDragX += d }
                     )
                 }
         ) {
             Scaffold { paddingValues ->
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+                Box(Modifier.fillMaxSize().padding(paddingValues)) {
 
                     AnimatedVisibility(
                         visible = isLoading && userProfile == null,
-                        enter   = fadeIn(), exit = fadeOut()
+                        enter = fadeIn(), exit = fadeOut()
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(
-                                    modifier    = Modifier.size(56.dp),
-                                    color       = MaterialTheme.colorScheme.primary,
-                                    strokeWidth = 4.dp)
+                                CircularProgressIndicator(Modifier.size(56.dp),
+                                    color = MaterialTheme.colorScheme.primary, strokeWidth = 4.dp)
                                 Spacer(Modifier.height(16.dp))
                                 Text("Loading your profile...",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -125,20 +119,19 @@ fun MainScreen(
                         exit    = fadeOut(spring())
                     ) {
                         val features = listOf(
-                            FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
-                            FeatureItem(2, "Manage Complaints",  Icons.Outlined.List,               Color(0xFF8E24AA)),
-                            FeatureItem(3, "Admin Panel",        Icons.Outlined.AdminPanelSettings,  Color(0xFFFF6F00)),
-                            FeatureItem(4, "Server Connect",     Icons.Outlined.Code,               Color(0xFF6200EA)),
-                            FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,           Color(0xFF00796B)),
-                            FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,           Color(0xFFC51162)),
-                            FeatureItem(7, "Settings",           Icons.Outlined.Settings,           MaterialTheme.colorScheme.tertiary),
-                            FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary)
+                            FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,     Color(0xFFE53935)),
+                            FeatureItem(2, "Manage Complaints",  Icons.Outlined.List,              Color(0xFF8E24AA)),
+                            FeatureItem(3, "Admin Panel",        Icons.Outlined.AdminPanelSettings, Color(0xFFFF6F00)),
+                            FeatureItem(4, "Server Connect",     Icons.Outlined.Code,              Color(0xFF6200EA)),
+                            FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,          Color(0xFF00796B)),
+                            FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,          Color(0xFFC51162)),
+                            FeatureItem(7, "Settings",           Icons.Outlined.Settings,          MaterialTheme.colorScheme.tertiary),
+                            FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,      MaterialTheme.colorScheme.primary)
                         )
 
                         LazyVerticalGrid(
                             columns               = GridCells.Fixed(2),
-                            contentPadding        = PaddingValues(
-                                start = 16.dp, end = 16.dp, bottom = 32.dp),
+                            contentPadding        = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
                             verticalArrangement   = Arrangement.spacedBy(16.dp),
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             modifier              = Modifier.fillMaxSize()
@@ -152,13 +145,11 @@ fun MainScreen(
                                             containerColor = MaterialTheme.colorScheme.errorContainer)
                                     ) {
                                         Row(
-                                            Modifier.fillMaxWidth()
-                                                .clickable { onProfileClick() }
-                                                .padding(14.dp),
+                                            Modifier.fillMaxWidth().clickable { onProfileClick() }.padding(14.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Icon(Icons.Default.Warning, null,
-                                                tint     = MaterialTheme.colorScheme.onErrorContainer,
+                                                tint = MaterialTheme.colorScheme.onErrorContainer,
                                                 modifier = Modifier.size(22.dp))
                                             Spacer(Modifier.width(10.dp))
                                             Column(Modifier.weight(1f)) {
@@ -177,12 +168,14 @@ fun MainScreen(
                             }
 
                             item(span = { GridItemSpan(2) }) {
-                                Spacer(Modifier.height(8.dp))
-                                UserProfileCard(
-                                    profile        = userProfile,
-                                    onProfileClick = onProfileClick,
-                                    onLogout       = onLogout
-                                )
+                                Column {
+                                    Spacer(Modifier.height(8.dp))
+                                    UserProfileCard(
+                                        profile        = userProfile,
+                                        onProfileClick = onProfileClick,
+                                        onLogout       = onLogout
+                                    )
+                                }
                             }
 
                             item(span = { GridItemSpan(2) }) {
@@ -202,8 +195,10 @@ fun MainScreen(
                             }
 
                             item(span = { GridItemSpan(2) }) {
-                                Spacer(Modifier.height(8.dp))
-                                CopyrightSection(developerName = "Ritik Saini")
+                                Column {
+                                    Spacer(Modifier.height(8.dp))
+                                    CopyrightSection(developerName = "Ritik Saini")
+                                }
                             }
                         }
                     }
@@ -213,32 +208,31 @@ fun MainScreen(
     }
 }
 
-// ── Profile Card — centered avatar, no edit button, shows email/role/dept ────
+// ── Profile Card ──────────────────────────────────────────────────────────────
+
 @Composable
 fun UserProfileCard(
     profile       : UserProfileData?,
     onProfileClick: () -> Unit,
     onLogout      : () -> Unit
 ) {
-    val name       = profile?.name        ?: "Loading..."
-    val email      = profile?.email       ?: ""
-    val role       = profile?.role        ?: ""
-    val department = profile?.department  ?: ""
-    val designation= profile?.designation ?: ""
-    val imageUrl   = profile?.imageUrl
+    val name        = profile?.name        ?: "Loading..."
+    val email       = profile?.email       ?: ""
+    val role        = profile?.role        ?: ""
+    val department  = profile?.department  ?: ""
+    val designation = profile?.designation ?: ""
+    val imageUrl    = profile?.imageUrl
 
     Card(
         modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp))
             .clickable { onProfileClick() },
         shape  = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
         Column(
-            modifier            = Modifier.fillMaxWidth().padding(20.dp),
+            Modifier.fillMaxWidth().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // ── Avatar ────────────────────────────────────────────────────────
             Box(
                 modifier = Modifier.size(88.dp).background(
                     Brush.linearGradient(listOf(
@@ -254,12 +248,11 @@ fun UserProfileCard(
                             .data(imageUrl).crossfade(true).build(),
                         contentDescription = "Profile",
                         modifier     = Modifier.size(82.dp).clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
+                        contentScale = ContentScale.Crop)
                 } else {
                     Box(
                         Modifier.size(82.dp).clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                            .background(MaterialTheme.colorScheme.primary.copy(0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
                         val initials = name.split(" ").take(2)
@@ -267,102 +260,62 @@ fun UserProfileCard(
                             .joinToString("")
                         if (initials.isNotBlank())
                             Text(initials,
-                                style      = MaterialTheme.typography.headlineSmall,
+                                style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold,
-                                color      = MaterialTheme.colorScheme.primary)
+                                color = MaterialTheme.colorScheme.primary)
                         else
                             Icon(Icons.Default.Person, "Profile",
-                                modifier = Modifier.size(44.dp),
-                                tint     = MaterialTheme.colorScheme.primary)
+                                Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
 
             Spacer(Modifier.height(14.dp))
-
-            // ── Name (bold, centered) ─────────────────────────────────────────
-            Text(
-                text       = name,
-                style      = MaterialTheme.typography.titleLarge,
+            Text(name, style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color      = MaterialTheme.colorScheme.onPrimaryContainer,
-                textAlign  = TextAlign.Center
-            )
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                textAlign = TextAlign.Center)
 
-            // ── Designation (medium) ──────────────────────────────────────────
             if (designation.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
-                Text(
-                    text      = designation,
-                    style     = MaterialTheme.typography.bodyMedium,
-                    color     = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                    textAlign = TextAlign.Center
-                )
+                Text(designation, style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.75f),
+                    textAlign = TextAlign.Center)
             }
 
             Spacer(Modifier.height(10.dp))
-
-            // ── Info chips row: email | role | department ─────────────────────
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
+            Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                if (email.isNotBlank())      InfoChip(Icons.Outlined.Email,   email)
+                verticalAlignment     = Alignment.CenterVertically) {
+                if (email.isNotBlank()) InfoChip(Icons.Outlined.Email, email)
             }
             Spacer(Modifier.height(6.dp))
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
+            Row(Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
+                verticalAlignment     = Alignment.CenterVertically) {
                 if (role.isNotBlank()) {
                     InfoChip(Icons.Outlined.ManageAccounts, role)
                     Spacer(Modifier.width(8.dp))
                 }
                 if (department.isNotBlank()) InfoChip(Icons.Outlined.Groups, department)
             }
-
             Spacer(Modifier.height(4.dp))
         }
     }
 }
 
-// ── Small info chip used inside profile card ──────────────────────────────────
 @Composable
 private fun InfoChip(icon: ImageVector, label: String) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
-    ) {
-        Row(
-            modifier          = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(icon, null,
-                modifier = Modifier.size(12.dp),
-                tint     = MaterialTheme.colorScheme.primary)
+    Surface(shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.primary.copy(0.10f)) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(4.dp))
-            Text(label,
-                style      = MaterialTheme.typography.labelSmall,
-                color      = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Medium,
-                maxLines   = 1)
+            Text(label, style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium, maxLines = 1)
         }
-    }
-}
-
-
-
-@Composable
-fun StatItem(value: Int, label: String, icon: ImageVector) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 8.dp)) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.height(4.dp))
-        Text(value.toString(), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onPrimaryContainer)
-        Text(label, style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
     }
 }
 
@@ -370,10 +323,8 @@ fun StatItem(value: Int, label: String, icon: ImageVector) {
 fun FeatureCard(title: String, icon: ImageVector, color: Color, onClick: () -> Unit) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue   = if (pressed) 0.95f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label         = "cardScale"
-    )
+        if (pressed) 0.95f else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "cardScale")
     Card(
         modifier = Modifier.fillMaxWidth().height(130.dp).scale(scale)
             .shadow(4.dp, RoundedCornerShape(16.dp)).clickable { pressed = true; onClick() },
@@ -385,8 +336,8 @@ fun FeatureCard(title: String, icon: ImageVector, color: Color, onClick: () -> U
             verticalArrangement = Arrangement.Center,
             modifier            = Modifier.fillMaxSize().padding(16.dp)
         ) {
-            Box(Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(color.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center) {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(14.dp))
+                .background(color.copy(0.15f)), Alignment.Center) {
                 Icon(icon, null, tint = color, modifier = Modifier.size(28.dp))
             }
             Spacer(Modifier.height(10.dp))
@@ -404,11 +355,11 @@ fun FeatureCard(title: String, icon: ImageVector, color: Color, onClick: () -> U
 
 @Composable
 fun AppSidebar(
-    profile        : UserProfileData?,
-    onProfileClick : () -> Unit,
-    onCardClick    : (Int) -> Unit,
-    onLogout       : () -> Unit,
-    onClose        : () -> Unit
+    profile       : UserProfileData?,
+    onProfileClick: () -> Unit,
+    onCardClick   : (Int) -> Unit,
+    onLogout      : () -> Unit,
+    onClose       : () -> Unit
 ) {
     val sidebarItems = listOf(
         FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
@@ -421,161 +372,88 @@ fun AppSidebar(
         FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       Color(0xFF1976D2))
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxHeight()
-            .width(300.dp)
-            .background(MaterialTheme.colorScheme.surface)
-    ) {
-        // ── Header ────────────────────────────────────────────────────────────
+    Column(Modifier.fillMaxHeight().width(300.dp).background(MaterialTheme.colorScheme.surface)) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(listOf(
-                        MaterialTheme.colorScheme.primary,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-                    ))
-                )
+            Modifier.fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(
+                    MaterialTheme.colorScheme.primary,
+                    MaterialTheme.colorScheme.primary.copy(0.85f)
+                )))
                 .clickable { onProfileClick() }
                 .padding(top = 52.dp, bottom = 20.dp, start = 20.dp, end = 20.dp)
         ) {
             Column {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.25f)),
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(Modifier.size(64.dp).clip(CircleShape).background(Color.White.copy(0.25f)),
+                    Alignment.Center) {
                     if (!profile?.imageUrl.isNullOrBlank()) {
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
                                 .data(profile!!.imageUrl).crossfade(true).build(),
                             contentDescription = "Avatar",
                             modifier     = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
+                            contentScale = ContentScale.Crop)
                     } else {
-                        val initials = (profile?.name ?: "")
-                            .split(" ").take(2)
+                        val initials = (profile?.name ?: "").split(" ").take(2)
                             .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
                             .joinToString("")
                         if (initials.isNotBlank())
-                            Text(initials,
-                                style      = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color      = Color.White)
+                            Text(initials, style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold, color = Color.White)
                         else
-                            Icon(Icons.Default.Person, null,
-                                modifier = Modifier.size(34.dp),
-                                tint     = Color.White)
+                            Icon(Icons.Default.Person, null, Modifier.size(34.dp), tint = Color.White)
                     }
                 }
-
                 Spacer(Modifier.height(12.dp))
-
-                Text(
-                    text       = profile?.name ?: "Loading...",
-                    style      = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color      = Color.White,
-                    maxLines   = 1
-                )
-                if (!profile?.designation.isNullOrBlank()) {
-                    Text(
-                        text     = profile!!.designation,
-                        style    = MaterialTheme.typography.bodySmall,
-                        color    = Color.White.copy(alpha = 0.85f),
-                        maxLines = 1
-                    )
-                }
+                Text(profile?.name ?: "Loading...",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                if (!profile?.designation.isNullOrBlank())
+                    Text(profile!!.designation,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(0.85f), maxLines = 1)
                 if (!profile?.role.isNullOrBlank()) {
                     Spacer(Modifier.height(6.dp))
-                    Surface(
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Text(
-                            text       = profile!!.role,
-                            modifier   = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                            style      = MaterialTheme.typography.labelSmall,
-                            color      = Color.White,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                    Surface(color = Color.White.copy(0.2f), shape = RoundedCornerShape(20.dp)) {
+                        Text(profile!!.role,
+                            Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
         }
 
-        // ── Nav items (scrollable) ────────────────────────────────────────────
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(vertical = 8.dp)
-        ) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
             sidebarItems.forEach { item ->
-                SidebarNavItem(
-                    icon    = item.icon,
-                    label   = item.title,
-                    color   = item.color,
-                    onClick = { onCardClick(item.id) }
-                )
+                SidebarNavItem(item.icon, item.title, item.color) { onCardClick(item.id) }
             }
         }
 
-        // ── Logout at bottom ──────────────────────────────────────────────────
-        HorizontalDivider(
-            color    = MaterialTheme.colorScheme.outlineVariant,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.padding(horizontal = 16.dp))
         Spacer(Modifier.height(4.dp))
-        SidebarNavItem(
-            icon    = Icons.Default.Logout,
-            label   = "Logout",
-            color   = MaterialTheme.colorScheme.error,
-            onClick = onLogout
-        )
+        SidebarNavItem(Icons.Default.Logout, "Logout", MaterialTheme.colorScheme.error) { onLogout() }
         Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
-private fun SidebarNavItem(
-    icon   : ImageVector,
-    label  : String,
-    color  : Color,
-    onClick: () -> Unit
-) {
+private fun SidebarNavItem(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
     var pressed by remember { mutableStateOf(false) }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = Modifier.fillMaxWidth()
             .clickable { pressed = true; onClick() }
-            .background(
-                if (pressed) MaterialTheme.colorScheme.surfaceVariant
-                else Color.Transparent
-            )
+            .background(if (pressed) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
             .padding(horizontal = 20.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(color.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(color.copy(0.12f)),
+            Alignment.Center) {
             Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
         }
         Spacer(Modifier.width(14.dp))
-        Text(
-            text       = label,
-            style      = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color      = MaterialTheme.colorScheme.onSurface
-        )
+        Text(label, style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
     }
     LaunchedEffect(pressed) {
         if (pressed) { kotlinx.coroutines.delay(120); pressed = false }
@@ -585,35 +463,46 @@ private fun SidebarNavItem(
 @Composable
 fun CopyrightSection(developerName: String) {
     val heartScale by rememberInfiniteTransition(label = "heart").animateFloat(
-        initialValue  = 1f, targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(
-            androidx.compose.animation.core.tween(800,
-                easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "heartScale"
-    )
+        1f, 1.3f,
+        infiniteRepeatable(androidx.compose.animation.core.tween(800,
+            easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "heartScale")
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier            = Modifier.fillMaxWidth().padding(vertical = 16.dp)
     ) {
-        HorizontalDivider(modifier = Modifier.width(80.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+        HorizontalDivider(Modifier.width(80.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.3f))
         Spacer(Modifier.height(4.dp))
         Text("© 2025 $developerName", style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         Text("All rights reserved", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), textAlign = TextAlign.Center)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f), textAlign = TextAlign.Center)
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("Made with", style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f))
             Icon(Icons.Default.Favorite, "Love",
                 tint = Color.Red, modifier = Modifier.size(14.dp).scale(heartScale))
             Text("by $developerName", style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f))
         }
     }
 }
 
-
+@Composable
+fun StatItem(value: Int, label: String, icon: ImageVector) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 8.dp)) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(value.toString(), fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer)
+        Text(label, style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.6f))
+    }
+}
 
 data class FeatureItem(val id: Int, val title: String, val icon: ImageVector, val color: Color)

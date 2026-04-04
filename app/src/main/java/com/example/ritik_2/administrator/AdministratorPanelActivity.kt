@@ -9,24 +9,22 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.administrator.databasemanager.DatabaseManagerActivity
+import com.example.ritik_2.administrator.departmentmanager.DepartmentActivity
 import com.example.ritik_2.administrator.manageuser.ManageUserActivity
 import com.example.ritik_2.administrator.newusercreation.CreateUserActivity
 import com.example.ritik_2.administrator.rolemanagement.RoleManagementActivity
 import com.example.ritik_2.auth.AuthRepository
-import com.example.ritik_2.core.AppConfig
+import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.data.source.AppDataSource
+import com.example.ritik_2.localdatabase.AppDatabase
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
 import javax.inject.Inject
 
-// Roles allowed to enter Administrator Panel
 private val ALLOWED_ROLES = setOf("Administrator", "Manager", "HR")
 
 @AndroidEntryPoint
@@ -34,7 +32,8 @@ class AdministratorPanelActivity : ComponentActivity() {
 
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var dataSource    : AppDataSource
-    @Inject lateinit var http          : OkHttpClient
+    @Inject lateinit var db            : AppDatabase
+    @Inject lateinit var monitor       : ConnectivityMonitor
 
     private val adminData         = mutableStateOf<AdminData?>(null)
     private val departmentData    = mutableStateOf<List<DepartmentData>>(emptyList())
@@ -55,22 +54,13 @@ class AdministratorPanelActivity : ComponentActivity() {
         val imageUrl             : String = ""
     )
 
-    data class DepartmentData(
-        val name      : String,
-        val sanitized : String,
-        val userCount : Int,
-        val roles     : List<String>
-    )
+    data class DepartmentData(val name: String, val sanitized: String,
+                              val userCount: Int, val roles: List<String>)
 
-    data class OrganizationStats(
-        val totalUsers       : Int,
-        val totalDepartments : Int,
-        val totalRoles       : Int
-    )
+    data class OrganizationStats(val totalUsers: Int, val totalDepartments: Int, val totalRoles: Int)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContent {
             ITConnectTheme {
                 AdministratorPanelScreen(
@@ -84,79 +74,105 @@ class AdministratorPanelActivity : ComponentActivity() {
                 )
             }
         }
-
         lifecycleScope.launch { verifyAndLoad() }
     }
 
     private suspend fun verifyAndLoad() {
         try {
             val session = authRepository.getSession()
-            val userId  = session?.userId ?: run { deny("Session not found. Please log in again."); return }
-            val profile = dataSource.getUserProfile(userId).getOrNull()
-                ?: run { deny("Could not load your profile."); return }
+            val userId  = session?.userId ?: run { deny("Session not found."); return }
 
-            // ── Role gate ─────────────────────────────────────────────────────
-            if (profile.role !in ALLOWED_ROLES) {
-                deny("Access denied. Only Administrator, Manager and HR can access this panel.")
+            // ── Try local cache first — instant, no network needed ────────────
+            val cachedUser = withContext(Dispatchers.IO) { db.userDao().getById(userId) }
+
+            if (cachedUser != null) {
+                // Show UI immediately from cache
+                if (cachedUser.role !in ALLOWED_ROLES) {
+                    deny("Access denied. Only Administrator, Manager and HR can access this panel.")
+                    return
+                }
+                adminData.value = AdminData(
+                    userId               = userId,
+                    name                 = cachedUser.name,
+                    email                = cachedUser.email,
+                    companyName          = cachedUser.companyName,
+                    sanitizedCompanyName = cachedUser.sanitizedCompanyName,
+                    role                 = cachedUser.role,
+                    department           = cachedUser.department,
+                    permissions          = cachedUser.permissions,
+                    imageUrl             = cachedUser.imageUrl
+                )
+                hasAccess.value = true
+                loadDashboardFromCache(cachedUser.sanitizedCompanyName)
+            }
+
+            // ── If server reachable, refresh in background ────────────────────
+            if (monitor.serverReachable.value) {
+                val profile = dataSource.getUserProfile(userId).getOrNull()
+                if (profile != null) {
+                    if (profile.role !in ALLOWED_ROLES) {
+                        if (cachedUser == null) {
+                            deny("Access denied.")
+                            return
+                        }
+                        // Role changed on server — deny
+                        deny("Access denied. Only Administrator, Manager and HR can access this panel.")
+                        return
+                    }
+                    adminData.value = AdminData(
+                        userId               = userId,
+                        name                 = profile.name,
+                        email                = profile.email,
+                        companyName          = profile.companyName,
+                        sanitizedCompanyName = profile.sanitizedCompany,
+                        role                 = profile.role,
+                        department           = profile.department,
+                        permissions          = profile.permissions,
+                        imageUrl             = profile.imageUrl
+                    )
+                    hasAccess.value = true
+                    loadDashboardFromCache(profile.sanitizedCompany)
+                } else if (cachedUser == null) {
+                    deny("Could not load your profile.")
+                    return
+                }
+            } else if (cachedUser == null) {
+                // No cache, no network
+                deny("Server unreachable and no cached data. Connect to the server first.")
                 return
             }
 
-            adminData.value = AdminData(
-                userId               = userId,
-                name                 = profile.name,
-                email                = profile.email,
-                companyName          = profile.companyName,
-                sanitizedCompanyName = profile.sanitizedCompany,
-                role                 = profile.role,
-                department           = profile.department,
-                permissions          = profile.permissions,
-                imageUrl             = profile.imageUrl
-            )
-
-            hasAccess.value = true
-            loadDashboard(profile.role, profile.sanitizedCompany)
-
         } catch (e: Exception) {
+            Log.e("AdminPanel", "verifyAndLoad: ${e.message}", e)
             deny("Error loading panel: ${e.message}")
         }
     }
 
-    private suspend fun loadDashboard(role: String, sanitizedCompany: String) {
+    private suspend fun loadDashboardFromCache(sanitizedCompany: String) {
         try {
-            val token  = authRepository.getSession()?.token ?: return
-            // Administrator sees all companies; Manager/HR see only their own
-            val filter = if (role == "Administrator") ""
-            else "?filter=(sanitizedCompanyName='$sanitizedCompany')"
-
-            val deptsRes  = withContext(Dispatchers.IO) {
-                pbGet("${AppConfig.BASE_URL}/api/collections/departments_metadata/records$filter", token)
+            val depts = withContext(Dispatchers.IO) {
+                db.deptDao().getByCompany(sanitizedCompany)
             }
-            val deptsJson = JSONObject(deptsRes).optJSONArray("items")
-
-            var totalUsers = 0
-            val allRoles   = mutableSetOf<String>()
-            val depts      = mutableListOf<DepartmentData>()
-
-            for (i in 0 until (deptsJson?.length() ?: 0)) {
-                val d     = deptsJson!!.getJSONObject(i)
-                val roles = d.optJSONArray("availableRoles")
-                    ?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList()
-                allRoles.addAll(roles)
-                val uc = d.optInt("userCount", 0)
-                totalUsers += uc
-                depts.add(DepartmentData(
-                    name      = d.optString("departmentName"),
-                    sanitized = d.optString("sanitizedName"),
-                    userCount = uc,
-                    roles     = roles
-                ))
+            val users = withContext(Dispatchers.IO) {
+                db.userDao().getByCompany(sanitizedCompany)
+            }
+            val roles = withContext(Dispatchers.IO) {
+                db.roleDao().getByCompany(sanitizedCompany)
             }
 
-            departmentData.value    = depts.sortedByDescending { it.userCount }
-            organizationStats.value = OrganizationStats(totalUsers, depts.size, allRoles.size)
-
+            val deptData = depts.map { d ->
+                DepartmentData(
+                    name      = d.name,
+                    sanitized = d.sanitizedName,
+                    userCount = users.count { it.sanitizedDepartment == d.sanitizedName },
+                    roles     = users.filter { it.sanitizedDepartment == d.sanitizedName }
+                        .map { it.role }.distinct()
+                )
+            }
+            departmentData.value    = deptData.sortedByDescending { it.userCount }
+            organizationStats.value = OrganizationStats(users.size, depts.size, roles.size)
         } catch (e: Exception) {
-            Log.e("AdminPanel", "loadDashboard: ${e.message}", e)
+            Log.e("AdminPanel", "loadDashboardFromCache: ${e.message}")
         } finally {
             isLoading.value = false
         }
@@ -164,60 +180,32 @@ class AdministratorPanelActivity : ComponentActivity() {
 
     private fun handleFunctionClick(id: String) {
         val ad = adminData.value ?: return
-
         when (id) {
-            "create_user" -> {
-                // Administrator and HR can create users
-                if (ad.role in setOf("Administrator", "HR")) {
+            "create_user"      -> {
+                if (ad.role in setOf("Administrator", "HR", "Manager"))
                     startActivity(Intent(this, CreateUserActivity::class.java))
-                } else {
-                    toast("Only Administrator and HR can create users.")
-                }
+                else toast("Only Administrator, HR and Manager can create users.")
             }
-
-            "manage_users" -> {
-                // All three allowed roles can manage users
-                startActivity(Intent(this, ManageUserActivity::class.java))
-            }
-
-            "role_management" -> {
-                // Only Administrator can change roles
-                if (ad.role == "Administrator") {
+            "manage_users"     -> startActivity(Intent(this, ManageUserActivity::class.java))
+            "department_mgr"   -> startActivity(Intent(this, DepartmentActivity::class.java))
+            "role_management"  -> {
+                if (ad.role == "Administrator")
                     startActivity(Intent(this, RoleManagementActivity::class.java))
-                } else {
-                    toast("Only Administrator can manage roles.")
-                }
+                else toast("Only Administrator can manage roles.")
             }
-
             "database_manager" -> {
-                // Only Administrator can change roles
-                if (ad.role == "Administrator") {
+                if (ad.role == "Administrator")
                     startActivity(Intent(this, DatabaseManagerActivity::class.java))
-                } else {
-                    toast("Only Administrator can manage roles.")
-                }
+                else toast("Only Administrator can access the database manager.")
             }
-
-            // database_manager intentionally removed
-
             else -> toast("Feature coming soon!")
         }
     }
 
     private fun deny(msg: String) {
-        accessDeniedMsg.value = msg
-        isLoading.value       = false
+        accessDeniedMsg.value = msg; isLoading.value = false
         lifecycleScope.launch { delay(2500); finish() }
     }
 
-    private fun toast(msg: String) =
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-
-    private fun pbGet(url: String, token: String): String {
-        val res = http.newCall(
-            Request.Builder().url(url).get()
-                .addHeader("Authorization", "Bearer $token").build()
-        ).execute()
-        val b = res.body?.string() ?: "{}"; res.close(); return b
-    }
+    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 }

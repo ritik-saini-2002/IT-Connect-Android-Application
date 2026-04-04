@@ -4,123 +4,223 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.AppConfig
+import com.example.ritik_2.core.ConnectivityMonitor
+import com.example.ritik_2.core.StringUtils
+import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
-import com.example.ritik_2.pocketbase.PocketBaseDataSource
+import com.example.ritik_2.localdatabase.AppDatabase
+import com.example.ritik_2.localdatabase.RoleEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 
 data class RoleManagementUiState(
-    val isLoading    : Boolean           = false,
-    val users        : List<UserProfile> = emptyList(),
-    val filteredUsers: List<UserProfile> = emptyList(),
-    val searchQuery  : String            = "",
-    val successMsg   : String?           = null,
-    val error        : String?           = null
+    val isLoading     : Boolean           = false,
+    val users         : List<UserProfile> = emptyList(),
+    val filteredUsers : List<UserProfile> = emptyList(),
+    val roles         : List<RoleInfo>    = emptyList(),
+    val searchQuery   : String            = "",
+    val successMsg    : String?           = null,
+    val error         : String?           = null,
+    val isOffline     : Boolean           = false
+)
+
+data class RoleInfo(
+    val id        : String,
+    val name      : String,
+    val userCount : Int,
+    val isCustom  : Boolean,
+    val isBuiltIn : Boolean = Permissions.ALL_ROLES.contains(name)
 )
 
 @HiltViewModel
 class RoleManagementViewModel @Inject constructor(
     private val dataSource    : AppDataSource,
-    private val pbDataSource  : PocketBaseDataSource, // for cached admin token
     private val authRepository: AuthRepository,
-    private val http          : OkHttpClient
+    private val db            : AppDatabase,
+    private val syncManager   : SyncManager,
+    private val monitor       : ConnectivityMonitor
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(RoleManagementUiState())
     val state: StateFlow<RoleManagementUiState> = _state.asStateFlow()
 
-    val availableRoles = Permissions.ALL_ROLES
+    private var sanitizedCompany = ""
 
-    init { loadUsers() }
+    init { load() }
 
-    // ── Use admin token for all operations ────────────────────────────────────
-    // User token only has access to the current user's own record.
-    // Changing OTHER users' roles requires admin token.
-    // getAdminToken() is suspend — always call from a coroutine on Dispatchers.IO
-
-    private fun loadUsers() {
+    private fun load() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val session = authRepository.getSession()
-                    ?: throw Exception("Not logged in")
+                val session = authRepository.getSession() ?: error("Not logged in")
                 val profile = dataSource.getUserProfile(session.userId).getOrThrow()
-                val token   = getAdminToken()
-                val users   = fetchUsersForCompany(profile.sanitizedCompany, token)
-                _state.update {
-                    it.copy(isLoading = false, users = users, filteredUsers = users)
+                sanitizedCompany = profile.sanitizedCompany
+
+                val offline = !monitor.serverReachable.value
+
+                // Always load from local first for instant display
+                loadFromLocal()
+
+                if (!offline) {
+                    // Refresh cache then reload
+                    syncManager.refreshCompanyData(sanitizedCompany)
+                    loadFromLocal()
                 }
+
+                _state.update { it.copy(isLoading = false, isOffline = offline) }
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
         }
     }
 
-    fun search(query: String) {
+    private suspend fun loadFromLocal() {
+        val roleEntities = db.roleDao().getByCompany(sanitizedCompany)
+        val userEntities = db.userDao().getByCompany(sanitizedCompany)
+
+        val roles = roleEntities.map { r ->
+            RoleInfo(
+                id        = r.id,
+                name      = r.name,
+                userCount = userEntities.count { it.role == r.name },
+                isCustom  = r.isCustom
+            )
+        }
+
+        val users = userEntities.map { u ->
+            UserProfile(
+                id               = u.id,
+                name             = u.name,
+                email            = u.email,
+                role             = u.role,
+                companyName      = u.companyName,
+                sanitizedCompany = u.sanitizedCompanyName,
+                department       = u.department,
+                sanitizedDept    = u.sanitizedDepartment,
+                designation      = u.designation,
+                imageUrl         = u.imageUrl,
+                isActive         = u.isActive
+            )
+        }
+
         _state.update { s ->
-            val q        = query.trim()
-            val filtered = if (q.isBlank()) s.users
-            else s.users.filter {
-                it.name.contains(q, ignoreCase = true)        ||
-                        it.email.contains(q, ignoreCase = true)       ||
-                        it.role.contains(q, ignoreCase = true)        ||
-                        it.designation.contains(q, ignoreCase = true) ||
-                        it.department.contains(q, ignoreCase = true)
-            }
-            s.copy(searchQuery = query, filteredUsers = filtered)
+            s.copy(
+                roles         = roles,
+                users         = users,
+                filteredUsers = applySearch(users, s.searchQuery)
+            )
         }
     }
 
-    fun changeUserRole(
-        user   : UserProfile,
-        newRole: String,
-        onDone : (String, String, String) -> Unit
-    ) {
-        if (user.role == newRole) return
+    // ── Create role ───────────────────────────────────────────────────────────
 
+    fun createRole(roleName: String) {
+        if (roleName.isBlank()) return
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            _state.update { it.copy(isLoading = true) }
             try {
-                val token     = getAdminToken()   // suspend — runs on IO
-                val newPerms  = Permissions.forRole(newRole)
-                val permsJson = Json.encodeToString(newPerms)
-                val newPath   = "users/${user.sanitizedCompany}/${user.sanitizedDept}/$newRole/${user.id}"
+                val roleId = "${sanitizedCompany}_$roleName"
 
-                // 1. PATCH users record
-                pbPatch(
-                    "${AppConfig.BASE_URL}/api/collections/users/records/${user.id}",
-                    token,
-                    JSONObject().apply {
-                        put("role",         newRole)
-                        put("permissions",  permsJson)
-                        put("documentPath", newPath)
+                // Save locally immediately
+                db.roleDao().upsert(
+                    RoleEntity(
+                        id = roleId,
+                        name = roleName,
+                        sanitizedCompanyName = sanitizedCompany,
+                        companyName = _state.value.roles.firstOrNull()?.name?.let {
+                            db.companyDao().getByName(sanitizedCompany)?.originalName
+                        } ?: sanitizedCompany,
+                        isCustom = true,
+                        pendingCreate = true
+                    )
+                )
+
+                // Enqueue server update
+                syncManager.enqueue(
+                    type       = "UPDATE",
+                    collection = "companies_metadata",
+                    recordId   = sanitizedCompany,
+                    payload    = JSONObject().apply {
+                        put("action",   "add_role")
+                        put("roleName", roleName)
+                        put("sc",       sanitizedCompany)
                     }.toString()
                 )
 
-                // 2. PATCH user_access_control record
-                val acBody = pbGet(
-                    "${AppConfig.BASE_URL}/api/collections/user_access_control/records" +
-                            "?filter=(userId='${user.id}')&perPage=1",
-                    token
-                )
-                val acId = JSONObject(acBody)
-                    .optJSONArray("items")?.optJSONObject(0)?.optString("id")
-                if (!acId.isNullOrEmpty()) {
-                    pbPatch(
-                        "${AppConfig.BASE_URL}/api/collections/user_access_control/records/$acId",
+                // If online, do it now
+                if (monitor.serverReachable.value) {
+                    applyRoleToServer(roleName, action = "add")
+                }
+
+                loadFromLocal()
+                _state.update { it.copy(isLoading = false, successMsg = "Role '$roleName' created") }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    // ── Delete role ───────────────────────────────────────────────────────────
+
+    fun deleteRole(role: RoleInfo) {
+        if (role.isBuiltIn && !role.isCustom) {
+            _state.update { it.copy(error = "Cannot delete built-in role '${role.name}'") }
+            return
+        }
+        if (role.userCount > 0) {
+            _state.update { it.copy(error = "Cannot delete '${role.name}' — ${role.userCount} users assigned. Move them first.") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                db.roleDao().delete(role.id)
+                if (monitor.serverReachable.value) {
+                    applyRoleToServer(role.name, action = "remove")
+                } else {
+                    syncManager.enqueue("UPDATE", "companies_metadata", sanitizedCompany,
+                        JSONObject().apply {
+                            put("action",   "remove_role")
+                            put("roleName", role.name)
+                            put("sc",       sanitizedCompany)
+                        }.toString()
+                    )
+                }
+                loadFromLocal()
+                _state.update { it.copy(isLoading = false, successMsg = "Role '${role.name}' deleted") }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    // ── Change user role ──────────────────────────────────────────────────────
+
+    fun changeUserRole(user: UserProfile, newRole: String, onDone: (String, String, String) -> Unit) {
+        if (user.role == newRole) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val newPerms  = Permissions.forRole(newRole)
+                val permsJson = Json.encodeToString(newPerms)
+                val newPath   = "users/$sanitizedCompany/${user.sanitizedDept}/$newRole/${user.id}"
+
+                // Update local cache immediately
+                db.userDao().setRole(user.id, newRole)
+
+                if (monitor.serverReachable.value) {
+                    val token = syncManager.getAdminToken()
+                    // PATCH users record
+                    syncManager.pbPatch(
+                        "${AppConfig.BASE_URL}/api/collections/users/records/${user.id}",
                         token,
                         JSONObject().apply {
                             put("role",         newRole)
@@ -128,154 +228,91 @@ class RoleManagementViewModel @Inject constructor(
                             put("documentPath", newPath)
                         }.toString()
                     )
-                }
-
-                // 3. PATCH user_search_index record
-                val siBody = pbGet(
-                    "${AppConfig.BASE_URL}/api/collections/user_search_index/records" +
-                            "?filter=(userId='${user.id}')&perPage=1",
-                    token
-                )
-                val siId = JSONObject(siBody)
-                    .optJSONArray("items")?.optJSONObject(0)?.optString("id")
-                if (!siId.isNullOrEmpty()) {
-                    pbPatch(
-                        "${AppConfig.BASE_URL}/api/collections/user_search_index/records/$siId",
-                        token,
-                        JSONObject().apply {
-                            put("role",         newRole)
+                    // PATCH access_control
+                    val acRes = syncManager.pbGet(
+                        "${AppConfig.BASE_URL}/api/collections/user_access_control/records" +
+                                "?filter=(userId='${user.id}')&perPage=1", token
+                    )
+                    val acId = JSONObject(acRes).optJSONArray("items")?.optJSONObject(0)?.optString("id")
+                    if (!acId.isNullOrEmpty()) {
+                        syncManager.pbPatch(
+                            "${AppConfig.BASE_URL}/api/collections/user_access_control/records/$acId",
+                            token,
+                            JSONObject().apply {
+                                put("role",         newRole)
+                                put("permissions",  permsJson)
+                                put("documentPath", newPath)
+                            }.toString()
+                        )
+                    }
+                } else {
+                    syncManager.enqueue(
+                        type       = "ROLE_CHANGE",
+                        collection = "users",
+                        recordId   = user.id,
+                        payload    = JSONObject().apply {
+                            put("role",        newRole)
+                            put("permissions", permsJson)
                             put("documentPath", newPath)
                         }.toString()
                     )
                 }
 
-                // Update local state so UI reflects change immediately
-                val updated = _state.value.users.map {
-                    if (it.id == user.id)
-                        it.copy(role = newRole, permissions = newPerms, documentPath = newPath)
-                    else it
-                }
-                _state.update {
-                    it.copy(
-                        isLoading     = false,
-                        users         = updated,
-                        filteredUsers = applySearch(updated, it.searchQuery),
-                        successMsg    = "${user.name} is now $newRole"
-                    )
-                }
+                loadFromLocal()
+                _state.update { it.copy(isLoading = false, successMsg = "${user.name} is now $newRole") }
                 onDone(user.name, user.role, newRole)
-
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(isLoading = false, error = "Role change failed: ${e.message}")
-                }
+                _state.update { it.copy(isLoading = false, error = "Role change failed: ${e.message}") }
             }
         }
     }
 
-    fun clearMessages() = _state.update { it.copy(successMsg = null, error = null) }
+    fun search(query: String) {
+        _state.update { s ->
+            s.copy(searchQuery = query, filteredUsers = applySearch(s.users, query))
+        }
+    }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    fun clearMessages() = _state.update { it.copy(successMsg = null, error = null) }
+    fun refresh() = load()
+
+    // ── Server helpers ────────────────────────────────────────────────────────
+
+    private suspend fun applyRoleToServer(roleName: String, action: String) {
+        val token = syncManager.getAdminToken()
+        val compRes = syncManager.pbGet(
+            "${AppConfig.BASE_URL}/api/collections/companies_metadata/records" +
+                    "?filter=(sanitizedName='$sanitizedCompany')&perPage=1",
+            token
+        )
+        val item = JSONObject(compRes).optJSONArray("items")?.optJSONObject(0) ?: return
+        val cId  = item.optString("id")
+        val arr  = try { JSONArray(item.optString("availableRoles", "[]")) }
+        catch (_: Exception) { JSONArray() }
+
+        val current = (0 until arr.length()).map { arr.optString(it) }.toMutableList()
+        when (action) {
+            "add"    -> if (!current.contains(roleName)) current.add(roleName)
+            "remove" -> current.remove(roleName)
+        }
+        syncManager.pbPatch(
+            "${AppConfig.BASE_URL}/api/collections/companies_metadata/records/$cId",
+            token,
+            JSONObject().apply {
+                put("availableRoles", Json.encodeToString(current))
+            }.toString()
+        )
+    }
 
     private fun applySearch(users: List<UserProfile>, query: String): List<UserProfile> {
         val q = query.trim()
         return if (q.isBlank()) users
         else users.filter {
-            it.name.contains(q, true) || it.email.contains(q, true) ||
-                    it.role.contains(q, true) || it.designation.contains(q, true)
+            it.name.contains(q, true)        ||
+                    it.email.contains(q, true)       ||
+                    it.role.contains(q, true)        ||
+                    it.designation.contains(q, true) ||
+                    it.department.contains(q, true)
         }
     }
-
-    private suspend fun fetchUsersForCompany(sc: String, token: String): List<UserProfile> =
-        withContext(Dispatchers.IO) {
-            val res   = pbGet(
-                "${AppConfig.BASE_URL}/api/collections/users/records" +
-                        "?filter=(sanitizedCompanyName='$sc')&perPage=200",
-                token
-            )
-            val items = JSONObject(res).optJSONArray("items")
-                ?: return@withContext emptyList()
-
-            (0 until items.length()).mapNotNull { i ->
-                runCatching {
-                    val o       = items.getJSONObject(i)
-                    val uid     = o.optString("id")
-                    val profile = runCatching {
-                        JSONObject(o.optString("profile", "{}"))
-                    }.getOrDefault(JSONObject())
-                    val avatarFile = profile.optString("imageUrl", "")
-                        .substringAfterLast("/", "")
-
-                    UserProfile(
-                        id               = uid,
-                        name             = o.optString("name"),
-                        email            = o.optString("email"),
-                        role             = o.optString("role"),
-                        companyName      = o.optString("companyName"),
-                        sanitizedCompany = o.optString("sanitizedCompanyName"),
-                        department       = o.optString("department"),
-                        sanitizedDept    = o.optString("sanitizedDepartment"),
-                        designation      = o.optString("designation"),
-                        isActive         = o.optBoolean("isActive", true),
-                        documentPath     = o.optString("documentPath"),
-                        imageUrl         = profile.optString("imageUrl", ""),
-                        needsProfileCompletion = o.optBoolean("needsProfileCompletion", false)
-                    )
-                }.getOrNull()
-            }
-        }
-
-    // Fetches admin token on IO thread — must always be called from a suspend context
-    private suspend fun getAdminToken(): String = withContext(Dispatchers.IO) {
-        val endpoints = listOf(
-            "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
-            "${AppConfig.BASE_URL}/api/admins/auth-with-password"
-        )
-        for (url in endpoints) {
-            try {
-                val body = JSONObject().apply {
-                    put("identity", AppConfig.ADMIN_EMAIL)
-                    put("password", AppConfig.ADMIN_PASS)
-                }.toString().toRequestBody("application/json".toMediaType())
-                val res     = http.newCall(
-                    Request.Builder().url(url).post(body).build()
-                ).execute()
-                val resBody = res.body?.string() ?: ""
-                val ok      = res.isSuccessful
-                res.close()
-                if (ok) {
-                    val t = JSONObject(resBody).optString("token")
-                    if (t.isNotEmpty()) return@withContext t
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("RoleManagementVM", "Admin auth failed at $url: ${e.message}")
-            }
-        }
-        error("Could not obtain admin token — check ADMIN_EMAIL/ADMIN_PASS in local.properties")
-    }
-
-    private suspend fun pbGet(url: String, token: String): String =
-        withContext(Dispatchers.IO) {
-            val res = http.newCall(
-                Request.Builder().url(url).get()
-                    .addHeader("Authorization", "Bearer $token").build()
-            ).execute()
-            val body = res.body?.string() ?: "{}"
-            res.close()
-            body
-        }
-
-    private suspend fun pbPatch(url: String, token: String, body: String) =
-        withContext(Dispatchers.IO) {
-            val res = http.newCall(
-                Request.Builder().url(url)
-                    .patch(body.toRequestBody("application/json".toMediaType()))
-                    .addHeader("Authorization", "Bearer $token").build()
-            ).execute()
-            val resBody = res.body?.string() ?: ""
-            val code    = res.code
-            res.close()
-            if (!res.isSuccessful)
-                error("PATCH failed HTTP $code: $resBody")
-        }
 }

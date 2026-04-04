@@ -15,7 +15,6 @@ import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
-// Roles that can edit profiles via the admin panel
 private val CAN_EDIT_ROLES = setOf("Administrator", "Manager", "HR")
 
 @AndroidEntryPoint
@@ -23,7 +22,6 @@ class ProfileActivity : ComponentActivity() {
 
     private val viewModel: ProfileViewModel by viewModels()
 
-    // Inject AuthRepository to check the CURRENT logged-in user's role
     @Inject lateinit var authRepository: AuthRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,12 +31,12 @@ class ProfileActivity : ComponentActivity() {
         val userId = intent.getStringExtra("userId") ?: run { finish(); return }
         viewModel.loadProfile(userId)
 
-        // Get the role of the person who is currently logged in
         val currentUserRole = authRepository.getSession()?.role ?: ""
         val canEdit         = currentUserRole in CAN_EDIT_ROLES
 
         setContent {
             ITConnectTheme {
+                // Use getValue on the StateFlow directly — avoids smart-cast issues
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
                 when {
@@ -63,7 +61,7 @@ class ProfileActivity : ComponentActivity() {
                             totalComplaints    = p.totalComplaints,
                             resolvedComplaints = p.resolvedComplaints,
                             isLoading          = uiState.isLoading,
-                            canEdit            = canEdit,           // ✅ pass down
+                            canEdit            = canEdit,
                             onEditClick        = {
                                 startActivity(
                                     ProfileCompletionActivity.createIntent(
@@ -80,11 +78,9 @@ class ProfileActivity : ComponentActivity() {
                     }
 
                     else -> {
-                        Toast.makeText(
-                            this,
+                        Toast.makeText(this,
                             uiState.error ?: "Profile not found",
-                            Toast.LENGTH_LONG
-                        ).show()
+                            Toast.LENGTH_LONG).show()
                         finish()
                     }
                 }

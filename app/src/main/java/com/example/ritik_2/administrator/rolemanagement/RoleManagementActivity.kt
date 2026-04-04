@@ -5,7 +5,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import com.example.ritik_2.theme.Ritik_2Theme
+import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -16,15 +16,13 @@ class RoleManagementActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            Ritik_2Theme {
+            ITConnectTheme {
                 RoleManagementScreen(
-                    viewModel = vm,
+                    viewModel    = vm,
                     onRoleChanged = { userName, oldRole, newRole ->
-                        Toast.makeText(
-                            this,
+                        Toast.makeText(this,
                             "$userName moved from $oldRole → $newRole",
-                            Toast.LENGTH_LONG
-                        ).show()
+                            Toast.LENGTH_LONG).show()
                     }
                 )
             }

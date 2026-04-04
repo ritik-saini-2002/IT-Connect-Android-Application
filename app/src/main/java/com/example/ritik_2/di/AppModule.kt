@@ -2,7 +2,10 @@ package com.example.ritik_2.di
 
 import android.content.Context
 import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.ConnectivityMonitor
+import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.source.AppDataSource
+import com.example.ritik_2.localdatabase.AppDatabase
 import com.example.ritik_2.pocketbase.PocketBaseDataSource
 import com.example.ritik_2.pocketbase.SessionManager
 import dagger.Module
@@ -18,14 +21,15 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    @Provides
-    @Singleton
-    fun provideSessionManager(
-        @ApplicationContext ctx: Context
-    ): SessionManager = SessionManager(ctx)
+    @Provides @Singleton
+    fun provideDatabase(@ApplicationContext ctx: Context): AppDatabase =
+        AppDatabase.getInstance(ctx)
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
+    fun provideSessionManager(@ApplicationContext ctx: Context): SessionManager =
+        SessionManager(ctx)
+
+    @Provides @Singleton
     fun provideOkHttpClient(): OkHttpClient =
         OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -33,11 +37,21 @@ object AppModule {
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
+    fun provideConnectivityMonitor(@ApplicationContext ctx: Context): ConnectivityMonitor =
+        ConnectivityMonitor(ctx)
+
+    @Provides @Singleton
+    fun provideSyncManager(
+        db     : AppDatabase,
+        http   : OkHttpClient,
+        monitor: ConnectivityMonitor
+    ): SyncManager = SyncManager(db, http, monitor)
+
+    @Provides @Singleton
     fun provideAuthRepository(
         dataSource    : AppDataSource,
-        pbDataSource  : PocketBaseDataSource,  // ← fixed: was SessionManager
+        pbDataSource  : PocketBaseDataSource,
         sessionManager: SessionManager
     ): AuthRepository = AuthRepository(dataSource, pbDataSource, sessionManager)
 }
