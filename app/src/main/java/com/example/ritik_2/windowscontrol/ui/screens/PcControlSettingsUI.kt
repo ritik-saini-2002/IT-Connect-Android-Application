@@ -225,7 +225,7 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
             }
 
             // ── Quick-fill hint if key looks wrong ───────
-            if (keyText != "Ritik@2002" && keyText.isNotBlank()) {
+            if (keyText != "my_secret_123" && keyText.isNotBlank()) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.errorContainer
@@ -241,12 +241,12 @@ fun PcControlSettingsUI(viewModel: PcControlViewModel) {
                             tint     = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(18.dp))
                         Text(
-                            "Agent uses \"Ritik@2002\" — tap to auto-fill",
+                            "Agent uses \"my_secret_key\" — tap to auto-fill",
                             style  = MaterialTheme.typography.bodySmall,
                             color  = MaterialTheme.colorScheme.onErrorContainer,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = { keyText = "Ritik@2002"; saved = false }) {
+                        TextButton(onClick = { keyText = "my_secret_123"; saved = false }) {
                             Text("Fix", style = MaterialTheme.typography.labelSmall)
                         }
                     }
