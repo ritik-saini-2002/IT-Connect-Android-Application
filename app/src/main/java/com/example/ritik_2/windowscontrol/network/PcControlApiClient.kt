@@ -10,9 +10,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import java.io.File
-import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 private val JSON_MT = "application/json; charset=utf-8".toMediaType()
@@ -32,7 +29,6 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .retryOnConnectionFailure(false)
         .build()
 
-    // Separate fast client for ping — fails quickly instead of blocking UI
     protected val httpFast = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
@@ -40,11 +36,10 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .retryOnConnectionFailure(false)
         .build()
 
-    // Long-timeout client for file transfers
     protected val httpTransfer = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)   // no read timeout for large files
-        .writeTimeout(0, TimeUnit.SECONDS)  // no write timeout
+        .readTimeout(0, TimeUnit.SECONDS)
+        .writeTimeout(0, TimeUnit.SECONDS)
         .build()
 
     protected fun baseRequest(path: String) = Request.Builder()
@@ -86,8 +81,8 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
 
     suspend fun ping(): PcNetworkResult<PcPingResponse> = withContext(Dispatchers.IO) {
         try {
-            android.util.Log.d("PcControl", "ping → ${settings.baseUrl}/ping  key=${settings.secretKey}")
-            // Ping uses the auth header too — agent checks it on all paths except /ping
+            android.util.Log.d("PcControl",
+                "ping → ${settings.baseUrl}/ping  key=${settings.secretKey}")
             val req  = baseRequest("/ping").get().build()
             val resp = httpFast.newCall(req).execute()
             android.util.Log.d("PcControl", "ping response → ${resp.code}")
@@ -100,7 +95,8 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
                 PcNetworkResult(false, error = "HTTP ${resp.code}")
             }
         } catch (e: Exception) {
-            android.util.Log.e("PcControl", "ping exception → ${e.javaClass.simpleName}: ${e.message}")
+            android.util.Log.e("PcControl",
+                "ping exception → ${e.javaClass.simpleName}: ${e.message}")
             PcNetworkResult(false, error = e.message ?: "Unreachable")
         }
     }
@@ -112,9 +108,9 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
             add("steps", stepsArray)
         }
         val result = post("/execute", payload)
-        return if (result.success) {
+        return if (result.success)
             PcNetworkResult(true, gson.fromJson(result.data, PcExecuteResponse::class.java))
-        } else PcNetworkResult(false, error = result.error)
+        else PcNetworkResult(false, error = result.error)
     }
 
     suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> {
@@ -148,17 +144,17 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
             val map = gson.fromJson(r.data, Map::class.java)
-            val img = map["image"] as? String ?: return PcNetworkResult(false, error = "No image")
+            val img = map["image"] as? String
+                ?: return PcNetworkResult(false, error = "No image")
             PcNetworkResult(true, img)
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
-    /** Poll for pending "Open With" dialog on PC */
     suspend fun pollOpenWithDialog(): PcNetworkResult<PcOpenWithDialog?> {
         val r = get("/dialog/openwith/poll")
-        if (!r.success) return PcNetworkResult(true, null) // no dialog = ok
+        if (!r.success) return PcNetworkResult(true, null)
         return try {
-            val json = gson.fromJson(r.data, Map::class.java)
+            val json   = gson.fromJson(r.data, Map::class.java)
             val hasDlg = json["has_dialog"] as? Boolean ?: false
             if (!hasDlg) return PcNetworkResult(true, null)
             val filePath = json["file_path"] as? String ?: ""
@@ -175,7 +171,6 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
-    /** Tell PC which app was selected in Open With dialog */
     suspend fun resolveOpenWithDialog(exePath: String): PcNetworkResult<String> =
         post("/dialog/openwith/resolve", mapOf("exe" to exePath))
 }
@@ -201,7 +196,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
     ): PcNetworkResult<List<PcFileItem>> {
         val fp = if (filter.extensions.isEmpty()) ""
         else "&exts=${filter.extensions.joinToString(",")}"
-        val r = get("/browse/dir?path=${java.net.URLEncoder.encode(path, "UTF-8")}$fp")
+        val r  = get("/browse/dir?path=${java.net.URLEncoder.encode(path, "UTF-8")}$fp")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
             val type = object : TypeToken<List<PcFileItem>>() {}.type
@@ -238,17 +233,12 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
 
     // ── File Transfer ──────────────────────────────────────────
 
-    /**
-     * Download a file from the PC.
-     * Returns an InputStream for streaming — caller must close.
-     * onProgress(bytesRead, totalBytes, speedBps)
-     */
     suspend fun downloadFile(
         remotePath : String,
         onProgress : (Long, Long, Long) -> Unit
     ): PcNetworkResult<ByteArray> = withContext(Dispatchers.IO) {
         try {
-            val url = "${settings.baseUrl}/file/download?path=${
+            val url  = "${settings.baseUrl}/file/download?path=${
                 java.net.URLEncoder.encode(remotePath, "UTF-8")}"
             val req  = Request.Builder()
                 .url(url)
@@ -260,7 +250,8 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
                 false, error = "HTTP ${resp.code}")
 
             val total     = resp.header("Content-Length")?.toLongOrNull() ?: -1L
-            val body      = resp.body ?: return@withContext PcNetworkResult(false, error = "No body")
+            val body      = resp.body
+                ?: return@withContext PcNetworkResult(false, error = "No body")
             val source    = body.source()
             val buf       = okio.Buffer()
             var done      = 0L
@@ -275,18 +266,17 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
                 val chunk = ByteArray(buf.size.toInt())
                 buf.read(chunk)
                 chunks.add(chunk)
-
                 val now   = System.currentTimeMillis()
                 val dtMs  = (now - lastTime).coerceAtLeast(1)
                 val speed = if (dtMs > 200) {
-                    val s = ((done - lastBytes) * 1000L / dtMs)
+                    val s = (done - lastBytes) * 1000L / dtMs
                     lastTime = now; lastBytes = done; s
                 } else 0L
                 onProgress(done, total, speed)
             }
 
             val result = ByteArray(done.toInt())
-            var offset = 0
+            var offset  = 0
             for (c in chunks) { c.copyInto(result, offset); offset += c.size }
             PcNetworkResult(true, result)
         } catch (e: Exception) {
@@ -294,15 +284,11 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         }
     }
 
-    /**
-     * Upload a file to the PC at remotePath.
-     * onProgress(bytesRead, totalBytes, speedBps)
-     */
     suspend fun uploadFile(
-        localBytes  : ByteArray,
-        fileName    : String,
-        remotePath  : String,
-        onProgress  : (Long, Long, Long) -> Unit
+        localBytes : ByteArray,
+        fileName   : String,
+        remotePath : String,
+        onProgress : (Long, Long, Long) -> Unit
     ): PcNetworkResult<String> = withContext(Dispatchers.IO) {
         try {
             val total     = localBytes.size.toLong()
@@ -310,8 +296,6 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
             var lastTime  = System.currentTimeMillis()
             var lastBytes = 0L
 
-            // Wrap bytes in a counting RequestBody
-            // Build multipart/form-data body so agent can use request.files["file"]
             val filePart = object : RequestBody() {
                 override fun contentType() = "application/octet-stream".toMediaType()
                 override fun contentLength() = total
@@ -334,7 +318,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
                 }
             }
 
-            val destEnc = java.net.URLEncoder.encode(remotePath, "UTF-8")
+            val destEnc   = java.net.URLEncoder.encode(remotePath, "UTF-8")
             val multipart = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("dest", remotePath)
@@ -347,7 +331,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
                 .build()
 
             val resp = httpTransfer.newCall(req).execute()
-            onProgress(total, total, 0L) // mark complete
+            onProgress(total, total, 0L)
             if (resp.isSuccessful) PcNetworkResult(true, resp.body?.string())
             else PcNetworkResult(false, error = "HTTP ${resp.code}: ${resp.body?.string()}")
         } catch (e: Exception) {
@@ -370,6 +354,14 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
 
     suspend fun scrollMouse(amount: Int) =
         post("/input/mouse/scroll", mapOf("amount" to amount))
+
+    /** Hold a mouse button down — used for drag mode on the touchpad */
+    suspend fun mouseButtonDown(button: String = "left") =
+        post("/input/mouse/down", mapOf("button" to button))
+
+    /** Release a held mouse button — ends drag mode */
+    suspend fun mouseButtonUp(button: String = "left") =
+        post("/input/mouse/up", mapOf("button" to button))
 
     suspend fun pressKey(key: String) =
         post("/input/keyboard/key", mapOf("value" to key))

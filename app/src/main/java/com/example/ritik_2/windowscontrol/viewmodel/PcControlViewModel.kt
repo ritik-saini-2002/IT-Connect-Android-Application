@@ -43,6 +43,8 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     private val repo   get() = PcControlMain.repository   ?: run { PcControlMain.init(context); PcControlMain.repository!! }
     private val api    get() = PcControlMain.apiClient    ?: run { PcControlMain.init(context); PcControlMain.apiClient!! }
     private val browse get() = PcControlMain.browseClient ?: run { PcControlMain.init(context); PcControlMain.browseClient!! }
+
+    // Fresh InputClient per call — always picks up latest settings
     private val input  get() = PcControlInputClient(PcControlMain.getSettings())
 
     // ── Plans ──────────────────────────────────────────────
@@ -129,7 +131,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     private val _transferProgress = MutableStateFlow<PcTransferProgress?>(null)
     val transferProgress: StateFlow<PcTransferProgress?> = _transferProgress
 
-    // ── Scroll position memory (path → index) ─────────────
+    // ── Scroll position memory ─────────────────────────────
     private val scrollPositions = mutableMapOf<String, Int>()
 
     fun saveScrollPosition(path: String, index: Int) { scrollPositions[path] = index }
@@ -174,19 +176,16 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
             try {
                 val currentSettings = PcControlMain.getSettings()
                 android.util.Log.d("PcControl",
-                    "pingPc → IP=${currentSettings.pcIpAddress} Port=${currentSettings.port} Key=${currentSettings.secretKey}")
+                    "pingPc → IP=${currentSettings.pcIpAddress} Port=${currentSettings.port}")
                 if (currentSettings.pcIpAddress.isBlank()) {
-                    android.util.Log.w("PcControl", "pingPc skipped — IP is blank")
                     _connectionStatus.value = PcConnectionStatus.UNKNOWN
                     return@launch
                 }
                 _connectionStatus.value = PcConnectionStatus.CHECKING
                 val freshApi = PcControlApiClient(currentSettings)
-                val r = freshApi.ping()
-                android.util.Log.d("PcControl",
-                    "pingPc result → success=${r.success} error=${r.error} data=${r.data}")
+                val r        = freshApi.ping()
                 _connectionStatus.value = if (r.success) PcConnectionStatus.ONLINE
-                else PcConnectionStatus.OFFLINE
+                else            PcConnectionStatus.OFFLINE
             } catch (e: Exception) {
                 android.util.Log.e("PcControl", "pingPc exception: ${e.message}", e)
                 _connectionStatus.value = PcConnectionStatus.OFFLINE
@@ -354,7 +353,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                                 else             -> "⚙️"
                             }
                             PcInstalledApp(
-                                name      = proc.replace(".exe", "", ignoreCase = true),
+                                name      = proc.replace(".exe","", ignoreCase = true),
                                 exePath   = proc,
                                 icon      = icon,
                                 isRunning = true
@@ -364,7 +363,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                         .sortedBy   { it.name.lowercase() }
                 }
             } catch (e: Exception) {
-                android.util.Log.e("PcControl", "loadRunningApps: ${e.message}")
+                android.util.Log.e("PcControl","loadRunningApps: ${e.message}")
             } finally {
                 _browseLoading.value = false
             }
@@ -401,19 +400,11 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                     }?.filter { it.name.isNotBlank() } ?: emptyList()
                 }
             } catch (e: Exception) {
-                android.util.Log.e("PcControl", "loadSpecialFolders: ${e.message}")
+                android.util.Log.e("PcControl","loadSpecialFolders: ${e.message}")
             }
         }
     }
 
-    /**
-     * Browse a directory.
-     *
-     * @param isRefresh  When true the call is a same-path refresh (tab return,
-     *                   pull-to-refresh, filter change, post-upload/download).
-     *                   The path stack and currentPath are NOT mutated on failure,
-     *                   so the user stays exactly where they were.
-     */
     fun browseDir(
         path      : String,
         filter    : PcFileFilter = PcFileFilter.ALL,
@@ -442,30 +433,22 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                         if (pathStack.isNotEmpty()) _currentPath.value = pathStack.removeLast()
                         else _currentPath.value = ""
                     }
-                    // On refresh failure we keep currentPath as-is so the user stays put
                 }
             } catch (e: Exception) {
                 _uiState.value = PcUiState.Error("Error: ${e.message}")
-                if (!isRefresh) {
-                    _currentPath.value = ""
-                    pathStack.clear()
-                }
+                if (!isRefresh) { _currentPath.value = ""; pathStack.clear() }
             } finally {
                 _browseLoading.value = false
             }
         }
     }
 
-    /**
-     * Browse a directory for the plan file-picker dialog.
-     * Uses its own call so it doesn't touch dirItems / currentPath.
-     */
     suspend fun browsePickerDir(path: String): List<PcFileItem> {
         return try {
             val r = browse.browseDir(path, PcFileFilter.ALL)
             if (r.success) r.data ?: emptyList() else emptyList()
         } catch (e: Exception) {
-            android.util.Log.e("PcControl", "browsePickerDir: ${e.message}")
+            android.util.Log.e("PcControl","browsePickerDir: ${e.message}")
             emptyList()
         }
     }
@@ -514,29 +497,22 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     ) {
         viewModelScope.launch {
             val fileName = remotePath.substringAfterLast('/').substringAfterLast('\\')
-            _transferProgress.value = PcTransferProgress(
-                fileName, 0L, 0L, 0L, isUpload = false)
+            _transferProgress.value = PcTransferProgress(fileName, 0L, 0L, 0L, isUpload = false)
             try {
                 val result = browse.downloadFile(remotePath) { done, total, speed ->
-                    _transferProgress.value = PcTransferProgress(
-                        fileName, total, done, speed, isUpload = false)
+                    _transferProgress.value = PcTransferProgress(fileName, total, done, speed, isUpload = false)
                 }
                 if (result.success && result.data != null) {
-                    contentResolver.openOutputStream(saveToUri)?.use { out ->
-                        out.write(result.data)
-                    }
+                    contentResolver.openOutputStream(saveToUri)?.use { it.write(result.data) }
                     val sz = result.data.size.toLong()
-                    _transferProgress.value = PcTransferProgress(
-                        fileName, sz, sz, 0L, isUpload = false, isDone = true)
+                    _transferProgress.value = PcTransferProgress(fileName, sz, sz, 0L, isUpload = false, isDone = true)
                     _uiState.value = PcUiState.Success("Downloaded: $fileName")
                 } else {
-                    _transferProgress.value = _transferProgress.value?.copy(
-                        error = result.error, isDone = true)
+                    _transferProgress.value = _transferProgress.value?.copy(error = result.error, isDone = true)
                     _uiState.value = PcUiState.Error("Download failed: ${result.error}")
                 }
             } catch (e: Exception) {
-                _transferProgress.value = _transferProgress.value?.copy(
-                    error = e.message, isDone = true)
+                _transferProgress.value = _transferProgress.value?.copy(error = e.message, isDone = true)
                 _uiState.value = PcUiState.Error("Download error: ${e.message}")
             }
         }
@@ -544,26 +520,21 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun uploadFile(localBytes: ByteArray, fileName: String, remotePath: String) {
         viewModelScope.launch {
-            _transferProgress.value = PcTransferProgress(
-                fileName, localBytes.size.toLong(), 0L, 0L, isUpload = true)
+            _transferProgress.value = PcTransferProgress(fileName, localBytes.size.toLong(), 0L, 0L, isUpload = true)
             try {
                 val result = browse.uploadFile(localBytes, fileName, remotePath) { done, total, speed ->
-                    _transferProgress.value = PcTransferProgress(
-                        fileName, total, done, speed, isUpload = true)
+                    _transferProgress.value = PcTransferProgress(fileName, total, done, speed, isUpload = true)
                 }
                 if (result.success) {
                     val sz = localBytes.size.toLong()
-                    _transferProgress.value = PcTransferProgress(
-                        fileName, sz, sz, 0L, isUpload = true, isDone = true)
+                    _transferProgress.value = PcTransferProgress(fileName, sz, sz, 0L, isUpload = true, isDone = true)
                     _uiState.value = PcUiState.Success("Uploaded: $fileName")
                 } else {
-                    _transferProgress.value = _transferProgress.value?.copy(
-                        error = result.error, isDone = true)
+                    _transferProgress.value = _transferProgress.value?.copy(error = result.error, isDone = true)
                     _uiState.value = PcUiState.Error("Upload failed: ${result.error}")
                 }
             } catch (e: Exception) {
-                _transferProgress.value = _transferProgress.value?.copy(
-                    error = e.message, isDone = true)
+                _transferProgress.value = _transferProgress.value?.copy(error = e.message, isDone = true)
                 _uiState.value = PcUiState.Error("Upload error: ${e.message}")
             }
         }
@@ -603,23 +574,79 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     // ─────────────────────────────────────────────────────
 
     fun sendMouseDelta(dx: Float, dy: Float) {
-        viewModelScope.launch { input.moveMouse(dx, dy) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.moveMouse(dx, dy) }
+            catch (e: Exception) { android.util.Log.e("PcControl","sendMouseDelta: ${e.message}") }
+        }
     }
 
     fun sendMouseClick(button: String = "left", double: Boolean = false) {
-        viewModelScope.launch { input.clickMouse(button, double) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.clickMouse(button, double) }
+            catch (e: Exception) { android.util.Log.e("PcControl","sendMouseClick: ${e.message}") }
+        }
     }
 
-    fun sendMouseScroll(amount: Int) {
-        viewModelScope.launch { input.scrollMouse(amount) }
+    /**
+     * Scroll the mouse wheel.
+     * @param amount   Positive = scroll up, negative = scroll down.
+     * @param horizontal  If true, sends a horizontal scroll (2-finger side swipe).
+     */
+    fun sendMouseScroll(amount: Int, horizontal: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (horizontal) {
+                    // Horizontal scroll: sent as SYSTEM_CMD SCROLL_H to the agent
+                    api.executeQuickStep(
+                        PcStep(
+                            type  = "SYSTEM_CMD",
+                            value = "SCROLL_H",
+                            args  = listOf(amount.toString())
+                        )
+                    )
+                } else {
+                    input.scrollMouse(amount)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl","sendMouseScroll: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Hold a mouse button down — used for drag mode on the touchpad.
+     * Calls /input/mouse/down on the agent.
+     */
+    fun mouseButtonDown(button: String = "left") {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.mouseButtonDown(button) }
+            catch (e: Exception) { android.util.Log.e("PcControl","mouseButtonDown: ${e.message}") }
+        }
+    }
+
+    /**
+     * Release a held mouse button — ends drag mode on the touchpad.
+     * Calls /input/mouse/up on the agent.
+     */
+    fun mouseButtonUp(button: String = "left") {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.mouseButtonUp(button) }
+            catch (e: Exception) { android.util.Log.e("PcControl","mouseButtonUp: ${e.message}") }
+        }
     }
 
     fun sendKey(key: String) {
-        viewModelScope.launch { input.pressKey(key) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.pressKey(key) }
+            catch (e: Exception) { android.util.Log.e("PcControl","sendKey: ${e.message}") }
+        }
     }
 
     fun sendText(text: String) {
-        viewModelScope.launch { input.typeText(text) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.typeText(text) }
+            catch (e: Exception) { android.util.Log.e("PcControl","sendText: ${e.message}") }
+        }
     }
 
     // ─────────────────────────────────────────────────────
@@ -668,7 +695,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     fun stopLiveScreen() {
         _liveScreenActive.value = false
         liveScreenJob?.cancel()
-        liveScreenJob = null
+        liveScreenJob  = null
         _liveScreenB64.value = null
     }
 
