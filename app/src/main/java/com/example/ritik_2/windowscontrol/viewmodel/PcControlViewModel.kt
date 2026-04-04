@@ -25,7 +25,6 @@ enum class PcConnectionStatus { UNKNOWN, CHECKING, ONLINE, OFFLINE }
 
 enum class PcScreen { PLANS, APP_DIRECTORY, FILE_BROWSER, TOUCHPAD, KEYBOARD, SETTINGS }
 
-/** Whether file browser is in execute mode (double-tap) or transfer mode (single tap) */
 enum class FileBrowserMode { EXECUTE, TRANSFER }
 
 // ─────────────────────────────────────────────────────────────
@@ -71,38 +70,59 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     val editingPlan: StateFlow<PcPlan?> = _editingPlan
 
     // ── Browse State ───────────────────────────────────────
-    private val _drives         = MutableStateFlow<List<PcDrive>>(emptyList())
+    private val _drives        = MutableStateFlow<List<PcDrive>>(emptyList())
     val drives: StateFlow<List<PcDrive>> = _drives
 
-    private val _currentPath    = MutableStateFlow("")
+    private val _currentPath   = MutableStateFlow("")
     val currentPath: StateFlow<String> = _currentPath
 
-    private val _dirItems       = MutableStateFlow<List<PcFileItem>>(emptyList())
+    private val _dirItems      = MutableStateFlow<List<PcFileItem>>(emptyList())
     val dirItems: StateFlow<List<PcFileItem>> = _dirItems
 
-    private val _installedApps  = MutableStateFlow<List<PcInstalledApp>>(emptyList())
+    private val _installedApps = MutableStateFlow<List<PcInstalledApp>>(emptyList())
     val installedApps: StateFlow<List<PcInstalledApp>> = _installedApps
 
-    private val _recentPaths    = MutableStateFlow<List<PcRecentPath>>(emptyList())
+    private val _recentPaths   = MutableStateFlow<List<PcRecentPath>>(emptyList())
     val recentPaths: StateFlow<List<PcRecentPath>> = _recentPaths
 
     data class SpecialFolder(val name: String, val path: String, val icon: String)
     private val _specialFolders = MutableStateFlow<List<SpecialFolder>>(emptyList())
     val specialFolders: StateFlow<List<SpecialFolder>> = _specialFolders
 
-    private val _browseLoading  = MutableStateFlow(false)
+    private val _browseLoading = MutableStateFlow(false)
     val browseLoading: StateFlow<Boolean> = _browseLoading
 
     private val _appSearchQuery = MutableStateFlow("")
     val appSearchQuery: StateFlow<String> = _appSearchQuery
 
+    // ── File Browser UI State (survives tab switching) ─────
+    private val _browserLevel   = MutableStateFlow<BrowserLevelState>(BrowserLevelState.Root)
+    val browserLevel: StateFlow<BrowserLevelState> = _browserLevel
+
+    private val _selectedFilter = MutableStateFlow(PcFileFilter.ALL)
+    val selectedFilter: StateFlow<PcFileFilter> = _selectedFilter
+
+    private val _searchQuery    = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery
+
     // ── File Browser Mode ──────────────────────────────────
-    private val _fileBrowserMode = MutableStateFlow(FileBrowserMode.TRANSFER)
+    private val _fileBrowserMode = MutableStateFlow(FileBrowserMode.EXECUTE)
     val fileBrowserMode: StateFlow<FileBrowserMode> = _fileBrowserMode
+
+    fun setBrowserLevel(level: BrowserLevelState) { _browserLevel.value = level }
+    fun setSelectedFilter(f: PcFileFilter)         { _selectedFilter.value = f }
+    fun setSearchQuery(q: String)                  { _searchQuery.value = q }
 
     fun toggleFileBrowserMode() {
         _fileBrowserMode.value = if (_fileBrowserMode.value == FileBrowserMode.TRANSFER)
             FileBrowserMode.EXECUTE else FileBrowserMode.TRANSFER
+    }
+
+    /** Serialisable form of BrowserLevel stored in ViewModel */
+    sealed class BrowserLevelState {
+        object Root                                                : BrowserLevelState()
+        data class Drive(val letter: String, val label: String)   : BrowserLevelState()
+        data class Directory(val path: String, val label: String) : BrowserLevelState()
     }
 
     // ── Transfer Progress ──────────────────────────────────
@@ -161,7 +181,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                     return@launch
                 }
                 _connectionStatus.value = PcConnectionStatus.CHECKING
-                // Rebuild clients with latest settings every ping — ensures stale clients never used
                 val freshApi = PcControlApiClient(currentSettings)
                 val r = freshApi.ping()
                 android.util.Log.d("PcControl",
@@ -260,6 +279,17 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    fun savePlanDirectly(plan: PcPlan) {
+        viewModelScope.launch {
+            try {
+                repo.insertPlan(plan)
+                _uiState.value = PcUiState.Success("File added to \"${plan.planName}\"")
+            } catch (e: Exception) {
+                _uiState.value = PcUiState.Error("Failed to save: ${e.message}")
+            }
+        }
+    }
+
     fun deletePlan(plan: PcPlan) {
         viewModelScope.launch { repo.deletePlan(plan) }
     }
@@ -314,14 +344,14 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                         .map { proc ->
                             val n = proc.lowercase()
                             val icon = when {
-                                "chrome"   in n -> "🌐"; "firefox" in n -> "🦊"
-                                "vlc"      in n -> "🎬"; "spotify" in n -> "🎵"
-                                "code"     in n -> "💻"; "word"    in n -> "📝"
-                                "excel"    in n -> "📗"; "powerpnt" in n -> "📊"
-                                "teams"    in n -> "💬"; "zoom"    in n -> "📹"
-                                "notepad"  in n -> "📄"; "explorer" in n -> "📁"
-                                "studio"   in n -> "🤖"
-                                else            -> "⚙️"
+                                "chrome"    in n -> "🌐"; "firefox"  in n -> "🦊"
+                                "vlc"       in n -> "🎬"; "spotify"  in n -> "🎵"
+                                "code"      in n -> "💻"; "word"     in n -> "📝"
+                                "excel"     in n -> "📗"; "powerpnt" in n -> "📊"
+                                "teams"     in n -> "💬"; "zoom"     in n -> "📹"
+                                "notepad"   in n -> "📄"; "explorer" in n -> "📁"
+                                "studio"    in n -> "🤖"
+                                else             -> "⚙️"
                             }
                             PcInstalledApp(
                                 name      = proc.replace(".exe", "", ignoreCase = true),
@@ -376,39 +406,75 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun browseDir(path: String, filter: PcFileFilter = PcFileFilter.ALL) {
+    /**
+     * Browse a directory.
+     *
+     * @param isRefresh  When true the call is a same-path refresh (tab return,
+     *                   pull-to-refresh, filter change, post-upload/download).
+     *                   The path stack and currentPath are NOT mutated on failure,
+     *                   so the user stays exactly where they were.
+     */
+    fun browseDir(
+        path      : String,
+        filter    : PcFileFilter = PcFileFilter.ALL,
+        isRefresh : Boolean      = false
+    ) {
         viewModelScope.launch {
             try {
                 _browseLoading.value = true
                 val isDriveRoot = path.matches(Regex("[A-Za-z]:[/\\\\]?"))
-                if (isDriveRoot) pathStack.clear()
-                else if (_currentPath.value.isNotEmpty()) pathStack.addLast(_currentPath.value)
+
+                if (!isRefresh) {
+                    if (isDriveRoot) pathStack.clear()
+                    else if (_currentPath.value.isNotEmpty() && _currentPath.value != path)
+                        pathStack.addLast(_currentPath.value)
+                }
+
                 _currentPath.value = path
-                _dirItems.value = emptyList()
+                _dirItems.value    = emptyList()
+
                 val r = browse.browseDir(path, filter)
                 if (r.success) {
                     _dirItems.value = r.data ?: emptyList()
                 } else {
                     _uiState.value = PcUiState.Error("Cannot open: ${r.error}")
-                    if (pathStack.isNotEmpty()) _currentPath.value = pathStack.removeLast()
-                    else _currentPath.value = ""
+                    if (!isRefresh) {
+                        if (pathStack.isNotEmpty()) _currentPath.value = pathStack.removeLast()
+                        else _currentPath.value = ""
+                    }
+                    // On refresh failure we keep currentPath as-is so the user stays put
                 }
             } catch (e: Exception) {
                 _uiState.value = PcUiState.Error("Error: ${e.message}")
-                _currentPath.value = ""
-                pathStack.clear()
+                if (!isRefresh) {
+                    _currentPath.value = ""
+                    pathStack.clear()
+                }
             } finally {
                 _browseLoading.value = false
             }
         }
     }
 
+    /**
+     * Browse a directory for the plan file-picker dialog.
+     * Uses its own call so it doesn't touch dirItems / currentPath.
+     */
+    suspend fun browsePickerDir(path: String): List<PcFileItem> {
+        return try {
+            val r = browse.browseDir(path, PcFileFilter.ALL)
+            if (r.success) r.data ?: emptyList() else emptyList()
+        } catch (e: Exception) {
+            android.util.Log.e("PcControl", "browsePickerDir: ${e.message}")
+            emptyList()
+        }
+    }
+
     fun navigateUp(): Boolean {
         if (pathStack.isEmpty()) {
-            // Going back to drive root clears path
             if (_currentPath.value.isNotEmpty()) {
                 _currentPath.value = ""
-                _dirItems.value = emptyList()
+                _dirItems.value    = emptyList()
                 return true
             }
             return false
@@ -416,7 +482,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         val prev = pathStack.removeLast()
         viewModelScope.launch {
             _browseLoading.value = true
-            _currentPath.value = prev
+            _currentPath.value   = prev
             val r = browse.browseDir(prev)
             if (r.success) _dirItems.value = r.data ?: emptyList()
             _browseLoading.value = false
@@ -441,7 +507,11 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     // ── File Transfer ──────────────────────────────────────
 
-    fun downloadFile(remotePath: String, saveToUri: android.net.Uri, contentResolver: android.content.ContentResolver) {
+    fun downloadFile(
+        remotePath      : String,
+        saveToUri       : android.net.Uri,
+        contentResolver : android.content.ContentResolver
+    ) {
         viewModelScope.launch {
             val fileName = remotePath.substringAfterLast('/').substringAfterLast('\\')
             _transferProgress.value = PcTransferProgress(
@@ -576,7 +646,10 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun stopRealTimeRefresh() { realTimeRefreshJob?.cancel(); realTimeRefreshJob = null }
+    fun stopRealTimeRefresh() {
+        realTimeRefreshJob?.cancel()
+        realTimeRefreshJob = null
+    }
 
     fun startLiveScreen(intervalMs: Long = 1500L) {
         if (_liveScreenActive.value) return

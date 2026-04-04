@@ -160,7 +160,8 @@ data class PcFileItem(
     val path      : String,
     val isDir     : Boolean,
     val sizeKb    : Long    = 0,
-    val extension : String  = ""
+    val extension : String  = "",
+    val modTime   : Long    = 0
 )
 
 data class PcInstalledApp(

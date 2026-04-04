@@ -1,9 +1,12 @@
 package com.example.ritik_2.windowscontrol.pcfilebrowser
 
+import android.content.ContentResolver
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,42 +18,33 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.theme.Ritik_2Theme
 import com.example.ritik_2.windowscontrol.data.*
-import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
+import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel.BrowserLevelState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+
+import androidx.core.view.WindowCompat
+import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 
 class PcControlFileBrowserActivity : ComponentActivity() {
-
     private lateinit var viewModel: PcControlViewModel
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         viewModel = ViewModelProvider(this)[PcControlViewModel::class.java]
-        setContent {
-            Ritik_2Theme() {
-                FileBrowserScreen(viewModel)
-            }
-        }
+        setContent { Ritik_2Theme { FileBrowserScreen(viewModel) } }
     }
 }
 
-/**
- * Drop-in replacement for the old PcControlFileBrowserUI(viewModel) call.
- * Use this in PcControlMainUI.kt:
- *
- *   PcScreen.FILE_BROWSER -> PcFileBrowserCompat(viewModel)
- */
 @Composable
-fun PcFileBrowserCompat(viewModel: PcControlViewModel) {
-    FileBrowserScreen(viewModel)
-}
+fun PcFileBrowserCompat(viewModel: PcControlViewModel) = FileBrowserScreen(viewModel)
 
-// ── Screen composable — all logic lives here ──────────────────────────────────
+// ── Screen ────────────────────────────────────────────────────────────────────
 
 @Composable
 fun FileBrowserScreen(vm: PcControlViewModel) {
 
-    // ── ViewModel state ───────────────────────────────────────────────────────
     val drives           by vm.drives.collectAsStateWithLifecycle()
     val currentPath      by vm.currentPath.collectAsStateWithLifecycle()
     val dirItems         by vm.dirItems.collectAsStateWithLifecycle()
@@ -62,45 +56,73 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     val connectionStatus by vm.connectionStatus.collectAsStateWithLifecycle()
     val openWithDlg      by vm.openWithDialog.collectAsStateWithLifecycle()
 
-    // ── Local UI state ────────────────────────────────────────────────────────
-    var level          by remember { mutableStateOf<BrowserLevel>(BrowserLevel.Root) }
-    var selectedFilter by remember { mutableStateOf(vm.defaultFilter) }
-    var openingFile    by remember { mutableStateOf<String?>(null) }
+    // Persistent state from ViewModel (survives tab switches)
+    val vmLevel       by vm.browserLevel.collectAsStateWithLifecycle()
+    val vmFilter      by vm.selectedFilter.collectAsStateWithLifecycle()
+    val vmSearchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+
+    // Convert ViewModel level state → UI BrowserLevel
+    val level: BrowserLevel = when (val l = vmLevel) {
+        is BrowserLevelState.Root      -> BrowserLevel.Root
+        is BrowserLevelState.Drive     ->
+            drives.find { it.letter == l.letter }
+                ?.let { BrowserLevel.Drive(it) }
+                ?: BrowserLevel.Root
+        is BrowserLevelState.Directory -> BrowserLevel.Directory(l.path, l.label)
+    }
+
+    // Persist level back to ViewModel
+    fun persistLevel(bl: BrowserLevel) {
+        vm.setBrowserLevel(when (bl) {
+            is BrowserLevel.Root      -> BrowserLevelState.Root
+            is BrowserLevel.Drive     -> BrowserLevelState.Drive(bl.drive.letter, bl.drive.label)
+            is BrowserLevel.Directory -> BrowserLevelState.Directory(bl.path, bl.label)
+        })
+    }
+
+    var openingFile  by remember { mutableStateOf<String?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
 
     val scope   = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // ── Init ──────────────────────────────────────────────────────────────────
-    LaunchedEffect(Unit) { vm.loadDrives() }
-
-    // Sync level when ViewModel resets path
-    LaunchedEffect(currentPath) {
-        if (currentPath.isEmpty() && level !is BrowserLevel.Root) level = BrowserLevel.Root
+    // ── One-time init: only load drives when not already loaded ───────────────
+    // If we already have a path (returning from another tab), refresh contents
+    // without touching the nav stack or level.
+    LaunchedEffect(Unit) {
+        if (drives.isEmpty()) {
+            vm.loadDrives()
+        } else if (currentPath.isNotEmpty()) {
+            vm.browseDir(currentPath, vmFilter, isRefresh = true)
+        }
     }
 
     // ── Back handler ──────────────────────────────────────────────────────────
     BackHandler(enabled = level !is BrowserLevel.Root) {
-        level = resolveParentLevel(level, drives)
-        vm.navigateUp()
+        val parent = resolveParentLevel(level, drives)
+        persistLevel(parent)
+        when (parent) {
+            is BrowserLevel.Root      -> vm.navigateUp()
+            is BrowserLevel.Drive     -> vm.browseDir("${parent.drive.letter}:/")
+            is BrowserLevel.Directory -> vm.browseDir(parent.path, vmFilter)
+        }
     }
 
-    // ── Map specialFolders to PcRecentPath (safe, no reflection) ─────────────
-    // ViewModel exposes specialFolders as List<SpecialFolder> — cast directly.
-    // If your type is named differently, replace the cast below.
+    // ── Map specialFolders ────────────────────────────────────────────────────
     val mappedSpecialFolders: List<PcRecentPath> = remember(specialFolders) {
         specialFolders.mapNotNull { folder ->
             runCatching {
-                // SpecialFolder is an inner/data class in PcControlViewModel
-                // with fields: name: String, path: String, icon: String
-                val name = folder.name
-                val path = folder.path
-                val icon = folder.icon
-                PcRecentPath(label = name, path = path, icon = icon, isApp = false)
+                PcRecentPath(
+                    label = folder.name,
+                    path  = folder.path,
+                    icon  = folder.icon,
+                    isApp = false
+                )
             }.getOrNull()
         }
     }
 
-    // ── File launchers ────────────────────────────────────────────────────────
+    // ── Upload file launcher ──────────────────────────────────────────────────
     var uploadDestPath by remember { mutableStateOf("") }
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -112,49 +134,125 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
                 val bytes = cr.openInputStream(uri)?.readBytes() ?: return@launch
                 val name  = cr.query(uri, null, null, null, null)?.use { cur ->
                     val idx = cur.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    cur.moveToFirst()
-                    if (idx >= 0) cur.getString(idx) else null
+                    cur.moveToFirst(); if (idx >= 0) cur.getString(idx) else null
                 } ?: "upload_${System.currentTimeMillis()}"
                 vm.uploadFile(bytes, name, uploadDestPath.ifBlank { currentPath })
+                delay(600)
+                vm.browseDir(currentPath, vmFilter, isRefresh = true)
             } catch (e: Exception) {
                 Log.e("FileBrowser", "Upload error: ${e.message}")
             }
         }
     }
 
-    var downloadPath by remember { mutableStateOf("") }
+    val uploadFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        uri ?: return@rememberLauncherForActivityResult
+        Log.d("FileBrowser", "Upload folder URI: $uri")
+    }
+
+    // ── Download launcher ─────────────────────────────────────────────────────
+    var downloadItem by remember { mutableStateOf<PcFileItem?>(null) }
     val downloadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
     ) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
-        vm.downloadFile(downloadPath, uri, context.contentResolver)
+        val item = downloadItem ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                vm.downloadFile(item.path, uri, context.contentResolver)
+                delay(600)
+                vm.browseDir(currentPath, vmFilter, isRefresh = true)
+                delay(500)
+                val mimeType = getMimeType(item.extension) ?: "*/*"
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mimeType)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                runCatching { context.startActivity(intent) }
+            } catch (e: Exception) {
+                Log.e("FileBrowser", "Download error: ${e.message}")
+            } finally {
+                downloadItem = null
+            }
+        }
     }
 
-    // ── Folder action handler ─────────────────────────────────────────────────
-    // Add downloadFolder / deleteFolder / showFolderProperties / startFolderMove
-    // to your PcControlViewModel. Stubs shown below — replace with real impl.
-    fun handleFolderAction(item: PcFileItem, action: FolderAction) {
+    // ── Execute file on PC ────────────────────────────────────────────────────
+    fun executeFileOnPc(file: PcFileItem) {
+        openingFile = file.name
+        vm.executeQuickStep(
+            PcStep("SYSTEM_CMD", "OPEN_FILE", args = listOf(file.path))
+        )
+        vm.startOpenWithPolling()
+        scope.launch { delay(3000); openingFile = null }
+    }
+
+    // ── Item action handler ───────────────────────────────────────────────────
+    fun handleItemAction(item: PcFileItem, action: ItemAction) {
         scope.launch {
             when (action) {
-                FolderAction.DOWNLOAD    -> {
-                    // Example: vm.downloadFolder(item.path)
-                    Log.d("FileBrowser", "Download folder: ${item.path}")
+                ItemAction.DOWNLOAD -> {
+                    downloadItem = item
+                    downloadLauncher.launch(item.name)
                 }
-                FolderAction.DELETE      -> {
-                    // Example: vm.deleteFolder(item.path)
-                    Log.d("FileBrowser", "Delete folder: ${item.path}")
-                    delay(300)
-                    vm.browseDir(currentPath, selectedFilter)
+                ItemAction.DELETE -> {
+                    vm.executeQuickStep(PcStep("FILE_OP", action = "DELETE", from = item.path))
+                    delay(400)
+                    vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
-                FolderAction.PROPERTIES  -> {
-                    // Example: vm.showFolderProperties(item.path)
-                    Log.d("FileBrowser", "Properties: ${item.path}")
+                ItemAction.RENAME -> {
+                    val newPath = item.path.substringBeforeLast('/') + "/" + item.name
+                    vm.executeQuickStep(
+                        PcStep(
+                            "FILE_OP", action = "RENAME",
+                            from = item.path.substringBeforeLast('/') +
+                                    "/" + item.path.substringAfterLast('/'),
+                            to = newPath
+                        )
+                    )
+                    delay(400)
+                    vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
-                FolderAction.MOVE        -> {
-                    // Example: vm.startFolderMove(item.path)
-                    Log.d("FileBrowser", "Move: ${item.path}")
+                ItemAction.MOVE -> {
+                    val srcPath = item.path.substringBeforeLast('/')
+                    vm.executeQuickStep(
+                        PcStep("FILE_OP", action = "MOVE", from = srcPath, to = item.path)
+                    )
+                    delay(400)
+                    vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
+                ItemAction.COPY -> {
+                    val destPath = "$currentPath/${item.name}_copy"
+                    vm.executeQuickStep(
+                        PcStep("FILE_OP", action = "COPY", from = item.path, to = destPath)
+                    )
+                    delay(400)
+                    vm.browseDir(currentPath, vmFilter, isRefresh = true)
+                }
+                ItemAction.PASTE, ItemAction.PROPERTIES -> { /* handled in UI */ }
             }
+        }
+    }
+
+    // ── Navigate to a level ───────────────────────────────────────────────────
+    fun navigateTo(target: BrowserLevel) {
+        persistLevel(target)
+        when (target) {
+            is BrowserLevel.Root      -> vm.navigateUp()
+            is BrowserLevel.Drive     -> vm.browseDir("${target.drive.letter}:/")
+            is BrowserLevel.Directory -> vm.browseDir(target.path, vmFilter)
+        }
+    }
+
+    // ── Refresh ───────────────────────────────────────────────────────────────
+    fun doRefresh() {
+        scope.launch {
+            isRefreshing = true
+            vm.browseDir(currentPath, vmFilter, isRefresh = true)
+            delay(800)
+            isRefreshing = false
         }
     }
 
@@ -170,61 +268,54 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         transferProgress = transferProg,
         connectionStatus = connectionStatus,
         openingFileName  = openingFile,
-        selectedFilter   = selectedFilter,
+        selectedFilter   = vmFilter,
         level            = level,
-        openWithDialog   = openWithDlg
+        openWithDialog   = openWithDlg,
+        searchQuery      = vmSearchQuery,
+        isRefreshing     = isRefreshing,
     )
 
     // ── Build callbacks ───────────────────────────────────────────────────────
     val callbacks = FileBrowserCallbacks(
         onDriveClick = { drive ->
-            level = BrowserLevel.Drive(drive)
+            persistLevel(BrowserLevel.Drive(drive))
             vm.browseDir("${drive.letter}:/")
         },
         onFolderClick = { folder ->
-            level = BrowserLevel.Directory(path = folder.path, label = folder.name)
-            vm.browseDir(folder.path, selectedFilter)
+            persistLevel(BrowserLevel.Directory(path = folder.path, label = folder.name))
+            vm.browseDir(folder.path, vmFilter)
         },
         onSpecialFolderClick = { path, name ->
-            level = BrowserLevel.Directory(path = path, label = name)
+            persistLevel(BrowserLevel.Directory(path = path, label = name))
             vm.browseDir(path)
         },
         onRecentClick = { recent ->
-            level = BrowserLevel.Directory(path = recent.path, label = recent.label)
+            persistLevel(BrowserLevel.Directory(path = recent.path, label = recent.label))
             vm.browseDir(recent.path)
         },
-        onFileOpen = { file ->
-            openingFile = file.name
-            vm.executeQuickStep(buildOpenCommand(file))
-            vm.startOpenWithPolling()
-            scope.launch { delay(3000); openingFile = null }
-        },
+        onFileOpen     = { file -> executeFileOnPc(file) },
         onFileDownload = { file ->
-            downloadPath = file.path
+            downloadItem = file
             downloadLauncher.launch(file.name)
         },
-        onFolderAction = { item, action -> handleFolderAction(item, action) },
+        onItemAction   = { item, action -> handleItemAction(item, action) },
         onFilterChange = { filter ->
-            selectedFilter = filter
-            vm.browseDir(currentPath, filter)
+            vm.setSelectedFilter(filter)
+            vm.browseDir(currentPath, filter, isRefresh = true)
         },
-        onPing    = { vm.pingPc() },
-        onUpload  = {
-            uploadDestPath = currentPath
-            uploadLauncher.launch("*/*")
-        },
-        onRefresh = { vm.browseDir(currentPath, selectedFilter) },
-        onBreadcrumbNav = { target ->
-            level = target
-            when (target) {
-                is BrowserLevel.Root      -> vm.navigateUp()
-                is BrowserLevel.Drive     -> vm.browseDir("${target.drive.letter}:/")
-                is BrowserLevel.Directory -> vm.browseDir(target.path, selectedFilter)
-            }
+        onPing         = { vm.pingPc() },
+        onUpload       = { uploadDestPath = currentPath; uploadLauncher.launch("*/*") },
+        onUploadFolder = { uploadFolderLauncher.launch(null) },
+        onRefresh      = { doRefresh() },
+        onBreadcrumbNav = { target -> navigateTo(target) },
+        onNavigateBack  = {
+            val parent = resolveParentLevel(level, drives)
+            navigateTo(parent)
         },
         onDismissTransfer = { vm.clearTransferProgress() },
         onOpenWithSelect  = { vm.resolveOpenWith(it.exePath) },
-        onDismissOpenWith = { vm.dismissOpenWithDialog() }
+        onDismissOpenWith = { vm.dismissOpenWithDialog() },
+        onSearchChange    = { vm.setSearchQuery(it) },
     )
 
     PcControlFileBrowserUI(state = uiState, callbacks = callbacks)
@@ -251,21 +342,12 @@ fun resolveParentLevel(level: BrowserLevel, drives: List<PcDrive>): BrowserLevel
         }
     }
 
-fun buildOpenCommand(file: PcFileItem): PcStep {
-    return when (file.extension.lowercase()) {
-        "mp4", "mkv", "avi", "mov", "wmv",
-        "flac", "mp3", "wav", "m4a", "aac"   -> PcStep("LAUNCH_APP", "vlc.exe",        args = listOf(file.path))
-        "jpg", "jpeg", "png", "gif",
-        "bmp", "webp", "tiff", "svg"          -> PcStep("SYSTEM_CMD", "OPEN_FILE",      args = listOf(file.path))
-        "doc", "docx", "rtf", "odt"           -> PcStep("LAUNCH_APP", "WINWORD.EXE",    args = listOf(file.path))
-        "xls", "xlsx", "csv", "ods"           -> PcStep("LAUNCH_APP", "EXCEL.EXE",      args = listOf(file.path))
-        "ppt", "pptx", "odp"                  -> PcStep("LAUNCH_APP", "POWERPNT.EXE",   args = listOf(file.path))
-        else                                   -> PcStep("SYSTEM_CMD", "OPEN_FILE",      args = listOf(file.path))
-    }
-}
+fun buildOpenCommand(file: PcFileItem): PcStep =
+    PcStep("SYSTEM_CMD", "OPEN_FILE", args = listOf(file.path))
 
-// ── ViewModel extension property ──────────────────────────────────────────────
-// Add a defaultFilter property to your PcControlViewModel:
-//   val defaultFilter: PcFileFilter = PcFileFilter.ALL
-// Or replace `vm.defaultFilter` with `PcFileFilter.ALL` directly if not present.
-val PcControlViewModel.defaultFilter: PcFileFilter get() = PcFileFilter.ALL
+fun getMimeType(extension: String): String? =
+    MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase())
+
+fun encodePath(path: String): String =
+    URLEncoder.encode(path, StandardCharsets.UTF_8.name())
+        .replace("+", "%20")

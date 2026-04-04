@@ -166,11 +166,11 @@ fun LandscapeControllerUI(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                    .padding(horizontal = 42.dp, vertical = 4.dp),
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(dotColor))
+                Box(Modifier.size(17.dp).clip(CircleShape).background(dotColor))
                 Text(
                     when (connectionStatus) {
                         PcConnectionStatus.ONLINE   -> "Connected"
@@ -185,20 +185,20 @@ fun LandscapeControllerUI(
                         color = MaterialTheme.colorScheme.primary)
                 }
                 Spacer(Modifier.weight(1f))
-                Text("Spd", fontSize = 9.sp,
+                Text("Spd", fontSize = 35.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Slider(
                     value          = sensitivity,
                     onValueChange  = onSensChange,
                     valueRange     = 1f..14f,
                     steps          = 12,
-                    modifier       = Modifier.width(80.dp).height(20.dp)
+                    modifier       = Modifier.width(100.dp).height(40.dp)
                 )
-                Text("${sensitivity.toInt()}", fontSize = 9.sp,
+                Text("${sensitivity.toInt()}", fontSize = 19.sp,
                     color = MaterialTheme.colorScheme.primary)
                 IconButton(
                     onClick  = { viewModel.navigateTo(PcScreen.KEYBOARD) },
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(Icons.Default.Keyboard, null, Modifier.size(15.dp))
                 }
@@ -220,7 +220,7 @@ fun LandscapeControllerUI(
                 // Shoulder buttons
                 Row(
                     modifier              = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     CtrlBtn("Right Click", Modifier.weight(1f),
                         MaterialTheme.colorScheme.surfaceVariant,
