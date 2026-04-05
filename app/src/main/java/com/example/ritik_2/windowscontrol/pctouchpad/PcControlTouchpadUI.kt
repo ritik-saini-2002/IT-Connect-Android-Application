@@ -441,7 +441,7 @@ fun PortraitLayout(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(gap)
     ) {
         // Status bar
@@ -451,7 +451,7 @@ fun PortraitLayout(
             modifier = Modifier.fillMaxWidth().height(30.dp)
         ) {
             Row(
-                Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                Modifier.fillMaxSize().padding(horizontal = 18.dp),
                 verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -473,7 +473,7 @@ fun PortraitLayout(
                 Text("Spd", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Slider(value = sensitivity, onValueChange = onSensChange,
                     valueRange = 1f..12f, steps = 10,
-                    modifier = Modifier.width(80.dp).height(20.dp))
+                    modifier = Modifier.width(180.dp).height(20.dp))
                 Text("${sensitivity.toInt()}", fontSize = 10.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary, modifier = Modifier.width(14.dp))
                 TextButton(onClick = { vm.navigateTo(PcScreen.KEYBOARD) },
@@ -493,7 +493,7 @@ fun PortraitLayout(
         )
 
         // Mouse L / scroll / R
-        Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        Row(Modifier.fillMaxWidth().height(55.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
             TBtn("L", Modifier.weight(1f).fillMaxHeight(),
                 MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer) { vm.sendMouseClick("left"); onFeedback("L Click") }
             Box(
@@ -511,7 +511,7 @@ fun PortraitLayout(
         }
 
         // Action row 1
-        Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        Row(Modifier.fillMaxWidth().height(55.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
             TBtn("Alt+F4", Modifier.weight(1.2f).fillMaxHeight(), MaterialTheme.colorScheme.errorContainer,     MaterialTheme.colorScheme.error)                 { vm.sendKey("ALT+F4");  onFeedback("Alt+F4") }
             TBtn("Enter",  Modifier.weight(1f).fillMaxHeight(),   MaterialTheme.colorScheme.primaryContainer,   MaterialTheme.colorScheme.onPrimaryContainer)    { vm.sendKey("ENTER");   onFeedback("Enter") }
             TBtn("Vol -",  Modifier.weight(0.9f).fillMaxHeight(), MaterialTheme.colorScheme.surfaceVariant,     MaterialTheme.colorScheme.onSurfaceVariant)      { vm.executeQuickStep(PcStep("SYSTEM_CMD","VOLUME_DOWN")); onFeedback("Vol-") }
@@ -521,7 +521,7 @@ fun PortraitLayout(
         }
 
         // Action row 2
-        Row(Modifier.fillMaxWidth().height(44.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        Row(Modifier.fillMaxWidth().height(55.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
             TBtn("F11",     Modifier.weight(0.9f).fillMaxHeight(), MaterialTheme.colorScheme.tertiaryContainer,  MaterialTheme.colorScheme.onTertiaryContainer)  { vm.sendKey("F11");     onFeedback("F11") }
             TBtn("Esc",     Modifier.weight(0.8f).fillMaxHeight(), MaterialTheme.colorScheme.surfaceVariant,     MaterialTheme.colorScheme.onSurfaceVariant)     { vm.sendKey("ESC");     onFeedback("Esc") }
             TBtn("Space",   Modifier.weight(1.4f).fillMaxHeight(), MaterialTheme.colorScheme.primaryContainer,   MaterialTheme.colorScheme.onPrimaryContainer)   { vm.sendKey("SPACE");   onFeedback("Space") }
@@ -531,7 +531,7 @@ fun PortraitLayout(
 
         // F-key row
         Row(
-            Modifier.fillMaxWidth().height(38.dp).horizontalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().height(48.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(gap)
         ) {
             (1..12).forEach { i ->
