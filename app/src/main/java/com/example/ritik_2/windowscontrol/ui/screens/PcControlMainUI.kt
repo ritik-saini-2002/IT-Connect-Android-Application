@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.windowscontrol.data.PcStep
+import com.example.ritik_2.windowscontrol.pccontrolappdirectory.PcControlAppDirectoryUI
 import com.example.ritik_2.windowscontrol.pcfilebrowser.PcFileBrowserCompat
 import com.example.ritik_2.windowscontrol.pctouchpad.PcControlTouchpadUI
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
