@@ -152,6 +152,9 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     // ── Real-time refresh ──────────────────────────────────
     private var realTimeRefreshJob: Job? = null
 
+    // ── Search debounce job ────────────────────────────────
+    private var searchJob: Job? = null
+
     val filteredApps: StateFlow<List<PcInstalledApp>> = combine(
         _installedApps, _appSearchQuery
     ) { apps, query ->
@@ -185,7 +188,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                 val freshApi = PcControlApiClient(currentSettings)
                 val r        = freshApi.ping()
                 _connectionStatus.value = if (r.success) PcConnectionStatus.ONLINE
-                else            PcConnectionStatus.OFFLINE
+                else PcConnectionStatus.OFFLINE
             } catch (e: Exception) {
                 android.util.Log.e("PcControl", "pingPc exception: ${e.message}", e)
                 _connectionStatus.value = PcConnectionStatus.OFFLINE
@@ -443,6 +446,36 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    // ── Server-side file search with 300ms debounce ────────
+    /**
+     * Search for files/folders matching [query] under [rootPath].
+     * Results are written into [_dirItems] so the existing
+     * SearchResultsView picks them up automatically.
+     * Debounced — rapid successive calls cancel the previous one.
+     */
+    fun searchFiles(rootPath: String, query: String) {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            // Short debounce so we don't hammer the agent while the user types
+            delay(300)
+            if (query.isBlank() || rootPath.isBlank()) return@launch
+            try {
+                _browseLoading.value = true
+                val r = browse.searchFiles(rootPath, query)
+                if (r.success) {
+                    _dirItems.value = r.data ?: emptyList()
+                } else {
+                    android.util.Log.w("PcControl", "searchFiles error: ${r.error}")
+                    // Keep whatever items were shown before rather than clearing to empty
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "searchFiles: ${e.message}")
+            } finally {
+                _browseLoading.value = false
+            }
+        }
+    }
+
     suspend fun browsePickerDir(path: String): List<PcFileItem> {
         return try {
             val r = browse.browseDir(path, PcFileFilter.ALL)
@@ -543,6 +576,8 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     fun clearTransferProgress() { _transferProgress.value = null }
 
     // ── Open With dialog polling ───────────────────────────
+    // Kept for backwards compatibility — no longer triggered by OPEN_FILE
+    // but still callable if needed from other contexts.
 
     fun startOpenWithPolling() {
         openWithPollJob?.cancel()
@@ -589,14 +624,13 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     /**
      * Scroll the mouse wheel.
-     * @param amount   Positive = scroll up, negative = scroll down.
+     * @param amount      Positive = scroll up, negative = scroll down.
      * @param horizontal  If true, sends a horizontal scroll (2-finger side swipe).
      */
     fun sendMouseScroll(amount: Int, horizontal: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (horizontal) {
-                    // Horizontal scroll: sent as SYSTEM_CMD SCROLL_H to the agent
                     api.executeQuickStep(
                         PcStep(
                             type  = "SYSTEM_CMD",
@@ -615,7 +649,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     /**
      * Hold a mouse button down — used for drag mode on the touchpad.
-     * Calls /input/mouse/down on the agent.
      */
     fun mouseButtonDown(button: String = "left") {
         viewModelScope.launch(Dispatchers.IO) {
@@ -626,7 +659,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     /**
      * Release a held mouse button — ends drag mode on the touchpad.
-     * Calls /input/mouse/up on the agent.
      */
     fun mouseButtonUp(button: String = "left") {
         viewModelScope.launch(Dispatchers.IO) {
@@ -695,7 +727,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     fun stopLiveScreen() {
         _liveScreenActive.value = false
         liveScreenJob?.cancel()
-        liveScreenJob  = null
+        liveScreenJob        = null
         _liveScreenB64.value = null
     }
 
@@ -704,6 +736,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         stopRealTimeRefresh()
         stopLiveScreen()
         openWithPollJob?.cancel()
+        searchJob?.cancel()
     }
 }
 

@@ -2,6 +2,7 @@ package com.example.ritik_2.windowscontrol.pcfilebrowser
 
 import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -32,6 +33,8 @@ class PcControlFileBrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Allow both portrait and landscape — UI adapts automatically
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         viewModel = ViewModelProvider(this)[PcControlViewModel::class.java]
         setContent { Ritik_2Theme { FileBrowserScreen(viewModel) } }
     }
@@ -56,12 +59,11 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     val connectionStatus by vm.connectionStatus.collectAsStateWithLifecycle()
     val openWithDlg      by vm.openWithDialog.collectAsStateWithLifecycle()
 
-    // Persistent state from ViewModel (survives tab switches)
     val vmLevel       by vm.browserLevel.collectAsStateWithLifecycle()
     val vmFilter      by vm.selectedFilter.collectAsStateWithLifecycle()
     val vmSearchQuery by vm.searchQuery.collectAsStateWithLifecycle()
 
-    // Convert ViewModel level state → UI BrowserLevel
+    // Convert ViewModel level → UI BrowserLevel
     val level: BrowserLevel = when (val l = vmLevel) {
         is BrowserLevelState.Root      -> BrowserLevel.Root
         is BrowserLevelState.Drive     ->
@@ -71,7 +73,6 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         is BrowserLevelState.Directory -> BrowserLevel.Directory(l.path, l.label)
     }
 
-    // Persist level back to ViewModel
     fun persistLevel(bl: BrowserLevel) {
         vm.setBrowserLevel(when (bl) {
             is BrowserLevel.Root      -> BrowserLevelState.Root
@@ -86,9 +87,7 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     val scope   = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // ── One-time init: only load drives when not already loaded ───────────────
-    // If we already have a path (returning from another tab), refresh contents
-    // without touching the nav stack or level.
+    // ── One-time init ─────────────────────────────────────────────────────────
     LaunchedEffect(Unit) {
         if (drives.isEmpty()) {
             vm.loadDrives()
@@ -179,13 +178,13 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         }
     }
 
-    // ── Execute file on PC ────────────────────────────────────────────────────
+    // ── Execute file on PC (direct open — no dialog) ──────────────────────────
     fun executeFileOnPc(file: PcFileItem) {
         openingFile = file.name
+        // SYSTEM_CMD → OPEN_FILE now calls os.startfile() directly on the agent
         vm.executeQuickStep(
             PcStep("SYSTEM_CMD", "OPEN_FILE", args = listOf(file.path))
         )
-        vm.startOpenWithPolling()
         scope.launch { delay(3000); openingFile = null }
     }
 
@@ -209,7 +208,7 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
                             "FILE_OP", action = "RENAME",
                             from = item.path.substringBeforeLast('/') +
                                     "/" + item.path.substringAfterLast('/'),
-                            to = newPath
+                            to   = newPath
                         )
                     )
                     delay(400)
@@ -253,6 +252,37 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
             vm.browseDir(currentPath, vmFilter, isRefresh = true)
             delay(800)
             isRefreshing = false
+        }
+    }
+
+    // ── Create folder ─────────────────────────────────────────────────────────
+    fun createFolder(folderName: String) {
+        if (folderName.isBlank() || currentPath.isEmpty()) return
+        val folderPath = "$currentPath/$folderName"
+        scope.launch {
+            vm.executeQuickStep(
+                PcStep("FILE_OP", action = "MKDIR", from = folderPath)
+            )
+            delay(500)
+            vm.browseDir(currentPath, vmFilter, isRefresh = true)
+        }
+    }
+
+    // ── Search handler ────────────────────────────────────────────────────────
+    fun handleSearchChange(query: String) {
+        vm.setSearchQuery(query)
+        val trimmed = query.trim().trimStart('\u200B')
+        when {
+            // Trigger server search when query has 2+ real chars and we have a path
+            trimmed.length >= 2 && currentPath.isNotEmpty() -> {
+                scope.launch {
+                    vm.searchFiles(currentPath, trimmed)
+                }
+            }
+            // Clear search — restore directory listing
+            trimmed.isEmpty() && currentPath.isNotEmpty() -> {
+                vm.browseDir(currentPath, vmFilter, isRefresh = false)
+            }
         }
     }
 
@@ -303,19 +333,20 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
             vm.setSelectedFilter(filter)
             vm.browseDir(currentPath, filter, isRefresh = true)
         },
-        onPing         = { vm.pingPc() },
-        onUpload       = { uploadDestPath = currentPath; uploadLauncher.launch("*/*") },
-        onUploadFolder = { uploadFolderLauncher.launch(null) },
-        onRefresh      = { doRefresh() },
-        onBreadcrumbNav = { target -> navigateTo(target) },
-        onNavigateBack  = {
+        onPing            = { vm.pingPc() },
+        onUpload          = { uploadDestPath = currentPath; uploadLauncher.launch("*/*") },
+        onUploadFolder    = { uploadFolderLauncher.launch(null) },
+        onCreateFolder    = { folderName -> createFolder(folderName) },
+        onRefresh         = { doRefresh() },
+        onBreadcrumbNav   = { target -> navigateTo(target) },
+        onNavigateBack    = {
             val parent = resolveParentLevel(level, drives)
             navigateTo(parent)
         },
         onDismissTransfer = { vm.clearTransferProgress() },
         onOpenWithSelect  = { vm.resolveOpenWith(it.exePath) },
         onDismissOpenWith = { vm.dismissOpenWithDialog() },
-        onSearchChange    = { vm.setSearchQuery(it) },
+        onSearchChange    = { query -> handleSearchChange(query) },
     )
 
     PcControlFileBrowserUI(state = uiState, callbacks = callbacks)

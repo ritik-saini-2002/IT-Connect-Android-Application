@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 private val JSON_MT = "application/json; charset=utf-8".toMediaType()
@@ -71,6 +72,9 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
                 PcNetworkResult(false, error = e.message ?: "Network error")
             }
         }
+
+    // Shared path encoder used across all clients
+    protected fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -196,12 +200,36 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
     ): PcNetworkResult<List<PcFileItem>> {
         val fp = if (filter.extensions.isEmpty()) ""
         else "&exts=${filter.extensions.joinToString(",")}"
-        val r  = get("/browse/dir?path=${java.net.URLEncoder.encode(path, "UTF-8")}$fp")
+        val r  = get("/browse/dir?path=${enc(path)}$fp")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
             val type = object : TypeToken<List<PcFileItem>>() {}.type
             PcNetworkResult(true, gson.fromJson(r.data, type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+    }
+
+    // ── Server-side file/folder search ─────────────────────────
+    /**
+     * Search recursively under [rootPath] for items whose name contains [query].
+     * Calls GET /browse/search?path=...&q=...&maxResults=100
+     * Results are a flat list of PcFileItem (same type as browseDir).
+     */
+    suspend fun searchFiles(
+        rootPath   : String,
+        query      : String,
+        maxResults : Int = 100
+    ): PcNetworkResult<List<PcFileItem>> {
+        if (query.isBlank() || rootPath.isBlank())
+            return PcNetworkResult(true, emptyList())
+        val url = "/browse/search?path=${enc(rootPath)}&q=${enc(query)}&maxResults=$maxResults"
+        val r   = get(url)
+        if (!r.success) return PcNetworkResult(false, error = r.error)
+        return try {
+            val type = object : TypeToken<List<PcFileItem>>() {}.type
+            PcNetworkResult(true, gson.fromJson(r.data, type))
+        } catch (e: Exception) {
+            PcNetworkResult(false, error = e.message)
+        }
     }
 
     suspend fun getInstalledApps(): PcNetworkResult<List<PcInstalledApp>> {
@@ -238,8 +266,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         onProgress : (Long, Long, Long) -> Unit
     ): PcNetworkResult<ByteArray> = withContext(Dispatchers.IO) {
         try {
-            val url  = "${settings.baseUrl}/file/download?path=${
-                java.net.URLEncoder.encode(remotePath, "UTF-8")}"
+            val url  = "${settings.baseUrl}/file/download?path=${enc(remotePath)}"
             val req  = Request.Builder()
                 .url(url)
                 .header("X-Secret-Key", settings.secretKey)
@@ -318,7 +345,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
                 }
             }
 
-            val destEnc   = java.net.URLEncoder.encode(remotePath, "UTF-8")
+            val destEnc   = enc(remotePath)
             val multipart = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("dest", remotePath)
