@@ -476,6 +476,11 @@ fun PortraitLayout(
                     }
                 }
                 Spacer(Modifier.weight(1f))
+                Text(
+                    "Ritik Saini                                                        ",
+                    fontSize = 8.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Text("Spd", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Slider(value = sensitivity, onValueChange = onSensChange,
                     valueRange = 1f..12f, steps = 10,
