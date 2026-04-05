@@ -93,7 +93,8 @@ fun LandscapeLayout(
     ) {
         val totalH = maxHeight
         val totalW = maxWidth
-        val sideW = totalW * 0.20f
+        val sideW = totalW * 0.10f
+        val sideWL = totalW * 0.20f
         val gap = 4.dp
         val padV = 25.dp
 
@@ -112,7 +113,7 @@ fun LandscapeLayout(
 
             // ── LEFT PANEL ────────────────────────────────
             Column(
-                modifier = Modifier.width(sideW).fillMaxHeight(),
+                modifier = Modifier.width(sideWL).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(gap)
             ) {
                 Row(
@@ -152,28 +153,28 @@ fun LandscapeLayout(
                     ) {
                         TBtn(
                             "▲",
-                            Modifier.width(sideW * 0.45f).height(36.dp),
+                            Modifier.width(sideWL * 0.45f).height(36.dp),
                             MaterialTheme.colorScheme.surfaceVariant,
                             MaterialTheme.colorScheme.onSurfaceVariant
                         ) { vm.sendKey("UP") }
                         Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                             TBtn(
                                 "◀",
-                                Modifier.width(sideW * 0.45f).height(36.dp),
+                                Modifier.width(sideWL * 0.45f).height(36.dp),
                                 MaterialTheme.colorScheme.surfaceVariant,
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             ) { vm.sendKey("LEFT") }
-                            Spacer(Modifier.width(sideW * 0.08f))
+                            Spacer(Modifier.width(sideWL * 0.08f))
                             TBtn(
                                 "▶",
-                                Modifier.width(sideW * 0.45f).height(36.dp),
+                                Modifier.width(sideWL * 0.45f).height(36.dp),
                                 MaterialTheme.colorScheme.surfaceVariant,
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             ) { vm.sendKey("RIGHT") }
                         }
                         TBtn(
                             "▼",
-                            Modifier.width(sideW * 0.45f).height(36.dp),
+                            Modifier.width(sideWL * 0.45f).height(36.dp),
                             MaterialTheme.colorScheme.surfaceVariant,
                             MaterialTheme.colorScheme.onSurfaceVariant
                         ) { vm.sendKey("DOWN") }
