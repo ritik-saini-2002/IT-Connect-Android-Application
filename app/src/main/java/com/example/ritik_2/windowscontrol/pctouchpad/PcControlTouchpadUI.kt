@@ -231,6 +231,11 @@ fun LandscapeLayout(
                             )
                         } else Spacer(Modifier.weight(1f))
                         Text(
+                            "Ritik Saini                                                        ",
+                            fontSize = 8.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
                             "Spd",
                             fontSize = 8.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -238,7 +243,7 @@ fun LandscapeLayout(
                         Slider(
                             value = sensitivity, onValueChange = onSensChange,
                             valueRange = 1f..12f, steps = 10,
-                            modifier = Modifier.width(72.dp).height(20.dp)
+                            modifier = Modifier.width(180.dp).height(20.dp)
                         )
                         Text(
                             "${sensitivity.toInt()}",
