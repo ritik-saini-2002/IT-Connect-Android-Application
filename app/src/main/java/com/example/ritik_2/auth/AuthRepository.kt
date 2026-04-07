@@ -1,6 +1,7 @@
 package com.example.ritik_2.auth
 
 import android.util.Log
+import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.pocketbase.PocketBaseDataSource
 import com.example.ritik_2.pocketbase.SessionManager
@@ -11,20 +12,31 @@ import javax.inject.Singleton
 class AuthRepository @Inject constructor(
     private val dataSource    : AppDataSource,
     private val pbDataSource  : PocketBaseDataSource,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val syncManager   : SyncManager       // ← injected to set user token
 ) {
     companion object { private const val TAG = "AuthRepository" }
 
     val isLoggedIn: Boolean get() = sessionManager.isLoggedIn()
 
+    /**
+     * Called on app start to restore a saved session.
+     * Sets the user token on SyncManager so reads work without admin credentials.
+     * Does NOT force-logout on network failure — we may be offline.
+     */
     suspend fun restoreSession() {
         val session = sessionManager.get()
-        if (session == null) { Log.d(TAG, "restoreSession: no saved session"); return }
+        if (session == null) {
+            Log.d(TAG, "restoreSession: no saved session")
+            return
+        }
         try {
             dataSource.restoreSession(session.token)
+            syncManager.setUserToken(session.token)   // ← allows reads without admin token
             Log.d(TAG, "Session restored for ${session.email}")
         } catch (e: Exception) {
-            // Don't clear session on restore failure — we may be offline
+            // Don't clear session on restore failure — we may be offline.
+            // SyncManager will still have the token set for when connectivity returns.
             Log.w(TAG, "Session restore failed (possibly offline): ${e.message}")
         }
     }
@@ -69,6 +81,10 @@ class AuthRepository @Inject constructor(
                 return SessionStatus.Deactivated
             }
 
+            // Re-set user token on every successful validation
+            // (covers the case where app was restored from background)
+            syncManager.setUserToken(session.token)
+
             SessionStatus.Valid(session)
 
         } catch (e: Exception) {
@@ -78,10 +94,16 @@ class AuthRepository @Inject constructor(
         }
     }
 
+    /**
+     * Logs in with email + password.
+     * Sets the user token on SyncManager immediately after success
+     * so all subsequent data reads use the user token.
+     */
     suspend fun login(email: String, password: String): Result<Unit> =
         try {
             val session = dataSource.login(email, password)
             sessionManager.save(session)
+            syncManager.setUserToken(session.token)   // ← key: enables reads without admin token
             Log.d(TAG, "Login success: $email role=${session.role} ✅")
             Result.success(Unit)
         } catch (e: Exception) {
@@ -92,9 +114,13 @@ class AuthRepository @Inject constructor(
     suspend fun sendPasswordReset(email: String): Result<Unit> =
         dataSource.sendPasswordReset(email)
 
+    /**
+     * Logs out — clears session and user token.
+     */
     suspend fun logout() {
         try { dataSource.logout() } catch (_: Exception) {}
         sessionManager.clear()
+        syncManager.setUserToken("")   // ← clear token on logout
         Log.d(TAG, "Logged out ✅")
     }
 

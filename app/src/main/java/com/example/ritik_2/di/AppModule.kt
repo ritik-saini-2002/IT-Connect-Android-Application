@@ -52,6 +52,7 @@ object AppModule {
     fun provideAuthRepository(
         dataSource    : AppDataSource,
         pbDataSource  : PocketBaseDataSource,
-        sessionManager: SessionManager
-    ): AuthRepository = AuthRepository(dataSource, pbDataSource, sessionManager)
+        sessionManager: SessionManager,
+        syncManager   : SyncManager          // ← added
+    ): AuthRepository = AuthRepository(dataSource, pbDataSource, sessionManager, syncManager)
 }
