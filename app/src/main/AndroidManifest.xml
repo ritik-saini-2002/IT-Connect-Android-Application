@@ -73,6 +73,8 @@
             android:exported="false" android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".profile.profilecompletion.ProfileCompletionActivity"
             android:exported="false" android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".profile.profilecompletion.ImageCropActivity"
+            android:exported="false" android:theme="@style/Base.Theme.Ritik_2"/>
 
         <!-- ── Features ───────────────────────────────────── -->
         <activity android:name=".contact.ContactActivity"

@@ -1,6 +1,7 @@
 package com.example.ritik_2.core
 
 import android.util.Log
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.localdatabase.AppDatabase
 import com.example.ritik_2.localdatabase.CollectionEntity
 import com.example.ritik_2.localdatabase.CompanyEntity
@@ -41,8 +42,7 @@ class SyncManager @Inject constructor(
 
     /**
      * Call this immediately after a successful login or session restore.
-     * This token is used for all read operations so admin credentials
-     * are not required for normal app usage.
+     * Enables all read operations without requiring admin credentials.
      */
     fun setUserToken(token: String) {
         userToken = token
@@ -51,8 +51,7 @@ class SyncManager @Inject constructor(
 
     /**
      * Returns the user token for read operations.
-     * Falls back to admin token only if user token is not yet set
-     * (e.g. very first sync before login completes).
+     * Falls back to admin token only if user token is not yet set.
      */
     private suspend fun getReadToken(): String {
         if (userToken.isNotBlank()) return userToken
@@ -121,7 +120,6 @@ class SyncManager @Inject constructor(
             }
             db.collectionDao().clear()
             db.collectionDao().upsertAll(cols)
-            // Also refresh companies while we have the token
             refreshCompanies(token)
             Log.d(tag, "refreshAllCollections ✅ ${cols.size} collections")
         } catch (e: Exception) {
@@ -138,7 +136,7 @@ class SyncManager @Inject constructor(
         val token = try {
             getAdminToken()
         } catch (e: Exception) {
-            Log.e(tag, "flushQueue: no admin token — ${e.message}. Will retry when token available.")
+            Log.e(tag, "flushQueue: no admin token — ${e.message}. Will retry later.")
             return@withContext
         }
 
@@ -317,30 +315,67 @@ class SyncManager @Inject constructor(
     }
 
     private suspend fun refreshRoles(sc: String, token: String) {
-        val res  = pbGet(
+        val res         = pbGet(
             "${AppConfig.BASE_URL}/api/collections/companies_metadata/records" +
                     "?filter=(sanitizedName='$sc')&perPage=1",
             token
         )
-        val item = JSONObject(res).optJSONArray("items")?.optJSONObject(0)
-        val arr  = try {
+        val item        = JSONObject(res).optJSONArray("items")?.optJSONObject(0)
+        val companyName = item?.optString("originalName") ?: sc
+
+        // Read from companies_metadata
+        val arr = try {
             JSONArray(item?.optString("availableRoles", "[]") ?: "[]")
         } catch (_: Exception) { JSONArray() }
+        val serverRoles = (0 until arr.length())
+            .map { arr.optString(it) }
+            .filter { it.isNotBlank() }
 
-        val roles = (0 until arr.length()).map { i ->
-            val name = arr.optString(i)
+        // Always derive from actual cached users as well — union of both
+        val usersInCompany = db.userDao().getByCompany(sc)
+        val rolesFromUsers = usersInCompany
+            .map { it.role }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        val allRoleNames = (serverRoles + rolesFromUsers).distinct()
+
+        if (allRoleNames.isEmpty()) {
+            Log.w(tag, "refreshRoles: no roles found for $sc — skipping")
+            return
+        }
+
+        val roles = allRoleNames.map { name ->
             RoleEntity(
                 id                   = "${sc}_$name",
                 name                 = name,
                 sanitizedCompanyName = sc,
-                companyName          = item?.optString("originalName") ?: sc,
-                isCustom             = false,
-                userCount            = db.userDao().getByCompany(sc).count { it.role == name }
+                companyName          = companyName,
+                isCustom             = name !in Permissions.ALL_ROLES,
+                userCount            = usersInCompany.count { it.role == name }
             )
         }
+
         db.roleDao().clearCompany(sc)
         db.roleDao().upsertAll(roles)
-        Log.d(tag, "refreshRoles: cached ${roles.size} roles for $sc")
+        Log.d(tag, "refreshRoles: cached ${roles.size} roles for $sc " +
+                "(${serverRoles.size} from server, ${rolesFromUsers.size} from users)")
+
+        // Self-heal: patch companies_metadata if server had empty roles but users have some
+        if (serverRoles.isEmpty() && rolesFromUsers.isNotEmpty() && item != null) {
+            try {
+                val cId     = item.optString("id")
+                val rolesArr = JSONArray().also { a -> allRoleNames.forEach { a.put(it) } }
+                pbPatch(
+                    "${AppConfig.BASE_URL}/api/collections/companies_metadata/records/$cId",
+                    token,
+                    JSONObject().apply { put("availableRoles", rolesArr) }.toString()
+                )
+                Log.d(tag, "refreshRoles: self-healed companies_metadata.availableRoles")
+            } catch (e: Exception) {
+                Log.w(tag, "refreshRoles: self-heal patch failed: ${e.message}")
+            }
+        }
     }
 
     private suspend fun refreshDepartments(sc: String, token: String) {
@@ -350,28 +385,66 @@ class SyncManager @Inject constructor(
             token
         )
         val item    = JSONObject(res).optJSONArray("items")?.optJSONObject(0)
-        val arr     = try {
-            JSONArray(item?.optString("departments", "[]") ?: "[]")
-        } catch (_: Exception) { JSONArray() }
         val company = item?.optString("originalName") ?: sc
 
-        val depts = (0 until arr.length()).map { i ->
-            val name  = arr.optString(i)
-            val sd    = StringUtils.sanitize(name)
-            val users = db.userDao().getByDepartment(sc, sd)
+        // Read from companies_metadata
+        val arr = try {
+            JSONArray(item?.optString("departments", "[]") ?: "[]")
+        } catch (_: Exception) { JSONArray() }
+        val serverDepts = (0 until arr.length())
+            .map { arr.optString(it) }
+            .filter { it.isNotBlank() }
+
+        // Always derive from actual cached users as well
+        val usersInCompany = db.userDao().getByCompany(sc)
+        val deptsFromUsers = usersInCompany
+            .filter { it.department.isNotBlank() }
+            .map { it.department to it.sanitizedDepartment }
+            .distinctBy { it.second }
+
+        // Merge server + user-derived, distinct by sanitized name
+        val serverDeptPairs = serverDepts.map { name -> name to StringUtils.sanitize(name) }
+        val allDeptPairs    = (serverDeptPairs + deptsFromUsers).distinctBy { it.second }
+
+        if (allDeptPairs.isEmpty()) {
+            Log.w(tag, "refreshDepartments: no departments found for $sc — skipping")
+            return
+        }
+
+        val depts = allDeptPairs.map { (name, sd) ->
+            val usersInDept = usersInCompany.filter { it.sanitizedDepartment == sd }
             DepartmentEntity(
                 id                   = "${sc}_$sd",
                 name                 = name,
                 sanitizedName        = sd,
                 companyName          = company,
                 sanitizedCompanyName = sc,
-                userCount            = users.size,
-                activeUsers          = users.count { it.isActive }
+                userCount            = usersInDept.size,
+                activeUsers          = usersInDept.count { it.isActive }
             )
         }
+
         db.deptDao().clearCompany(sc)
         db.deptDao().upsertAll(depts)
-        Log.d(tag, "refreshDepartments: cached ${depts.size} depts for $sc")
+        Log.d(tag, "refreshDepartments: cached ${depts.size} depts for $sc " +
+                "(${serverDepts.size} from server, ${deptsFromUsers.size} from users)")
+
+        // Self-heal: patch companies_metadata if server had empty depts but users have some
+        if (serverDepts.isEmpty() && deptsFromUsers.isNotEmpty() && item != null) {
+            try {
+                val cId      = item.optString("id")
+                val deptNames = allDeptPairs.map { it.first }
+                val deptsArr  = JSONArray().also { a -> deptNames.forEach { a.put(it) } }
+                pbPatch(
+                    "${AppConfig.BASE_URL}/api/collections/companies_metadata/records/$cId",
+                    token,
+                    JSONObject().apply { put("departments", deptsArr) }.toString()
+                )
+                Log.d(tag, "refreshDepartments: self-healed companies_metadata.departments")
+            } catch (e: Exception) {
+                Log.w(tag, "refreshDepartments: self-heal patch failed: ${e.message}")
+            }
+        }
     }
 
     private suspend fun refreshCompanies(token: String) {
@@ -385,12 +458,12 @@ class SyncManager @Inject constructor(
                 runCatching {
                     val o     = items.getJSONObject(i)
                     val roles = try {
-                        val arr = JSONArray(o.optString("availableRoles", "[]"))
-                        (0 until arr.length()).map { arr.optString(it) }
+                        val a = JSONArray(o.optString("availableRoles", "[]"))
+                        (0 until a.length()).map { a.optString(it) }
                     } catch (_: Exception) { emptyList() }
                     val depts = try {
-                        val arr = JSONArray(o.optString("departments", "[]"))
-                        (0 until arr.length()).map { arr.optString(it) }
+                        val a = JSONArray(o.optString("departments", "[]"))
+                        (0 until a.length()).map { a.optString(it) }
                     } catch (_: Exception) { emptyList() }
                     CompanyEntity(
                         sanitizedName  = o.optString("sanitizedName"),

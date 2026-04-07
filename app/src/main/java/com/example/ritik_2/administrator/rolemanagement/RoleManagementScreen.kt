@@ -27,11 +27,31 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ritik_2.data.model.UserProfile
 
-// ── Screen level ──────────────────────────────────────────────────────────────
+// ── Navigation levels ─────────────────────────────────────────────────────────
 private sealed class RoleLevel {
-    object Roles                              : RoleLevel()
-    data class Users(val role: RoleInfo)      : RoleLevel()
+    object Roles                          : RoleLevel()
+    data class Users(val role: RoleInfo)  : RoleLevel()
+    data class Perms(val role: RoleInfo)  : RoleLevel()
 }
+
+// Permission categories for grouped display
+private val PERMISSION_CATEGORIES = linkedMapOf(
+    "Admin"        to listOf("access_admin_panel", "system_settings", "database_manager",
+        "manage_permissions"),
+    "Users"        to listOf("create_user", "delete_user", "modify_user", "view_all_users",
+        "manage_roles", "manage_companies"),
+    "Data"         to listOf("view_analytics", "view_reports", "export_data", "access_all_data",
+        "generate_reports"),
+    "Team"         to listOf("view_team_users", "modify_team_user", "view_team_analytics",
+        "assign_projects", "assign_tasks", "approve_requests",
+        "view_team_performance", "approve_leave"),
+    "HR"           to listOf("manage_employees", "access_personal_data", "view_hr_analytics"),
+    "Profile"      to listOf("view_profile", "edit_profile", "edit_basic_profile"),
+    "Projects"     to listOf("view_assigned_projects", "view_assigned_tasks", "submit_reports"),
+    "Complaints"   to listOf("submit_complaints", "view_own_complaints", "view_team_complaints",
+        "view_department_complaints", "view_all_complaints",
+        "resolve_complaints")
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,14 +59,14 @@ fun RoleManagementScreen(
     viewModel    : RoleManagementViewModel,
     onRoleChanged: (String, String, String) -> Unit
 ) {
-    val state          by viewModel.state.collectAsState()
-    val snack           = remember { SnackbarHostState() }
-    var level          by remember { mutableStateOf<RoleLevel>(RoleLevel.Roles) }
-    var showCreate     by remember { mutableStateOf(false) }
-    var deleteTarget   by remember { mutableStateOf<RoleInfo?>(null) }
-    var confirmDialog  by remember { mutableStateOf<Triple<UserProfile, String, String>?>(null) }
+    val state        by viewModel.state.collectAsState()
+    val snack         = remember { SnackbarHostState() }
+    var level        by remember { mutableStateOf<RoleLevel>(RoleLevel.Roles) }
+    var showCreate   by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<RoleInfo?>(null) }
+    var confirmDialog by remember { mutableStateOf<Triple<UserProfile, String, String>?>(null) }
 
-    BackHandler(level is RoleLevel.Users) { level = RoleLevel.Roles }
+    BackHandler(level !is RoleLevel.Roles) { level = RoleLevel.Roles }
 
     LaunchedEffect(state.successMsg) {
         state.successMsg?.let {
@@ -64,8 +84,7 @@ fun RoleManagementScreen(
     Scaffold(
         topBar = {
             Box(
-                Modifier
-                    .fillMaxWidth()
+                Modifier.fillMaxWidth()
                     .background(Brush.horizontalGradient(listOf(
                         MaterialTheme.colorScheme.primary,
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
@@ -74,7 +93,7 @@ fun RoleManagementScreen(
                     .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (level is RoleLevel.Users) {
+                    if (level !is RoleLevel.Roles) {
                         IconButton(onClick = { level = RoleLevel.Roles }) {
                             Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
                         }
@@ -88,24 +107,29 @@ fun RoleManagementScreen(
                         Alignment.Center
                     ) {
                         Icon(
-                            if (level is RoleLevel.Users) Icons.Default.People
-                            else Icons.Default.AdminPanelSettings,
+                            when (level) {
+                                is RoleLevel.Perms -> Icons.Default.Security
+                                is RoleLevel.Users -> Icons.Default.People
+                                else               -> Icons.Default.AdminPanelSettings
+                            },
                             null, tint = Color.White, modifier = Modifier.size(20.dp)
                         )
                     }
 
                     Spacer(Modifier.width(10.dp))
-
                     Column(Modifier.weight(1f)) {
                         val title = when (val l = level) {
                             is RoleLevel.Roles -> "Role Management"
                             is RoleLevel.Users -> l.role.name
+                            is RoleLevel.Perms -> "${l.role.name} · Permissions"
                         }
                         val subtitle = when (val l = level) {
                             is RoleLevel.Roles ->
                                 "${state.roles.size} roles · ${state.users.size} users"
                             is RoleLevel.Users ->
                                 "${l.role.userCount} user${if (l.role.userCount != 1) "s" else ""}"
+                            is RoleLevel.Perms ->
+                                "${l.role.permissions.size} permissions assigned"
                         }
                         Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold,
                             color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -113,15 +137,25 @@ fun RoleManagementScreen(
                     }
 
                     if (state.isOffline)
-                        Surface(color = Color.White.copy(0.15f), shape = RoundedCornerShape(8.dp)) {
+                        Surface(color = Color.White.copy(0.15f),
+                            shape = RoundedCornerShape(8.dp)) {
                             Text("Offline",
                                 Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                fontSize = 10.sp, color = Color.White,
+                                fontWeight = FontWeight.Bold)
                         }
 
                     if (level is RoleLevel.Roles) {
                         IconButton(onClick = { showCreate = true }) {
                             Icon(Icons.Default.Add, "Create Role", tint = Color.White)
+                        }
+                    }
+
+                    if (level is RoleLevel.Perms) {
+                        // Save permissions button in top bar
+                        TextButton(onClick = { viewModel.savePermissions() },
+                            enabled = !state.isLoading) {
+                            Text("Save", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -135,7 +169,6 @@ fun RoleManagementScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
 
-            // Search bar (shown when viewing users in a role)
             if (level is RoleLevel.Users) {
                 OutlinedTextField(
                     value         = state.searchQuery,
@@ -150,15 +183,14 @@ fun RoleManagementScreen(
                             }
                     },
                     modifier   = Modifier.fillMaxWidth().padding(12.dp),
-                    singleLine = true,
-                    shape      = RoundedCornerShape(12.dp)
+                    singleLine = true, shape = RoundedCornerShape(12.dp)
                 )
             }
 
             AnimatedContent(
                 targetState = level,
                 transitionSpec = {
-                    val entering = targetState is RoleLevel.Users
+                    val entering = targetState !is RoleLevel.Roles
                     (if (entering) slideInHorizontally { it } + fadeIn()
                     else slideInHorizontally { -it } + fadeIn()) togetherWith
                             (if (entering) slideOutHorizontally { -it } + fadeOut()
@@ -172,7 +204,11 @@ fun RoleManagementScreen(
                             roles     = state.roles,
                             isLoading = state.isLoading,
                             onClick   = { role -> level = RoleLevel.Users(role) },
-                            onDelete  = { role -> deleteTarget = role }
+                            onDelete  = { role -> deleteTarget = role },
+                            onEditPerms = { role ->
+                                viewModel.startEditingPermissions(role)
+                                level = RoleLevel.Perms(role)
+                            }
                         )
                     is RoleLevel.Users ->
                         UsersInRoleView(
@@ -184,6 +220,25 @@ fun RoleManagementScreen(
                                 confirmDialog = Triple(user, user.role, newRole)
                             }
                         )
+                    is RoleLevel.Perms ->
+                        PermissionsEditorView(
+                            role               = cur.role,
+                            selectedPermissions = state.editingPermissions,
+                            isLoading          = state.isLoading,
+                            onToggle           = { viewModel.togglePermission(it) },
+                            onSelectAll        = { category ->
+                                PERMISSION_CATEGORIES[category]?.forEach {
+                                    if (it !in state.editingPermissions)
+                                        viewModel.togglePermission(it)
+                                }
+                            },
+                            onClearAll         = { category ->
+                                PERMISSION_CATEGORIES[category]?.forEach {
+                                    if (it in state.editingPermissions)
+                                        viewModel.togglePermission(it)
+                                }
+                            }
+                        )
                 }
             }
         }
@@ -193,7 +248,10 @@ fun RoleManagementScreen(
     if (showCreate) {
         CreateRoleDialog(
             onDismiss = { showCreate = false },
-            onCreate  = { name -> viewModel.createRole(name); showCreate = false }
+            onCreate  = { name, perms ->
+                viewModel.createRole(name, perms)
+                showCreate = false
+            }
         )
     }
 
@@ -201,7 +259,8 @@ fun RoleManagementScreen(
     deleteTarget?.let { role ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            icon  = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+            icon  = { Icon(Icons.Default.Delete, null,
+                tint = MaterialTheme.colorScheme.error) },
             title = { Text("Delete '${role.name}'?", fontWeight = FontWeight.Bold) },
             text  = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -242,8 +301,7 @@ fun RoleManagementScreen(
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         RolePill(oldRole, roleColor(oldRole))
-                        Icon(Icons.Default.ArrowForward, null,
-                            modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.ArrowForward, null, Modifier.size(14.dp))
                         RolePill(newRole, roleColor(newRole))
                     }
                     Text("Permissions will be updated automatically.",
@@ -264,14 +322,15 @@ fun RoleManagementScreen(
     }
 }
 
-// ── Roles list view ───────────────────────────────────────────────────────────
+// ── Roles list ────────────────────────────────────────────────────────────────
 
 @Composable
 private fun RolesListView(
-    roles    : List<RoleInfo>,
-    isLoading: Boolean,
-    onClick  : (RoleInfo) -> Unit,
-    onDelete : (RoleInfo) -> Unit
+    roles      : List<RoleInfo>,
+    isLoading  : Boolean,
+    onClick    : (RoleInfo) -> Unit,
+    onDelete   : (RoleInfo) -> Unit,
+    onEditPerms: (RoleInfo) -> Unit
 ) {
     if (isLoading && roles.isEmpty()) {
         Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
@@ -300,16 +359,24 @@ private fun RolesListView(
                 modifier = Modifier.padding(bottom = 4.dp))
         }
         items(items = roles, key = { r -> r.id }) { role ->
-            RoleCard(role = role,
-                onClick  = { onClick(role) },
-                onDelete = { onDelete(role) })
+            RoleCard(
+                role        = role,
+                onClick     = { onClick(role) },
+                onDelete    = { onDelete(role) },
+                onEditPerms = { onEditPerms(role) }
+            )
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
 @Composable
-private fun RoleCard(role: RoleInfo, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun RoleCard(
+    role       : RoleInfo,
+    onClick    : () -> Unit,
+    onDelete   : () -> Unit,
+    onEditPerms: () -> Unit
+) {
     Card(
         Modifier.fillMaxWidth().clickable { onClick() },
         shape     = RoundedCornerShape(16.dp),
@@ -340,11 +407,19 @@ private fun RoleCard(role: RoleInfo, onClick: () -> Unit, onDelete: () -> Unit) 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MiniChip("${role.userCount} user${if (role.userCount != 1) "s" else ""}",
                         roleColor(role.name))
+                    MiniChip("${role.permissions.size} permissions",
+                        Color(0xFF7B1FA2))
                 }
             }
+            // Edit permissions button
+            IconButton(onClick = onEditPerms) {
+                Icon(Icons.Default.Security, null,
+                    tint     = Color(0xFF7B1FA2).copy(0.8f),
+                    modifier = Modifier.size(20.dp))
+            }
             IconButton(
-                onClick  = onDelete,
-                enabled  = !role.isBuiltIn || role.isCustom
+                onClick = onDelete,
+                enabled = !role.isBuiltIn || role.isCustom
             ) {
                 Icon(Icons.Default.Delete, null,
                     tint = if (!role.isBuiltIn || role.isCustom)
@@ -358,7 +433,188 @@ private fun RoleCard(role: RoleInfo, onClick: () -> Unit, onDelete: () -> Unit) 
     }
 }
 
-// ── Users in role view ────────────────────────────────────────────────────────
+// ── Permissions editor ────────────────────────────────────────────────────────
+
+@Composable
+private fun PermissionsEditorView(
+    role               : RoleInfo,
+    selectedPermissions: Set<String>,
+    isLoading          : Boolean,
+    onToggle           : (String) -> Unit,
+    onSelectAll        : (String) -> Unit,
+    onClearAll         : (String) -> Unit
+) {
+    LazyColumn(
+        contentPadding      = PaddingValues(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Header
+        item {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = roleColor(role.name).copy(0.08f)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, null,
+                        tint     = roleColor(role.name),
+                        modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("${role.name} Permissions",
+                            fontWeight = FontWeight.Bold,
+                            color      = roleColor(role.name))
+                        Text("${selectedPermissions.size} of ${ALL_PERMISSIONS.size} selected",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        // Category groups
+        PERMISSION_CATEGORIES.forEach { (category, perms) ->
+            item(key = category) {
+                PermissionCategoryCard(
+                    category    = category,
+                    permissions = perms,
+                    selected    = selectedPermissions,
+                    isLoading   = isLoading,
+                    onToggle    = onToggle,
+                    onSelectAll = { onSelectAll(category) },
+                    onClearAll  = { onClearAll(category) }
+                )
+            }
+        }
+
+        item { Spacer(Modifier.height(80.dp)) }
+    }
+}
+
+@Composable
+private fun PermissionCategoryCard(
+    category   : String,
+    permissions: List<String>,
+    selected   : Set<String>,
+    isLoading  : Boolean,
+    onToggle   : (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onClearAll : () -> Unit
+) {
+    val allSelected = permissions.all { it in selected }
+    val anySelected = permissions.any { it in selected }
+
+    Card(
+        Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(14.dp),
+        elevation = CardDefaults.cardElevation(2.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            // Category header
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(category,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize   = 14.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(0.1f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text("${permissions.count { it in selected }}/${permissions.size}",
+                            Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontSize   = 10.sp,
+                            color      = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick  = onSelectAll,
+                        enabled  = !isLoading && !allSelected,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("All", fontSize = 11.sp)
+                    }
+                    TextButton(
+                        onClick  = onClearAll,
+                        enabled  = !isLoading && anySelected,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("None", fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(0.4f))
+
+            // Permissions grid
+            permissions.forEach { perm ->
+                PermissionRow(
+                    permission = perm,
+                    checked    = perm in selected,
+                    enabled    = !isLoading,
+                    onToggle   = { onToggle(perm) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionRow(
+    permission: String,
+    checked   : Boolean,
+    enabled   : Boolean,
+    onToggle  : () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable(enabled = enabled) { onToggle() }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked         = checked,
+            onCheckedChange = { onToggle() },
+            enabled         = enabled,
+            modifier        = Modifier.size(20.dp),
+            colors          = CheckboxDefaults.colors(
+                checkedColor = MaterialTheme.colorScheme.primary)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                // Convert "create_user" → "Create User"
+                permission.split("_").joinToString(" ") { w ->
+                    w.replaceFirstChar { it.uppercaseChar() }
+                },
+                fontSize   = 13.sp,
+                fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Normal,
+                color      = if (checked) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurface.copy(0.6f)
+            )
+            Text(permission,
+                fontSize = 10.sp,
+                color    = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
+        }
+        if (checked) {
+            Icon(Icons.Default.Check, null,
+                tint     = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+// ── Users in role ─────────────────────────────────────────────────────────────
 
 @Composable
 private fun UsersInRoleView(
@@ -402,8 +658,6 @@ private fun UsersInRoleView(
     }
 }
 
-// ── User role card ────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UserRoleCard(
@@ -421,7 +675,6 @@ private fun UserRoleCard(
         colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(14.dp)) {
-            // User info row
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.size(48.dp).clip(CircleShape)
@@ -453,13 +706,9 @@ private fun UserRoleCard(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.65f))
                 }
-                Spacer(Modifier.width(8.dp))
                 RolePill(user.role, roleColor(user.role))
             }
-
             Spacer(Modifier.height(10.dp))
-
-            // Role change dropdown
             ExposedDropdownMenuBox(
                 expanded         = expanded && !isUpdating,
                 onExpandedChange = { if (!isUpdating) expanded = it }
@@ -474,9 +723,7 @@ private fun UserRoleCard(
                     },
                     enabled  = !isUpdating,
                     modifier = Modifier.fillMaxWidth().menuAnchor(),
-                    shape    = RoundedCornerShape(10.dp),
-                    colors   = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary)
+                    shape    = RoundedCornerShape(10.dp)
                 )
                 ExposedDropdownMenu(
                     expanded         = expanded,
@@ -513,25 +760,107 @@ private fun UserRoleCard(
 // ── Dialogs ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CreateRoleDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var name by remember { mutableStateOf("") }
+private fun CreateRoleDialog(
+    onDismiss: () -> Unit,
+    onCreate : (String, List<String>) -> Unit
+) {
+    var name            by remember { mutableStateOf("") }
+    var selectedPerms   by remember { mutableStateOf(setOf<String>()) }
+    var showPermPicker  by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon  = { Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary) },
+        icon  = { Icon(Icons.Default.Add, null,
+            tint = MaterialTheme.colorScheme.primary) },
         title = { Text("Create New Role", fontWeight = FontWeight.Bold) },
         text  = {
-            OutlinedTextField(
-                value         = name,
-                onValueChange = { name = it },
-                label         = { Text("Role Name") },
-                placeholder   = { Text("e.g. Senior Developer") },
-                singleLine    = true,
-                modifier      = Modifier.fillMaxWidth()
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value         = name,
+                    onValueChange = { name = it },
+                    label         = { Text("Role Name") },
+                    placeholder   = { Text("e.g. Senior Developer") },
+                    singleLine    = true,
+                    modifier      = Modifier.fillMaxWidth()
+                )
+
+                // Permission summary + toggle
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment     = Alignment.CenterVertically
+                        ) {
+                            Text("Permissions (${selectedPerms.size})",
+                                style      = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold)
+                            TextButton(onClick = { showPermPicker = !showPermPicker }) {
+                                Text(if (showPermPicker) "Hide" else "Select")
+                            }
+                        }
+                        if (selectedPerms.isNotEmpty()) {
+                            Text(selectedPerms.take(3).joinToString(", ") +
+                                    if (selectedPerms.size > 3) " +${selectedPerms.size - 3} more" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
+                if (showPermPicker) {
+                    Card(shape = RoundedCornerShape(10.dp),
+                        elevation = CardDefaults.cardElevation(1.dp)) {
+                        LazyColumn(
+                            Modifier.heightIn(max = 220.dp).padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            ALL_PERMISSIONS.forEach { perm ->
+                                item(key = perm) {
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .clickable {
+                                                selectedPerms = if (perm in selectedPerms)
+                                                    selectedPerms - perm
+                                                else selectedPerms + perm
+                                            }
+                                            .padding(vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            checked         = perm in selectedPerms,
+                                            onCheckedChange = {
+                                                selectedPerms = if (it)
+                                                    selectedPerms + perm
+                                                else selectedPerms - perm
+                                            },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            perm.split("_").joinToString(" ") { w ->
+                                                w.replaceFirstChar { it.uppercaseChar() }
+                                            },
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
             Button(
-                onClick  = { if (name.isNotBlank()) onCreate(name.trim()) },
+                onClick  = {
+                    if (name.isNotBlank())
+                        onCreate(name.trim(), selectedPerms.toList())
+                },
                 enabled  = name.isNotBlank()
             ) { Text("Create") }
         },
@@ -549,8 +878,7 @@ fun RolePill(role: String, color: Color) {
         Text(role,
             modifier   = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
             style      = MaterialTheme.typography.labelSmall,
-            color      = color,
-            fontWeight = FontWeight.SemiBold)
+            color      = color, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -559,9 +887,7 @@ private fun RoleTag(label: String, color: Color) {
     Surface(color = color.copy(0.12f), shape = RoundedCornerShape(6.dp)) {
         Text(label,
             modifier   = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-            fontSize   = 9.sp,
-            color      = color,
-            fontWeight = FontWeight.Bold)
+            fontSize   = 9.sp, color = color, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -570,9 +896,7 @@ private fun MiniChip(label: String, color: Color) {
     Surface(color = color.copy(0.1f), shape = RoundedCornerShape(6.dp)) {
         Text(label,
             modifier   = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-            fontSize   = 10.sp,
-            fontWeight = FontWeight.SemiBold,
-            color      = color)
+            fontSize   = 10.sp, fontWeight = FontWeight.SemiBold, color = color)
     }
 }
 
