@@ -5,13 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
-import com.example.ritik_2.localdatabase.AppDatabase
-import com.example.ritik_2.localdatabase.UserEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -19,7 +15,6 @@ data class ProfileCompletionUiState(
     val isLoading        : Boolean      = false,
     val userProfile      : UserProfile? = null,
     val selectedImageUri : Uri?         = null,
-    val croppedImageUri  : Uri?         = null,   // ← after crop
     val error            : String?      = null,
     val isSaved          : Boolean      = false,
     val isEditMode       : Boolean      = false,
@@ -48,73 +43,49 @@ data class ProfileSaveData(
 @HiltViewModel
 class ProfileCompletionViewModel @Inject constructor(
     private val dataSource  : AppDataSource,
-    private val pbDataSource: com.example.ritik_2.pocketbase.PocketBaseDataSource,
-    private val db          : AppDatabase
+    private val pbDataSource: com.example.ritik_2.pocketbase.PocketBaseDataSource
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileCompletionUiState())
     val uiState: StateFlow<ProfileCompletionUiState> = _uiState.asStateFlow()
 
-    // ── Load user — cache-first, then server ──────────────────────────────────
-
     fun loadUser(userId: String, isEditMode: Boolean = false) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, isEditMode = isEditMode) }
-
-            // 1. Show from local cache immediately
-            val cached = withContext(Dispatchers.IO) { db.userDao().getById(userId) }
-            if (cached != null) {
-                _uiState.update {
-                    it.copy(
-                        userProfile = cached.toUserProfile(),
-                        isLoading   = false,
-                        isEditing   = !isEditMode
-                    )
-                }
-            }
-
-            // 2. Refresh from server in background
+            // When editing another user (isEditMode = true), the current user's token
+            // may not have access to that record. Ensure admin token is active first.
             if (isEditMode) {
                 try { pbDataSource.ensureAdminToken() } catch (_: Exception) {}
             }
             dataSource.getUserProfile(userId)
                 .onSuccess { p ->
-                    // Update server data into local cache
-                    withContext(Dispatchers.IO) {
-                        db.userDao().upsert(p.toUserEntity())
-                    }
                     _uiState.update {
                         it.copy(
                             userProfile = p,
                             isLoading   = false,
-                            isEditing   = !isEditMode
+                            isEditing   = !isEditMode  // first-time = always editing
                         )
                     }
                 }
                 .onFailure { e ->
-                    // If we already showed cache data, just log the error silently
-                    if (cached == null) {
-                        _uiState.update { it.copy(isLoading = false, error = e.message) }
-                    } else {
-                        _uiState.update { it.copy(isLoading = false) }
-                        android.util.Log.w("ProfileVM", "Server fetch failed, using cache: ${e.message}")
-                    }
+                    _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
         }
     }
 
-    fun setSelectedImage(uri: Uri) =
-        _uiState.update { it.copy(selectedImageUri = uri) }
+    fun setSelectedImage(uri: Uri) = _uiState.update { it.copy(selectedImageUri = uri) }
+    fun clearError()               = _uiState.update { it.copy(error = null) }
+    fun toggleEditing()            = _uiState.update { it.copy(isEditing = !it.isEditing) }
+    fun setEditing(v: Boolean)     = _uiState.update { it.copy(isEditing = v) }
 
-    fun setCroppedImage(uri: Uri) =
-        _uiState.update { it.copy(croppedImageUri = uri, selectedImageUri = uri) }
-
-    fun clearError()           = _uiState.update { it.copy(error = null) }
-    fun toggleEditing()        = _uiState.update { it.copy(isEditing = !it.isEditing) }
-    fun setEditing(v: Boolean) = _uiState.update { it.copy(isEditing = v) }
-
-    // ── Save profile — server + local cache ───────────────────────────────────
-
+    /**
+     * Save the profile.
+     *
+     * [isAdmin]   = current user is Administrator  → can edit all fields
+     * [isManager] = current user is Manager or HR  → can edit a restricted set
+     *               (designation, department, experience, emergency contact, address)
+     *               but NOT role, companyName, salary, employeeId, reportingTo
+     */
     fun saveProfile(
         userId    : String,
         data      : ProfileSaveData,
@@ -142,11 +113,13 @@ class ProfileCompletionViewModel @Inject constructor(
                 put("emergencyContactName",     data.emergencyContactName)
                 put("emergencyContactPhone",    data.emergencyContactPhone)
                 put("emergencyContactRelation", data.emergencyContactRelation)
+                // phone: admin sets it freely; manager can't change it; user can change own
                 put("phoneNumber", when {
                     isAdmin   -> data.phoneNumber
-                    isManager -> existing?.phoneNumber ?: ""
-                    else      -> data.phoneNumber
+                    isManager -> existing?.phoneNumber ?: ""  // manager cannot change phone
+                    else      -> data.phoneNumber              // own profile
                 })
+                // employeeId / reportingTo / salary — admin only
                 put("employeeId",  if (isAdmin) data.employeeId  else existing?.employeeId  ?: "")
                 put("reportingTo", if (isAdmin) data.reportingTo else existing?.reportingTo ?: "")
                 put("salary",      if (isAdmin) data.salary       else existing?.salary      ?: 0.0)
@@ -170,6 +143,7 @@ class ProfileCompletionViewModel @Inject constructor(
 
             when {
                 isAdmin -> {
+                    // Administrator can change everything
                     if (data.name.isNotBlank())        fields["name"]        = data.name
                     if (data.designation.isNotBlank()) fields["designation"] = data.designation
                     if (data.role.isNotBlank())        fields["role"]        = data.role
@@ -177,126 +151,19 @@ class ProfileCompletionViewModel @Inject constructor(
                     if (data.companyName.isNotBlank()) fields["companyName"] = data.companyName
                 }
                 isManager -> {
+                    // Manager / HR can change designation and department only
+                    // (role, company, salary, employeeId, reportingTo stay locked)
                     if (data.designation.isNotBlank()) fields["designation"] = data.designation
                     if (data.department.isNotBlank())  fields["department"]  = data.department
                 }
+                // Regular user editing their own profile — no extra fields
             }
 
             dataSource.updateUserProfile(userId, fields)
-                .onSuccess {
-                    // Update local Room cache immediately so other screens reflect the change
-                    withContext(Dispatchers.IO) {
-                        val cached = db.userDao().getById(userId)
-                        if (cached != null) {
-                            db.userDao().upsert(
-                                cached.copy(
-                                    imageUrl                 = imageUrl,
-                                    address                  = data.address,
-                                    emergencyContactName     = data.emergencyContactName,
-                                    emergencyContactPhone    = data.emergencyContactPhone,
-                                    emergencyContactRelation = data.emergencyContactRelation,
-                                    experience               = data.experience,
-                                    needsProfileCompletion   = false,
-                                    // Admin-only fields
-                                    name        = if (isAdmin && data.name.isNotBlank())
-                                        data.name else cached.name,
-                                    designation = if ((isAdmin || isManager) && data.designation.isNotBlank())
-                                        data.designation else cached.designation,
-                                    role        = if (isAdmin && data.role.isNotBlank())
-                                        data.role else cached.role,
-                                    department  = if ((isAdmin || isManager) && data.department.isNotBlank())
-                                        data.department else cached.department,
-                                    companyName = if (isAdmin && data.companyName.isNotBlank())
-                                        data.companyName else cached.companyName,
-                                    phoneNumber = when {
-                                        isAdmin   -> data.phoneNumber
-                                        isManager -> cached.phoneNumber
-                                        else      -> data.phoneNumber
-                                    },
-                                    employeeId  = if (isAdmin) data.employeeId  else cached.employeeId,
-                                    reportingTo = if (isAdmin) data.reportingTo else cached.reportingTo,
-                                    salary      = if (isAdmin) data.salary       else cached.salary,
-                                    pendingUpdate = true
-                                )
-                            )
-                        }
-                    }
-                    _uiState.update { it.copy(isLoading = false, isSaved = true) }
-                }
+                .onSuccess { _uiState.update { it.copy(isLoading = false, isSaved = true) } }
                 .onFailure { e ->
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
         }
-    }
-
-    // ── Mappers ───────────────────────────────────────────────────────────────
-
-    private fun UserEntity.toUserProfile() = UserProfile(
-        id                       = id,
-        name                     = name,
-        email                    = email,
-        role                     = role,
-        companyName              = companyName,
-        sanitizedCompany         = sanitizedCompanyName,
-        department               = department,
-        sanitizedDept            = sanitizedDepartment,
-        designation              = designation,
-        imageUrl                 = imageUrl,
-        phoneNumber              = phoneNumber,
-        address                  = address,
-        employeeId               = employeeId,
-        reportingTo              = reportingTo,
-        salary                   = salary,
-        experience               = experience,
-        completedProjects        = completedProjects,
-        activeProjects           = activeProjects,
-        pendingTasks             = pendingTasks,
-        completedTasks           = completedTasks,
-        totalComplaints          = totalComplaints,
-        resolvedComplaints       = resolvedComplaints,
-        pendingComplaints        = pendingComplaints,
-        isActive                 = isActive,
-        documentPath             = documentPath,
-        permissions              = permissions,
-        emergencyContactName     = emergencyContactName,
-        emergencyContactPhone    = emergencyContactPhone,
-        emergencyContactRelation = emergencyContactRelation,
-        needsProfileCompletion   = needsProfileCompletion
-    )
-
-    private fun UserProfile.toUserEntity(): UserEntity {
-        val cached = db.userDao().let { it }
-        return UserEntity(
-            id                       = id,
-            name                     = name,
-            email                    = email,
-            role                     = role,
-            companyName              = companyName,
-            sanitizedCompanyName     = sanitizedCompany,
-            department               = department,
-            sanitizedDepartment      = sanitizedDept,
-            designation              = designation,
-            imageUrl                 = imageUrl,
-            phoneNumber              = phoneNumber,
-            address                  = address,
-            employeeId               = employeeId,
-            reportingTo              = reportingTo,
-            salary                   = salary,
-            experience               = experience,
-            completedProjects        = completedProjects,
-            activeProjects           = activeProjects,
-            pendingTasks             = pendingTasks,
-            completedTasks           = completedTasks,
-            totalComplaints          = totalComplaints,
-            resolvedComplaints       = resolvedComplaints,
-            pendingComplaints        = pendingComplaints,
-            isActive                 = isActive,
-            documentPath             = documentPath,
-            permissions              = permissions,
-            emergencyContactName     = emergencyContactName,
-            emergencyContactPhone    = emergencyContactPhone,
-            emergencyContactRelation = emergencyContactRelation,
-            needsProfileCompletion   = needsProfileCompletion
-        )
     }
 }
