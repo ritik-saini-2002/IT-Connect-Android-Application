@@ -13,7 +13,6 @@ import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.SyncManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import kotlinx.coroutines.GlobalScope.coroutineContext
 import okhttp3.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -30,11 +29,9 @@ class ChatNotificationService : Service() {
     private var userName = ""
     private var listenJob: Job? = null
 
-    // NO pingInterval — it only applies to WebSocket/HTTP2.
-    // SSE over HTTP/1.1 needs application-level reconnect instead.
     private val sseClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)   // infinite read — SSE never closes
+        .readTimeout(0, TimeUnit.SECONDS)
         .build()
 
     companion object {
@@ -74,57 +71,47 @@ class ChatNotificationService : Service() {
     }
 
     // ── Reconnect loop ────────────────────────────────────────────────────────
-    // Each iteration opens a fresh SSE subscription. If it dies (timeout,
-    // network drop, server restart), we wait with exponential backoff and retry.
 
     private suspend fun connectLoop() {
         var retryDelay = 5_000L
-        while (coroutineContext.isActive) {
+        // Use isActive from the coroutine scope, not GlobalScope.coroutineContext
+        while (scope.isActive) {
             val connected = try {
                 doConnect()
                 true
             } catch (e: CancellationException) {
-                throw e                  // propagate scope cancellation
+                throw e
             } catch (e: Exception) {
                 Log.w("ChatNotifService", "SSE disconnected: ${e.message}")
                 false
             }
-            // Back-off: 5s → 10s → 20s → ... → 60s max
             delay(if (connected) 3_000L else retryDelay)
             retryDelay = if (connected) 5_000L else minOf(retryDelay * 2, 60_000L)
         }
     }
 
     // ── Single SSE session ────────────────────────────────────────────────────
-    // Returns normally when the stream ends (server closed it or network dropped).
-    // The caller (connectLoop) will reconnect.
 
     private suspend fun doConnect() = withContext(Dispatchers.IO) {
         val token = syncManager.getAdminToken()
 
-        // Step 1 — get a fresh client ID
         val clientId = JSONObject(
             syncManager.pbGet("${AppConfig.BASE_URL}/api/realtime", token)
         ).optString("clientId").ifEmpty {
-            Log.w("ChatNotifService", "No clientId — skipping this attempt")
+            Log.w("ChatNotifService", "No clientId — skipping")
             return@withContext
         }
 
-        // Step 2 — subscribe to messages for ALL rooms this user is in
-        // Filter: any message where members array contains our userId
         syncManager.pbPost(
             "${AppConfig.BASE_URL}/api/realtime", token,
             JSONObject().apply {
                 put("clientId", clientId)
                 put("subscriptions", JSONArray().apply {
-                    // Subscribe to the whole chat_messages collection;
-                    // we filter by senderId != userId client-side to skip own msgs
                     put("chat_messages")
                 }.toString())
             }.toString()
         )
 
-        // Step 3 — open SSE stream
         val call = sseClient.newCall(
             Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/realtime?clientId=$clientId")
@@ -146,16 +133,12 @@ class ChatNotificationService : Service() {
 
         try {
             val buf = StringBuilder()
-            while (coroutineContext.isActive) {
-                // readUtf8Line() blocks until a line arrives or the stream closes.
-                // With readTimeout=0 this will block indefinitely until data arrives,
-                // which is exactly what we want for SSE.
-                val line = source.readUtf8Line() ?: break   // null = stream closed
-
+            // isActive here refers to the withContext(Dispatchers.IO) coroutine context
+            while (isActive) {
+                val line = source.readUtf8Line() ?: break
                 when {
                     line.startsWith("data:") ->
                         buf.append(line.removePrefix("data:").trim())
-
                     line.isEmpty() && buf.isNotEmpty() -> {
                         handleEvent(buf.toString())
                         buf.clear()
@@ -165,7 +148,7 @@ class ChatNotificationService : Service() {
         } finally {
             call.cancel()
             response.close()
-            Log.d("ChatNotifService", "SSE stream closed, will reconnect…")
+            Log.d("ChatNotifService", "SSE stream closed, reconnecting…")
         }
     }
 
@@ -178,15 +161,13 @@ class ChatNotificationService : Service() {
             val record = json.optJSONObject("record") ?: return
 
             val senderId = record.optString("senderId")
-            if (senderId == userId) return           // skip own messages
+            if (senderId == userId) return
 
             val senderName = record.optString("senderName", "Someone")
             val text = record.optString("text", "").ifBlank {
                 "\uD83D\uDCCE ${record.optString("fileName", "File")}"
             }
-            val roomId = record.optString("roomId")
-
-            showMessageNotification(senderName, text, roomId)
+            showMessageNotification(senderName, text, record.optString("roomId"))
         } catch (e: Exception) {
             Log.w("ChatNotifService", "Event parse error: ${e.message}")
         }

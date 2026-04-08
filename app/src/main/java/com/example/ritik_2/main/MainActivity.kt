@@ -30,6 +30,7 @@ import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.macnet.MACNetActivity
+import com.example.ritik_2.notifications.NotificationActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.PcControlActivity
@@ -133,9 +134,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleNotificationClick() {
-        // For now open a simple activity; swap for your NotificationActivity when ready
-        Toast.makeText(this, "Notifications coming soon", Toast.LENGTH_SHORT).show()
-        // startActivity(Intent(this, NotificationActivity::class.java))
+        startActivity(Intent(this, NotificationActivity::class.java))
     }
 
     // ── Session / logout ──────────────────────────────────────────────────────
