@@ -51,7 +51,6 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
     val uiState          by viewModel.uiState.collectAsStateWithLifecycle()
     val context           = LocalContext.current
 
-    // Toast on success / error
     LaunchedEffect(uiState) {
         when (val s = uiState) {
             is PcUiState.Success -> {
@@ -68,15 +67,13 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
         }
     }
 
-    // State for file picker dialog
     var pickFileForPlan      by remember { mutableStateOf<PcPlan?>(null) }
     var pickFileAndExecute   by remember { mutableStateOf<PcPlan?>(null) }
     var filePickerPath       by remember { mutableStateOf("C:/") }
-    var filePickerItems      by remember { mutableStateOf<List<com.example.ritik_2.windowscontrol.data.PcFileItem>>(emptyList()) }
+    var filePickerItems      by remember { mutableStateOf<List<PcFileItem>>(emptyList()) }
     var filePickerLoading    by remember { mutableStateOf(false) }
     val scope                = rememberCoroutineScope()
 
-    // Load dir when path changes in picker
     LaunchedEffect(filePickerPath) {
         if (pickFileForPlan != null || pickFileAndExecute != null) {
             filePickerLoading = true
@@ -87,6 +84,7 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
 
     Scaffold(
         topBar = {
+            // ── Uses the shared PcScreenTopBar from PcScreenTopBar.kt ──
             PcScreenTopBar(
                 title            = "Plans",
                 connectionStatus = connectionStatus,
@@ -159,69 +157,7 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  SHARED TOP BAR  — used by all screens
-// ─────────────────────────────────────────────────────────────
-
-@Composable
-fun PcScreenTopBar(
-    title            : String,
-    connectionStatus : PcConnectionStatus,
-    onPing           : () -> Unit,
-    navigationIcon   : (@Composable () -> Unit)? = null,
-    extraActions     : (@Composable RowScope.() -> Unit)? = null
-) {
-    val (chipColor, chipLabel) = when (connectionStatus) {
-        PcConnectionStatus.ONLINE   -> Color(0xFF4ADE80) to "Online"
-        PcConnectionStatus.OFFLINE  -> Color(0xFFFF6B6B) to "Offline"
-        PcConnectionStatus.CHECKING -> Color(0xFFFBBF24) to "..."
-        PcConnectionStatus.UNKNOWN  -> MaterialTheme.colorScheme.onPrimary.copy(0.55f) to "Ping"
-    }
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.primary)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            navigationIcon?.invoke()
-
-            Text(
-                title,
-                fontWeight = FontWeight.Bold,
-                fontSize   = 15.sp,
-                color      = MaterialTheme.colorScheme.onPrimary,
-                modifier   = Modifier.weight(1f),
-                maxLines   = 1,
-                overflow   = TextOverflow.Ellipsis
-            )
-
-            extraActions?.invoke(this)
-
-            Surface(
-                onClick = onPing,
-                shape   = RoundedCornerShape(20.dp),
-                color   = chipColor.copy(0.18f),
-                border  = BorderStroke(1.dp, chipColor.copy(0.45f))
-            ) {
-                Text(
-                    "● $chipLabel",
-                    modifier   = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
-                    fontSize   = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color      = chipColor
-                )
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  SWIPEABLE PLAN CARD  — swipe right = execute, long-press = menu
+//  SWIPEABLE PLAN CARD
 // ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -252,7 +188,6 @@ fun SwipeablePlanCard(
 
     Box(modifier = Modifier.fillMaxWidth()) {
 
-        // ── Swipe reveal background ───────────────────────────────────────────
         Box(
             modifier = Modifier
                 .matchParentSize()
@@ -285,7 +220,6 @@ fun SwipeablePlanCard(
             }
         }
 
-        // ── Card ──────────────────────────────────────────────────────────────
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -316,15 +250,12 @@ fun SwipeablePlanCard(
                     }
                 )
                 .pointerInput(Unit) {
-                    detectTapGestures(
-                        onLongPress = { showLongPressMenu = true }
-                    )
+                    detectTapGestures(onLongPress = { showLongPressMenu = true })
                 },
             shape     = RoundedCornerShape(14.dp),
             colors    = CardDefaults.cardColors(containerColor = cardBg),
             elevation = CardDefaults.cardElevation(1.dp)
         ) {
-            // Title row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -343,24 +274,18 @@ fun SwipeablePlanCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-
-                // 3-dot menu
                 Box {
                     IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Default.MoreVert, "Options", modifier = Modifier.size(18.dp))
                     }
-                    DropdownMenu(
-                        expanded         = showMenu,
-                        onDismissRequest = { showMenu = false }
-                    ) {
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(
                             text        = { Text("Edit") },
                             leadingIcon = { Icon(Icons.Default.Edit, null) },
                             onClick     = { showMenu = false; onEdit() }
                         )
                         DropdownMenuItem(
-                            text        = { Text("Delete",
-                                color = MaterialTheme.colorScheme.error) },
+                            text        = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                             leadingIcon = { Icon(Icons.Default.Delete, null,
                                 tint = MaterialTheme.colorScheme.error) },
                             onClick     = { showMenu = false; showConfirm = true }
@@ -369,7 +294,6 @@ fun SwipeablePlanCard(
                 }
             }
 
-            // File step rows
             val fileSteps = plan.steps.filter { it.hasFilePath() }
             if (fileSteps.isNotEmpty()) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 14.dp))
@@ -413,135 +337,57 @@ fun SwipeablePlanCard(
         }
     }
 
-    // ── Long-press context dialog ─────────────────────────────────────────────
+    // Long-press context dialog
     if (showLongPressMenu) {
         AlertDialog(
             onDismissRequest = { showLongPressMenu = false },
             icon    = { Text("⚡", fontSize = 24.sp) },
             title   = {
-                Text(plan.planName,
-                    fontWeight = FontWeight.Bold,
-                    maxLines   = 1,
-                    overflow   = TextOverflow.Ellipsis)
+                Text(plan.planName, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("What would you like to do?",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-                    // 1. Execute now
-                    Surface(
-                        onClick  = { showLongPressMenu = false; onExecute() },
-                        shape    = RoundedCornerShape(10.dp),
-                        color    = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.padding(12.dp),
-                            verticalAlignment     = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    listOf(
+                        Triple(Icons.Default.PlayArrow,    MaterialTheme.colorScheme.primaryContainer,   "Execute Plan")       to { showLongPressMenu = false; onExecute() },
+                        Triple(Icons.Default.PlayCircle,   MaterialTheme.colorScheme.secondaryContainer, "Pick File + Execute") to { showLongPressMenu = false; onAddFileAndExecute(plan) },
+                        Triple(Icons.Default.PlaylistAdd,  MaterialTheme.colorScheme.tertiaryContainer,  "Add File to Plan")   to { showLongPressMenu = false; onAddFileToPlan(plan) },
+                        Triple(Icons.Default.Edit,         MaterialTheme.colorScheme.surfaceVariant,     "Edit Plan")          to { showLongPressMenu = false; onEdit() },
+                    ).forEach { (triple, action) ->
+                        val (icon, color, label) = triple
+                        Surface(
+                            onClick  = action,
+                            shape    = RoundedCornerShape(10.dp),
+                            color    = color,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.PlayArrow, null,
-                                tint     = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Execute Plan", fontWeight = FontWeight.SemiBold)
-                                Text("Run all ${plan.steps.size} steps now",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(Modifier.padding(12.dp),
+                                verticalAlignment     = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Icon(icon, null, modifier = Modifier.size(20.dp))
+                                Text(label, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f))
                             }
                         }
                     }
-
-                    // 2. Pick file + execute with plan
-                    Surface(
-                        onClick  = { showLongPressMenu = false; onAddFileAndExecute(plan) },
-                        shape    = RoundedCornerShape(10.dp),
-                        color    = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.padding(12.dp),
-                            verticalAlignment     = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(Icons.Default.PlayCircle, null,
-                                tint     = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.size(20.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Pick File + Execute", fontWeight = FontWeight.SemiBold)
-                                Text("Choose a file and run it with this plan",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-
-                    // 3. Add file step to saved plan
-                    Surface(
-                        onClick  = { showLongPressMenu = false; onAddFileToPlan(plan) },
-                        shape    = RoundedCornerShape(10.dp),
-                        color    = MaterialTheme.colorScheme.tertiaryContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.padding(12.dp),
-                            verticalAlignment     = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(Icons.Default.PlaylistAdd, null,
-                                tint     = MaterialTheme.colorScheme.tertiary,
-                                modifier = Modifier.size(20.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Add File to Plan", fontWeight = FontWeight.SemiBold)
-                                Text("Insert an OPEN_FILE step and save",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-
-                    // 4. Edit
-                    Surface(
-                        onClick  = { showLongPressMenu = false; onEdit() },
-                        shape    = RoundedCornerShape(10.dp),
-                        color    = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.padding(12.dp),
-                            verticalAlignment     = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(Icons.Default.Edit, null,
-                                tint     = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp))
-                            Text("Edit Plan",
-                                fontWeight = FontWeight.SemiBold,
-                                modifier   = Modifier.weight(1f))
-                        }
-                    }
-
-                    // 5. Delete
                     Surface(
                         onClick  = { showLongPressMenu = false; showConfirm = true },
                         shape    = RoundedCornerShape(10.dp),
                         color    = MaterialTheme.colorScheme.errorContainer,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            Modifier.padding(12.dp),
+                        Row(Modifier.padding(12.dp),
                             verticalAlignment     = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Icon(Icons.Default.Delete, null,
                                 tint     = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(20.dp))
-                            Text("Delete Plan",
-                                fontWeight = FontWeight.SemiBold,
-                                color      = MaterialTheme.colorScheme.error,
-                                modifier   = Modifier.weight(1f))
+                            Text("Delete Plan", fontWeight = FontWeight.SemiBold,
+                                color    = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f))
                         }
                     }
                 }
@@ -553,15 +399,12 @@ fun SwipeablePlanCard(
         )
     }
 
-    // ── Delete confirm ────────────────────────────────────────────────────────
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
             title            = { Text("Delete plan?") },
-            text             = {
-                Text("\"${plan.planName}\" will be permanently deleted.")
-            },
-            confirmButton = {
+            text             = { Text("\"${plan.planName}\" will be permanently deleted.") },
+            confirmButton    = {
                 TextButton(onClick = { showConfirm = false; onDelete() }) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }

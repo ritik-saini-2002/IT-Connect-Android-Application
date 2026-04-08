@@ -1,6 +1,7 @@
 package com.example.ritik_2.auth
 
 import android.util.Log
+import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.pocketbase.PocketBaseDataSource
@@ -13,98 +14,91 @@ class AuthRepository @Inject constructor(
     private val dataSource    : AppDataSource,
     private val pbDataSource  : PocketBaseDataSource,
     private val sessionManager: SessionManager,
-    private val syncManager   : SyncManager       // ← injected to set user token
+    private val syncManager   : SyncManager
 ) {
     companion object { private const val TAG = "AuthRepository" }
 
     val isLoggedIn: Boolean get() = sessionManager.isLoggedIn()
 
     /**
-     * Called on app start to restore a saved session.
-     * Sets the user token on SyncManager so reads work without admin credentials.
-     * Does NOT force-logout on network failure — we may be offline.
+     * True when the currently logged-in user's email matches the PocketBase
+     * admin credentials configured in local.properties.
+     *
+     * DB admin can:
+     *  - See ALL companies (not just their own)
+     *  - Access Database Manager regardless of role permissions
+     *  - Edit any user profile in any company
      */
+    fun isDbAdmin(): Boolean {
+        val email = sessionManager.get()?.email ?: return false
+        return email.equals(AppConfig.ADMIN_EMAIL, ignoreCase = true)
+    }
+
+    /**
+     * Returns the sanitized company name the current user belongs to.
+     * DB admin returns null (can access all companies).
+     */
+    fun userCompany(): String? {
+        if (isDbAdmin()) return null          // null = unrestricted
+        return sessionManager.get()?.let { s ->
+            com.example.ritik_2.core.StringUtils.sanitize(
+                // documentPath: "users/{sc}/{sd}/{role}/{uid}"
+                s.documentPath.split("/").getOrNull(1) ?: ""
+            ).ifBlank { null }
+        }
+    }
+
     suspend fun restoreSession() {
         val session = sessionManager.get()
-        if (session == null) {
-            Log.d(TAG, "restoreSession: no saved session")
-            return
-        }
+        if (session == null) { Log.d(TAG, "restoreSession: no saved session"); return }
         try {
             dataSource.restoreSession(session.token)
-            syncManager.setUserToken(session.token)   // ← allows reads without admin token
+            syncManager.setUserToken(session.token)
             Log.d(TAG, "Session restored for ${session.email}")
         } catch (e: Exception) {
-            // Don't clear session on restore failure — we may be offline.
-            // SyncManager will still have the token set for when connectivity returns.
             Log.w(TAG, "Session restore failed (possibly offline): ${e.message}")
         }
     }
 
-    /**
-     * Validates token + isActive. Returns [SessionStatus].
-     *
-     * If a network error occurs (server unreachable), returns [SessionStatus.Valid]
-     * optimistically so the app doesn't force-logout when offline.
-     * The ConnectivityMonitor + MainActivity handle showing the offline banner.
-     */
     suspend fun validateSession(): SessionStatus {
         val session = sessionManager.get() ?: return SessionStatus.NoSession
-
         return try {
-            // 1. Validate token — if network fails, assume valid
             val tokenValid = try {
                 pbDataSource.validateCurrentToken()
             } catch (e: Exception) {
                 Log.w(TAG, "Token validation failed (network?): ${e.message}")
-                // Network error — assume token is still valid, go offline
                 return SessionStatus.Valid(session)
             }
-
             if (!tokenValid) {
                 Log.w(TAG, "Token rejected — forcing logout")
                 logout()
                 return SessionStatus.TokenInvalid
             }
-
-            // 2. Check isActive — if network fails, assume active
             val isActive = try {
                 pbDataSource.checkIsActive(session.userId)
             } catch (e: Exception) {
                 Log.w(TAG, "isActive check failed (network?): ${e.message}")
-                true  // optimistic — don't deactivate offline users
+                true
             }
-
             if (!isActive) {
                 Log.w(TAG, "Account deactivated — forcing logout")
                 logout()
                 return SessionStatus.Deactivated
             }
-
-            // Re-set user token on every successful validation
-            // (covers the case where app was restored from background)
             syncManager.setUserToken(session.token)
-
             SessionStatus.Valid(session)
-
         } catch (e: Exception) {
-            // Catch-all for unexpected errors — go offline rather than force logout
             Log.w(TAG, "validateSession unexpected error: ${e.message}")
             SessionStatus.Valid(session)
         }
     }
 
-    /**
-     * Logs in with email + password.
-     * Sets the user token on SyncManager immediately after success
-     * so all subsequent data reads use the user token.
-     */
     suspend fun login(email: String, password: String): Result<Unit> =
         try {
             val session = dataSource.login(email, password)
             sessionManager.save(session)
-            syncManager.setUserToken(session.token)   // ← key: enables reads without admin token
-            Log.d(TAG, "Login success: $email role=${session.role} ✅")
+            syncManager.setUserToken(session.token)
+            Log.d(TAG, "Login success: $email role=${session.role} dbAdmin=${isDbAdmin()} ✅")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}")
@@ -114,13 +108,10 @@ class AuthRepository @Inject constructor(
     suspend fun sendPasswordReset(email: String): Result<Unit> =
         dataSource.sendPasswordReset(email)
 
-    /**
-     * Logs out — clears session and user token.
-     */
     suspend fun logout() {
         try { dataSource.logout() } catch (_: Exception) {}
         sessionManager.clear()
-        syncManager.setUserToken("")   // ← clear token on logout
+        syncManager.setUserToken("")
         Log.d(TAG, "Logged out ✅")
     }
 

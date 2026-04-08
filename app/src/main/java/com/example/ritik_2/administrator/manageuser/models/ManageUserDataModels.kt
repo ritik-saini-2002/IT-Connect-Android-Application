@@ -46,6 +46,7 @@ data class MUUser(
 
 data class ManageUserUiState(
     val isLoading           : Boolean         = false,
+    val isDbAdmin           : Boolean         = false,   // ← NEW
     val currentRole         : String          = "",
     val companies           : List<MUCompany> = emptyList(),
     val users               : List<MUUser>    = emptyList(),

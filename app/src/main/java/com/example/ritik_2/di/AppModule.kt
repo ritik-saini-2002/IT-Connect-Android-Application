@@ -48,11 +48,18 @@ object AppModule {
         monitor: ConnectivityMonitor
     ): SyncManager = SyncManager(db, http, monitor)
 
+    // PocketBaseDataSource now receives AppDatabase for offline caching
+    @Provides @Singleton
+    fun providePocketBaseDataSource(
+        http: OkHttpClient,
+        db  : AppDatabase
+    ): PocketBaseDataSource = PocketBaseDataSource(http, db)
+
     @Provides @Singleton
     fun provideAuthRepository(
         dataSource    : AppDataSource,
         pbDataSource  : PocketBaseDataSource,
         sessionManager: SessionManager,
-        syncManager   : SyncManager          // ← added
+        syncManager   : SyncManager
     ): AuthRepository = AuthRepository(dataSource, pbDataSource, sessionManager, syncManager)
 }

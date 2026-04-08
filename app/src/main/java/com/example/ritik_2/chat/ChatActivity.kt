@@ -1,0 +1,175 @@
+package com.example.ritik_2.chat
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.runtime.*
+import androidx.lifecycle.lifecycleScope
+import com.example.ritik_2.theme.ITConnectTheme
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+
+@AndroidEntryPoint
+class ChatActivity : ComponentActivity() {
+
+    private val listVm: ChatListViewModel by viewModels()
+    private val roomVm: ChatRoomViewModel by viewModels()
+
+    // ── File pickers — all return Uri? so we guard with ?: return ────────────
+
+    private val imagePicker = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri ?: return@registerForActivityResult
+        handleFilePicked(uri)
+    }
+
+    private val filePicker = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri ?: return@registerForActivityResult
+        handleFilePicked(uri)
+    }
+
+    // TakePicture returns Boolean — URI is stored before launch
+    private var cameraUri: Uri? = null
+    private val cameraPicker = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { saved: Boolean ->
+        if (!saved) return@registerForActivityResult
+        val uri = cameraUri ?: return@registerForActivityResult
+        handleFilePicked(uri)
+    }
+
+    // ── MemberPickerActivity result ───────────────────────────────────────────
+
+    private val memberPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val data      = result.data ?: return@registerForActivityResult
+        val ids       = data.getStringArrayListExtra(MemberPickerActivity.RESULT_IDS)
+            ?: return@registerForActivityResult
+        val names     = data.getStringArrayListExtra(MemberPickerActivity.RESULT_NAMES)
+            ?: arrayListOf()
+        val groupName = data.getStringExtra(MemberPickerActivity.RESULT_GROUP_NAME) ?: "New Group"
+        val isGroup   = data.getBooleanExtra(MemberPickerActivity.RESULT_IS_GROUP, false)
+
+        lifecycleScope.launch {
+            if (isGroup) {
+                val room = listVm.createGroup(groupName, ids, names, null)
+                if (room != null) openRoom(room)
+                else Toast.makeText(
+                    this@ChatActivity, "Failed to create group", Toast.LENGTH_SHORT
+                ).show()
+            } else if (ids.size == 1) {
+                val room = listVm.getOrCreateDM(ids[0], names.firstOrNull() ?: "")
+                if (room != null) openRoom(room)
+            }
+        }
+    }
+
+    // ── Compose state bridge ──────────────────────────────────────────────────
+
+    private val _currentRoom = mutableStateOf<ChatRoom?>(null)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val directRoomId = intent.getStringExtra(EXTRA_ROOM_ID)
+
+        setContent {
+            ITConnectTheme {
+                val currentRoom by _currentRoom
+
+                LaunchedEffect(directRoomId) {
+                    if (directRoomId != null && currentRoom == null) {
+                        val target = listVm.state.value.rooms.find { it.id == directRoomId }
+                        if (target != null) openRoom(target)
+                    }
+                }
+
+                if (currentRoom != null) {
+                    ChatRoomScreen(
+                        room         = currentRoom!!,
+                        viewModel    = roomVm,
+                        onBack       = { _currentRoom.value = null },
+                        onPickFile   = { filePicker.launch("*/*") },
+                        onPickImage  = { imagePicker.launch("image/*") },
+                        onPickCamera = { launchCamera() }
+                    )
+                } else {
+                    ChatListScreen(
+                        viewModel  = listVm,
+                        onOpenRoom = { room -> openRoom(room) },
+                        onNewGroup = {
+                            memberPickerLauncher.launch(
+                                MemberPickerActivity.newIntent(
+                                    this@ChatActivity,
+                                    sanitizedCompany = listVm.getSanitizedCompany(),
+                                    isGroupMode      = true
+                                )
+                            )
+                        },
+                        onNewDM = {
+                            memberPickerLauncher.launch(
+                                MemberPickerActivity.newIntent(
+                                    this@ChatActivity,
+                                    sanitizedCompany = listVm.getSanitizedCompany(),
+                                    isGroupMode      = false
+                                )
+                            )
+                        },
+                        onBack = { finish() }
+                    )
+                }
+            }
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private fun openRoom(room: ChatRoom) {
+        _currentRoom.value = room
+        roomVm.init(room.id)
+    }
+
+    private fun launchCamera() {
+        val file = java.io.File(cacheDir, "chat_photo_${System.currentTimeMillis()}.jpg")
+        val uri  = androidx.core.content.FileProvider.getUriForFile(
+            this, "${packageName}.fileprovider", file
+        )
+        cameraUri = uri          // store before launch so callback can read it
+        cameraPicker.launch(uri)
+    }
+
+    private fun handleFilePicked(uri: Uri) {           // non-null Uri — safe to use directly
+        val mime = contentResolver.getType(uri) ?: "application/octet-stream"
+        val name = getFileNameFromUri(uri)
+        roomVm.setSelectedFile(uri, name, mime)
+    }
+
+    private fun getFileNameFromUri(uri: Uri): String {
+        var name = "file_${System.currentTimeMillis()}"
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val col = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst() && col >= 0) name = cursor.getString(col)
+        }
+        return name
+    }
+
+    companion object {
+        const val EXTRA_ROOM_ID = "room_id"
+
+        fun newIntent(context: Context, roomId: String? = null): Intent =
+            Intent(context, ChatActivity::class.java).apply {
+                roomId?.let { putExtra(EXTRA_ROOM_ID, it) }
+            }
+    }
+}

@@ -6,12 +6,18 @@ import com.example.ritik_2.administrator.manageuser.models.*
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.ConnectivityMonitor
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.StringUtils
 import com.example.ritik_2.core.SyncManager
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.localdatabase.AppDatabase
+import com.example.ritik_2.localdatabase.UserEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -28,6 +34,7 @@ class ManageUserViewModel @Inject constructor(
     val state: StateFlow<ManageUserUiState> = _state.asStateFlow()
 
     private var sanitizedCompany = ""
+    private var isDbAdmin        = false
 
     init { loadCurrentUser() }
 
@@ -35,12 +42,16 @@ class ManageUserViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val session = authRepository.getSession() ?: error("Not logged in")
-                val profile = dataSource.getUserProfile(session.userId).getOrThrow()
+                val session   = authRepository.getSession() ?: error("Not logged in")
+                isDbAdmin     = authRepository.isDbAdmin()
+                val profile   = dataSource.getUserProfile(session.userId).getOrThrow()
                 sanitizedCompany = profile.sanitizedCompany
-                _state.update { it.copy(currentRole = profile.role) }
 
-                // Refresh from server if online
+                _state.update { it.copy(
+                    currentRole = profile.role,
+                    isDbAdmin   = isDbAdmin
+                ) }
+
                 if (monitor.serverReachable.value)
                     syncManager.refreshCompanyData(sanitizedCompany)
 
@@ -52,10 +63,9 @@ class ManageUserViewModel @Inject constructor(
     }
 
     private suspend fun loadFromLocal() {
-        val users = if (_state.value.currentRole == "Administrator")
-            db.userDao().getAll()
-        else
-            db.userDao().getByCompany(sanitizedCompany)
+        // DB admin sees ALL users across ALL companies; others see only their company
+        val users = if (isDbAdmin) db.userDao().getAll()
+        else            db.userDao().getByCompany(sanitizedCompany)
 
         val allUsers = users.filter { !it.pendingDelete }.map { u ->
             MUUser(
@@ -98,6 +108,8 @@ class ManageUserViewModel @Inject constructor(
         }
     }
 
+    // ── Search / navigation helpers ───────────────────────────────────────────
+
     fun search(query: String) {
         _state.update { s ->
             s.copy(searchQuery = query, filteredUsers = applySearch(s.users, query))
@@ -106,27 +118,19 @@ class ManageUserViewModel @Inject constructor(
 
     fun toggleCompany(sc: String) {
         val cur = _state.value.expandedCompanies.toMutableSet()
-        if (!cur.add(sc)) cur.remove(sc); _state.update { it.copy(expandedCompanies = cur) }
-    }
-
-    fun toggleDepartment(sc: String, sd: String) {
-        val key = "$sc|$sd"; val cur = _state.value.expandedDepartments.toMutableSet()
-        if (!cur.add(key)) cur.remove(key); _state.update { it.copy(expandedDepartments = cur) }
-    }
-
-    fun toggleRole(sc: String, sd: String, role: String) {
-        val key = "$sc|$sd|$role"; val cur = _state.value.expandedRoles.toMutableSet()
-        if (!cur.add(key)) cur.remove(key); _state.update { it.copy(expandedRoles = cur) }
+        if (!cur.add(sc)) cur.remove(sc)
+        _state.update { it.copy(expandedCompanies = cur) }
     }
 
     fun getDepts(sc: String): List<MUDepartment> {
-        val source = if (_state.value.searchQuery.isBlank()) _state.value.users
+        val src = if (_state.value.searchQuery.isBlank()) _state.value.users
         else _state.value.filteredUsers
-        return source.filter { it.companyName == sc }.groupBy { it.deptName }.map { (sd, uList) ->
+        return src.filter { it.companyName == sc }.groupBy { it.deptName }.map { (sd, uList) ->
             MUDepartment(
                 sanitizedName  = sd,
                 departmentName = uList.firstOrNull()?.originalDept ?: sd,
-                companyName    = sc, userCount = uList.size,
+                companyName    = sc,
+                userCount      = uList.size,
                 activeUsers    = uList.count { it.isActive },
                 roles          = uList.map { it.role }.distinct()
             )
@@ -134,28 +138,35 @@ class ManageUserViewModel @Inject constructor(
     }
 
     fun getRoles(sc: String, sd: String): List<MURoleInfo> {
-        val source = if (_state.value.searchQuery.isBlank()) _state.value.users
+        val src = if (_state.value.searchQuery.isBlank()) _state.value.users
         else _state.value.filteredUsers
-        return source.filter { it.companyName == sc && it.deptName == sd }
-            .groupBy { it.role }.map { (role, uList) ->
+        return src.filter { it.companyName == sc && it.deptName == sd }
+            .groupBy { it.role }
+            .map { (role, uList) ->
                 MURoleInfo(role, sc, sd, uList.size, uList.count { it.isActive })
             }
     }
 
     fun getUsers(sc: String, sd: String, role: String) =
-        (if (_state.value.searchQuery.isBlank()) _state.value.users else _state.value.filteredUsers)
+        (if (_state.value.searchQuery.isBlank()) _state.value.users
+        else _state.value.filteredUsers)
             .filter { it.companyName == sc && it.deptName == sd && it.role == role }
 
     fun getFilteredCompanies() = _state.value.let { s ->
         val src = if (s.searchQuery.isBlank()) s.users else s.filteredUsers
         src.groupBy { it.companyName }.map { (sc, uList) ->
-            MUCompany(sc, uList.firstOrNull()?.originalCompany ?: sc, uList.size, uList.count { it.isActive })
+            MUCompany(sc, uList.firstOrNull()?.originalCompany ?: sc,
+                uList.size, uList.count { it.isActive })
         }
     }
 
-    // ── Toggle active status ──────────────────────────────────────────────────
+    // ── Toggle active / deactivate ────────────────────────────────────────────
 
     fun toggleUserStatus(user: MUUser) {
+        if (!canModify(user)) {
+            _state.update { it.copy(error = "You don't have permission to modify this user") }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
@@ -169,15 +180,8 @@ class ManageUserViewModel @Inject constructor(
                         token,
                         JSONObject().apply { put("isActive", newStatus) }.toString()
                     )
-                    val acRes = syncManager.pbGet(
-                        "${AppConfig.BASE_URL}/api/collections/user_access_control/records" +
-                                "?filter=(userId='${user.id}')&perPage=1", token
-                    )
-                    val acId = JSONObject(acRes).optJSONArray("items")?.optJSONObject(0)?.optString("id")
-                    if (!acId.isNullOrEmpty()) syncManager.pbPatch(
-                        "${AppConfig.BASE_URL}/api/collections/user_access_control/records/$acId",
-                        token, JSONObject().apply { put("isActive", newStatus) }.toString()
-                    )
+                    // Sync access_control
+                    updateAccessControlField(user.id, token, "isActive", newStatus)
                 } else {
                     syncManager.enqueue("UPDATE", "users", user.id,
                         JSONObject().apply { put("isActive", newStatus) }.toString())
@@ -197,6 +201,10 @@ class ManageUserViewModel @Inject constructor(
     // ── Delete user ───────────────────────────────────────────────────────────
 
     fun deleteUser(user: MUUser) {
+        if (!canModify(user)) {
+            _state.update { it.copy(error = "You don't have permission to delete this user") }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
@@ -206,12 +214,14 @@ class ManageUserViewModel @Inject constructor(
                     val token = syncManager.getAdminToken()
                     syncManager.pbDelete(
                         "${AppConfig.BASE_URL}/api/collections/users/records/${user.id}", token)
+                    // Also delete from access_control and search_index
                     listOf("user_access_control", "user_search_index").forEach { col ->
                         runCatching {
                             val res = syncManager.pbGet(
                                 "${AppConfig.BASE_URL}/api/collections/$col/records" +
                                         "?filter=(userId='${user.id}')&perPage=1", token)
-                            val id = JSONObject(res).optJSONArray("items")?.optJSONObject(0)?.optString("id")
+                            val id  = JSONObject(res).optJSONArray("items")
+                                ?.optJSONObject(0)?.optString("id")
                             if (!id.isNullOrEmpty())
                                 syncManager.pbDelete(
                                     "${AppConfig.BASE_URL}/api/collections/$col/records/$id", token)
@@ -230,40 +240,194 @@ class ManageUserViewModel @Inject constructor(
         }
     }
 
-    // Called after ProfileCompletionActivity returns — just re-sync from local
+    // ── Create user (DB admin shortcut — no redirect to CreateUserActivity) ───
+
+    fun createUserDirect(
+        name       : String,
+        email      : String,
+        password   : String,
+        role       : String,
+        department : String,
+        designation: String,
+        companyName: String
+    ) {
+        if (!isDbAdmin) {
+            _state.update { it.copy(error = "Only DB admin can create users from this panel") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val sc           = StringUtils.sanitize(companyName)
+                val sd           = StringUtils.sanitize(department)
+                val token        = syncManager.getAdminToken()
+                val permsJson    = Json.encodeToString(Permissions.forRole(role))
+                val documentPath = "users/$sc/$sd/$role"
+
+                // 1. Create auth record
+                val createBody = JSONObject().apply {
+                    put("email", email); put("password", password)
+                    put("passwordConfirm", password); put("name", name)
+                    put("emailVisibility", true)
+                }.toString()
+                val createRes  = syncManager.pbPost(
+                    "${AppConfig.BASE_URL}/api/collections/users/records", token, createBody)
+                val userId = JSONObject(createRes).optString("id").ifEmpty { error("No userId") }
+                val fullPath = "$documentPath/$userId"
+
+                val profileJson = JSONObject().apply {
+                    put("imageUrl",""); put("phoneNumber",""); put("address","")
+                    put("employeeId",""); put("reportingTo",""); put("salary", 0)
+                    put("emergencyContactName",""); put("emergencyContactPhone","")
+                    put("emergencyContactRelation","")
+                }.toString()
+                val workJson = JSONObject().apply {
+                    put("experience",0); put("completedProjects",0)
+                    put("activeProjects",0); put("pendingTasks",0)
+                    put("completedTasks",0)
+                }.toString()
+                val issuesJson = JSONObject().apply {
+                    put("totalComplaints",0); put("resolvedComplaints",0)
+                    put("pendingComplaints",0)
+                }.toString()
+
+                // 2. Patch user record with metadata
+                syncManager.pbPatch(
+                    "${AppConfig.BASE_URL}/api/collections/users/records/$userId", token,
+                    JSONObject().apply {
+                        put("userId", userId); put("role", role)
+                        put("companyName", companyName); put("sanitizedCompanyName", sc)
+                        put("department", department); put("sanitizedDepartment", sd)
+                        put("designation", designation); put("isActive", true)
+                        put("documentPath", fullPath); put("permissions", permsJson)
+                        put("profile", profileJson); put("workStats", workJson)
+                        put("issues", issuesJson); put("needsProfileCompletion", true)
+                    }.toString()
+                )
+
+                // 3. Create access_control record
+                syncManager.pbPost(
+                    "${AppConfig.BASE_URL}/api/collections/user_access_control/records", token,
+                    JSONObject().apply {
+                        put("userId", userId); put("name", name); put("email", email)
+                        put("companyName", companyName); put("sanitizedCompanyName", sc)
+                        put("department", department); put("sanitizedDepartment", sd)
+                        put("role", role); put("designation", designation)
+                        put("permissions", permsJson); put("isActive", true)
+                        put("documentPath", fullPath); put("needsProfileCompletion", true)
+                    }.toString()
+                )
+
+                // 4. Cache locally
+                db.userDao().upsert(UserEntity(
+                    id                     = userId,
+                    name                   = name,
+                    email                  = email,
+                    role                   = role,
+                    companyName            = companyName,
+                    sanitizedCompanyName   = sc,
+                    department             = department,
+                    sanitizedDepartment    = sd,
+                    designation            = designation,
+                    isActive               = true,
+                    documentPath           = fullPath,
+                    needsProfileCompletion = true
+                ))
+
+                loadFromLocal()
+                _state.update { it.copy(isLoading = false, successMsg = "$name created ✓") }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = "Create failed: ${e.message}") }
+            }
+        }
+    }
+
+    // ── Change role (DB admin can change any user's role) ─────────────────────
+
+    fun changeRole(user: MUUser, newRole: String) {
+        if (!canModify(user)) {
+            _state.update { it.copy(error = "Permission denied") }
+            return
+        }
+        if (!PermissionGuard.canChangeRole(
+                editorRole = _state.value.currentRole,
+                targetRole = user.role,
+                newRole    = newRole,
+                isDbAdmin  = isDbAdmin)) {
+            _state.update { it.copy(error = "You cannot assign the role '$newRole'") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val permsJson = Json.encodeToString(Permissions.forRole(newRole))
+                val newPath   = "users/${user.companyName}/${user.deptName}/$newRole/${user.id}"
+
+                db.userDao().setRole(user.id, newRole)
+
+                if (monitor.serverReachable.value) {
+                    val token = syncManager.getAdminToken()
+                    syncManager.pbPatch(
+                        "${AppConfig.BASE_URL}/api/collections/users/records/${user.id}",
+                        token,
+                        JSONObject().apply {
+                            put("role", newRole); put("permissions", permsJson)
+                            put("documentPath", newPath)
+                        }.toString()
+                    )
+                    updateAccessControlField(user.id, token, "role",        newRole)
+                    updateAccessControlField(user.id, token, "permissions", permsJson)
+                    updateAccessControlField(user.id, token, "documentPath",newPath)
+                } else {
+                    syncManager.enqueue("ROLE_CHANGE", "users", user.id,
+                        JSONObject().apply {
+                            put("role", newRole); put("permissions", permsJson)
+                            put("documentPath", newPath)
+                        }.toString())
+                }
+
+                loadFromLocal()
+                _state.update { it.copy(isLoading = false,
+                    successMsg = "${user.name} is now $newRole") }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    // ── Refresh single user after profile edit ────────────────────────────────
+
     fun refreshUser(updatedUserId: String) {
         viewModelScope.launch {
             if (monitor.serverReachable.value) {
                 try {
-                    val token   = syncManager.getAdminToken()
-                    val res     = syncManager.pbGet(
+                    val token = syncManager.getAdminToken()
+                    val res   = syncManager.pbGet(
                         "${AppConfig.BASE_URL}/api/collections/users/records/$updatedUserId", token)
-                    val o       = JSONObject(res)
-                    val profile = try { JSONObject(o.optString("profile", "{}")) } catch (_: Exception) { JSONObject() }
-                    val work    = try { JSONObject(o.optString("workStats", "{}")) } catch (_: Exception) { JSONObject() }
-                    val issues  = try { JSONObject(o.optString("issues", "{}")) } catch (_: Exception) { JSONObject() }
-                    db.userDao().upsert(
-                        com.example.ritik_2.localdatabase.UserEntity(
-                            id                   = o.optString("id"),
-                            name                 = o.optString("name"),
-                            email                = o.optString("email"),
-                            role                 = o.optString("role"),
-                            companyName          = o.optString("companyName"),
-                            sanitizedCompanyName = o.optString("sanitizedCompanyName"),
-                            department           = o.optString("department"),
-                            sanitizedDepartment  = o.optString("sanitizedDepartment"),
-                            designation          = o.optString("designation"),
-                            isActive             = o.optBoolean("isActive", true),
-                            documentPath         = o.optString("documentPath"),
-                            imageUrl             = profile.optString("imageUrl", ""),
-                            phoneNumber          = profile.optString("phoneNumber", ""),
-                            experience           = work.optInt("experience"),
-                            activeProjects       = work.optInt("activeProjects"),
-                            completedProjects    = work.optInt("completedProjects"),
-                            totalComplaints      = issues.optInt("totalComplaints"),
-                            needsProfileCompletion = o.optBoolean("needsProfileCompletion", true)
-                        )
-                    )
+                    val o     = JSONObject(res)
+                    val profile = safeObj(o.optString("profile"))
+                    val work    = safeObj(o.optString("workStats"))
+                    val issues  = safeObj(o.optString("issues"))
+                    db.userDao().upsert(UserEntity(
+                        id                   = o.optString("id"),
+                        name                 = o.optString("name"),
+                        email                = o.optString("email"),
+                        role                 = o.optString("role"),
+                        companyName          = o.optString("companyName"),
+                        sanitizedCompanyName = o.optString("sanitizedCompanyName"),
+                        department           = o.optString("department"),
+                        sanitizedDepartment  = o.optString("sanitizedDepartment"),
+                        designation          = o.optString("designation"),
+                        isActive             = o.optBoolean("isActive", true),
+                        documentPath         = o.optString("documentPath"),
+                        imageUrl             = profile.optString("imageUrl", ""),
+                        phoneNumber          = profile.optString("phoneNumber", ""),
+                        experience           = work.optInt("experience"),
+                        activeProjects       = work.optInt("activeProjects"),
+                        completedProjects    = work.optInt("completedProjects"),
+                        totalComplaints      = issues.optInt("totalComplaints"),
+                        needsProfileCompletion = o.optBoolean("needsProfileCompletion", true)
+                    ))
                 } catch (e: Exception) {
                     android.util.Log.w("ManageUserVM", "refreshUser: ${e.message}")
                 }
@@ -274,14 +438,65 @@ class ManageUserViewModel @Inject constructor(
 
     fun clearMessages() = _state.update { it.copy(error = null, successMsg = null) }
 
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * True when the current editor can modify [user].
+     * DB admin → always yes.
+     * Administrator → yes within their company.
+     * Manager/HR → only Employee, Intern, Team Lead in their company.
+     */
+    private fun canModify(user: MUUser): Boolean {
+        if (isDbAdmin) return true
+        val editorRole = _state.value.currentRole
+        // Must be same company
+        if (user.companyName != sanitizedCompany) return false
+        return PermissionGuard.canEditProfile(
+            editorRole = editorRole,
+            targetRole = user.role,
+            editorId   = "",   // editing other
+            targetId   = user.id,
+            isDbAdmin  = false
+        )
+    }
+
+    private suspend fun updateAccessControlField(
+        userId: String, token: String, field: String, value: Any
+    ) {
+        try {
+            val res  = syncManager.pbGet(
+                "${AppConfig.BASE_URL}/api/collections/user_access_control/records" +
+                        "?filter=(userId='$userId')&perPage=1", token)
+            val acId = JSONObject(res).optJSONArray("items")
+                ?.optJSONObject(0)?.optString("id") ?: return
+            syncManager.pbPatch(
+                "${AppConfig.BASE_URL}/api/collections/user_access_control/records/$acId",
+                token,
+                JSONObject().apply {
+                    when (value) {
+                        is Boolean -> put(field, value)
+                        is Int     -> put(field, value)
+                        else       -> put(field, value.toString())
+                    }
+                }.toString()
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("ManageUserVM", "updateAC $field: ${e.message}")
+        }
+    }
+
     private fun applySearch(users: List<MUUser>, q: String) =
         if (q.isBlank()) users
         else users.filter {
-            it.name.contains(q, true)        ||
-                    it.email.contains(q, true)       ||
-                    it.role.contains(q, true)        ||
-                    it.designation.contains(q, true) ||
-                    it.originalCompany.contains(q, true) ||
+            it.name.contains(q, true)           ||
+                    it.email.contains(q, true)          ||
+                    it.role.contains(q, true)           ||
+                    it.designation.contains(q, true)    ||
+                    it.originalCompany.contains(q, true)||
                     it.originalDept.contains(q, true)
         }
+
+    private fun safeObj(raw: String): JSONObject =
+        try { if (raw.startsWith("{")) JSONObject(raw) else JSONObject() }
+        catch (_: Exception) { JSONObject() }
 }

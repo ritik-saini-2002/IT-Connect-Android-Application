@@ -8,12 +8,16 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <uses-feature android:name="android.hardware.camera"    android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -30,6 +34,10 @@
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="geo" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="content" />
         </intent>
     </queries>
 
@@ -60,44 +68,76 @@
 
         <!-- ── Auth ───────────────────────────────────────── -->
         <activity android:name=".login.LoginActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".registration.RegistrationActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Main ───────────────────────────────────────── -->
         <activity android:name=".main.MainActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Profile ────────────────────────────────────── -->
         <activity android:name=".profile.ProfileActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".profile.profilecompletion.ProfileCompletionActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Features ───────────────────────────────────── -->
         <activity android:name=".contact.ContactActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".windowscontrol.PcControlActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".winshare.ServerConnectActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".macnet.MACNetActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2"/>
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Admin ──────────────────────────────────────── -->
         <activity android:name=".administrator.AdministratorPanelActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".administrator.databasemanager.DatabaseManagerActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".administrator.manageuser.ManageUserActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".administrator.rolemanagement.RoleManagementActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".administrator.newusercreation.CreateUserActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2" />
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
         <activity android:name=".administrator.departmentmanager.DepartmentActivity"
-            android:exported="false" android:theme="@style/Theme.Ritik_2"/>
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
+        <!-- Fixed: was Base.Theme.Ritik_2 which caused runtime crash -->
+        <activity android:name=".administrator.companysettings.CompanySettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
+        <activity android:name=".administrator.reports.ReportsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
 
+        <!-- ── Chat ───────────────────────────────────────── -->
+        <activity
+            android:name=".chat.ChatActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Ritik_2" />
+        <activity
+            android:name=".chat.MemberPickerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── File Provider ──────────────────────────────── -->
         <provider

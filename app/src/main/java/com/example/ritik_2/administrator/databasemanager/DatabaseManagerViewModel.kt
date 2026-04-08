@@ -6,6 +6,7 @@ import com.example.ritik_2.administrator.databasemanager.models.*
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.ConnectivityMonitor
+import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.localdatabase.AppDatabase
 import com.example.ritik_2.core.SyncManager
@@ -15,6 +16,43 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
+
+// ── Collection folder model ───────────────────────────────────────────────────
+
+data class CollectionFolder(
+    val id          : String,
+    val name        : String,
+    val type        : String,           // "base" | "auth" | "view"
+    val fieldCount  : Int,
+    val indexCount  : Int,
+    val listRule    : String,
+    val viewRule    : String,
+    val createRule  : String,
+    val updateRule  : String,
+    val deleteRule  : String,
+    val fieldsJson  : String = "[]",
+    val indexesJson : String = "[]",
+    // Drill-down records
+    val records     : List<DBRecord> = emptyList(),
+    val isExpanded  : Boolean = false,
+    val isLoading   : Boolean = false
+)
+
+data class DBUiState(
+    val isLoading      : Boolean                 = false,
+    val accessDenied   : Boolean                 = false,    // ← new gate
+    val currentTab     : DBTab                   = DBTab.COLLECTIONS,
+    val records        : List<DBRecord>           = emptyList(),
+    val collections    : List<CollectionFolder>   = emptyList(), // ← folder view
+    val expandedCollId : String?                  = null,
+    val searchQuery    : String                   = "",
+    val totalCount     : Int                      = 0,
+    val error          : String?                  = null,
+    val successMsg     : String?                  = null,
+    val adminCompany   : String                   = "",
+    val isOffline      : Boolean                  = false,
+    val isDbAdmin      : Boolean                  = false
+)
 
 @HiltViewModel
 class DatabaseManagerViewModel @Inject constructor(
@@ -37,32 +75,164 @@ class DatabaseManagerViewModel @Inject constructor(
     private fun loadCurrentUser() {
         viewModelScope.launch {
             try {
-                val session = authRepository.getSession() ?: return@launch
-                val profile = dataSource.getUserProfile(session.userId).getOrNull() ?: return@launch
+                val session   = authRepository.getSession() ?: return@launch
+                val isDbAdmin = authRepository.isDbAdmin()
+                val profile   = dataSource.getUserProfile(session.userId).getOrNull()
+                    ?: return@launch
+
                 currentRole  = profile.role
                 adminCompany = profile.sanitizedCompany
 
+                // ── Access gate: DB admin OR has "database_manager" permission ─
+                val hasAccess = PermissionGuard.canAccessDatabaseManager(
+                    permissions = profile.permissions,
+                    isDbAdmin   = isDbAdmin
+                )
+                if (!hasAccess) {
+                    _state.update { it.copy(accessDenied = true) }
+                    return@launch
+                }
+
                 _state.update { it.copy(
                     adminCompany = profile.companyName,
-                    isOffline    = !monitor.serverReachable.value
+                    isOffline    = !monitor.serverReachable.value,
+                    isDbAdmin    = isDbAdmin
                 ) }
 
                 if (monitor.serverReachable.value) {
-                    // Refresh everything so cache is populated
                     syncManager.refreshAllCollections()
                     syncManager.refreshCompanyData(adminCompany)
                 }
 
-                // Load tab from cache (now populated)
-                loadTab(DBTab.USERS)
+                // Start on COLLECTIONS tab (folder view)
+                loadCollectionFolders()
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message) }
             }
         }
     }
 
+    // ── Collection folder view ────────────────────────────────────────────────
+
+    private fun loadCollectionFolders() {
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                val cached = db.collectionDao().getAll()
+                val folders = cached.map { c ->
+                    CollectionFolder(
+                        id         = c.id,
+                        name       = c.name,
+                        type       = c.type,
+                        fieldCount = try { JSONArray(c.fields).length()  } catch (_: Exception) { 0 },
+                        indexCount = try { JSONArray(c.indexes).length() } catch (_: Exception) { 0 },
+                        listRule   = c.listRule,
+                        viewRule   = c.viewRule,
+                        createRule = c.createRule,
+                        updateRule = c.updateRule,
+                        deleteRule = c.deleteRule,
+                        fieldsJson = c.fields,
+                        indexesJson= c.indexes
+                    )
+                }
+                _state.update { it.copy(
+                    isLoading    = false,
+                    collections  = folders,
+                    currentTab   = DBTab.COLLECTIONS
+                ) }
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    /**
+     * Drill into a collection — loads its records from PocketBase and
+     * shows them inline in the folder row.
+     * Only DB admin can trigger this.
+     */
+    fun toggleCollectionExpand(collId: String) {
+        val isDbAdmin = _state.value.isDbAdmin
+        viewModelScope.launch {
+            val alreadyExpanded = _state.value.expandedCollId == collId
+            if (alreadyExpanded) {
+                _state.update { it.copy(expandedCollId = null) }
+                return@launch
+            }
+
+            // Mark loading
+            _state.update { s ->
+                s.copy(
+                    expandedCollId = collId,
+                    collections    = s.collections.map { f ->
+                        if (f.id == collId) f.copy(isLoading = true) else f
+                    }
+                )
+            }
+
+            try {
+                if (!monitor.serverReachable.value || !isDbAdmin) {
+                    _state.update { s ->
+                        s.copy(
+                            collections = s.collections.map { f ->
+                                if (f.id == collId) f.copy(isLoading = false) else f
+                            },
+                            error = if (!isDbAdmin) "Only DB admin can browse records"
+                            else "Server unreachable"
+                        )
+                    }
+                    return@launch
+                }
+
+                val token   = syncManager.getAdminToken()
+                val collName = _state.value.collections.find { it.id == collId }?.name ?: return@launch
+                val res     = syncManager.pbGet(
+                    "${AppConfig.BASE_URL}/api/collections/$collName/records?perPage=50", token)
+                val items   = JSONObject(res).optJSONArray("items") ?: JSONArray()
+                val records = (0 until items.length()).map { i ->
+                    val o = items.getJSONObject(i)
+                    DBRecord(
+                        id    = o.optString("id"),
+                        title = o.optString("id"),
+                        sub1  = o.keys().asSequence().take(3).joinToString(" · ") {
+                            "$it: ${o.optString(it).take(20)}"
+                        },
+                        sub2  = "",
+                        badge = "record",
+                        extra = o.keys().asSequence().associate { k -> k to o.optString(k) },
+                        rawJson = o.toString(2)
+                    )
+                }
+
+                _state.update { s ->
+                    s.copy(
+                        collections = s.collections.map { f ->
+                            if (f.id == collId) f.copy(
+                                records   = records,
+                                isLoading = false,
+                                isExpanded = true
+                            ) else f.copy(isExpanded = false)
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { s ->
+                    s.copy(
+                        collections = s.collections.map { f ->
+                            if (f.id == collId) f.copy(isLoading = false) else f
+                        },
+                        error = e.message
+                    )
+                }
+            }
+        }
+    }
+
+    // ── Tab switch (non-collection tabs) ──────────────────────────────────────
+
     fun switchTab(tab: DBTab) {
-        _state.update { it.copy(currentTab = tab, searchQuery = "") }
+        if (tab == DBTab.COLLECTIONS) { loadCollectionFolders(); return }
+        _state.update { it.copy(currentTab = tab, searchQuery = "", expandedCollId = null) }
         loadTab(tab)
     }
 
@@ -75,24 +245,35 @@ class DatabaseManagerViewModel @Inject constructor(
         _state.update { it.copy(records = filtered) }
     }
 
+    // Also filter collection folders by name
+    fun searchCollections(q: String) {
+        _state.update { it.copy(searchQuery = q) }
+    }
+
     fun refresh() {
         viewModelScope.launch {
             if (monitor.serverReachable.value) {
                 syncManager.refreshAllCollections()
                 syncManager.refreshCompanyData(adminCompany)
             }
-            loadTab(_state.value.currentTab)
+            if (_state.value.currentTab == DBTab.COLLECTIONS) loadCollectionFolders()
+            else loadTab(_state.value.currentTab)
         }
     }
 
+    // ── Record delete — DB admin only ─────────────────────────────────────────
+
     fun deleteRecord(record: DBRecord) {
+        if (!_state.value.isDbAdmin) {
+            _state.update { it.copy(error = "Only DB admin can delete records") }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
                 val col = when (_state.value.currentTab) {
                     DBTab.USERS     -> "users"
                     DBTab.COMPANIES -> "companies_metadata"
-                    DBTab.COLLECTIONS -> return@launch
                     else            -> return@launch
                 }
                 if (monitor.serverReachable.value) {
@@ -110,7 +291,13 @@ class DatabaseManagerViewModel @Inject constructor(
         }
     }
 
+    // ── Collection management — DB admin only ─────────────────────────────────
+
     fun updateCollectionRules(collectionId: String, rules: CollectionRules) {
+        if (!_state.value.isDbAdmin) {
+            _state.update { it.copy(error = "Only DB admin can edit collection rules") }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
@@ -131,40 +318,7 @@ class DatabaseManagerViewModel @Inject constructor(
                 )
                 syncManager.refreshAllCollections()
                 _state.update { it.copy(isLoading = false, successMsg = "Rules updated") }
-                loadTab(DBTab.COLLECTIONS)
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = e.message) }
-            }
-        }
-    }
-
-    fun createIndex(collectionId: String, idx: DBIndex) {
-        viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
-            try {
-                if (!monitor.serverReachable.value) {
-                    _state.update { it.copy(isLoading = false, error = "Server unreachable") }
-                    return@launch
-                }
-                val token    = syncManager.getAdminToken()
-                val existRes = syncManager.pbGet(
-                    "${AppConfig.BASE_URL}/api/collections/$collectionId", token)
-                val col      = JSONObject(existRes)
-                val indexes  = try { JSONArray(col.optString("indexes", "[]")) }
-                catch (_: Exception) { JSONArray() }
-                val newIdx = JSONObject().apply {
-                    put("name",   idx.name)
-                    put("type",   idx.type)
-                    put("fields", JSONArray(idx.fields))
-                    if (idx.unique) put("unique", true)
-                }
-                indexes.put(newIdx)
-                syncManager.pbPatch(
-                    "${AppConfig.BASE_URL}/api/collections/$collectionId", token,
-                    JSONObject().apply { put("indexes", indexes) }.toString())
-                syncManager.refreshAllCollections()
-                _state.update { it.copy(isLoading = false, successMsg = "Index '${idx.name}' created") }
-                loadTab(DBTab.COLLECTIONS)
+                loadCollectionFolders()
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
@@ -172,6 +326,10 @@ class DatabaseManagerViewModel @Inject constructor(
     }
 
     fun createCollection(name: String, type: String, fields: List<DBField>) {
+        if (!_state.value.isDbAdmin) {
+            _state.update { it.copy(error = "Only DB admin can create collections") }
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
@@ -198,7 +356,43 @@ class DatabaseManagerViewModel @Inject constructor(
                 )
                 syncManager.refreshAllCollections()
                 _state.update { it.copy(isLoading = false, successMsg = "Collection '$name' created") }
-                loadTab(DBTab.COLLECTIONS)
+                loadCollectionFolders()
+            } catch (e: Exception) {
+                _state.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    fun createIndex(collectionId: String, idx: DBIndex) {
+        if (!_state.value.isDbAdmin) {
+            _state.update { it.copy(error = "Only DB admin can create indexes") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true) }
+            try {
+                if (!monitor.serverReachable.value) {
+                    _state.update { it.copy(isLoading = false, error = "Server unreachable") }
+                    return@launch
+                }
+                val token    = syncManager.getAdminToken()
+                val existRes = syncManager.pbGet(
+                    "${AppConfig.BASE_URL}/api/collections/$collectionId", token)
+                val col      = JSONObject(existRes)
+                val indexes  = try { JSONArray(col.optString("indexes", "[]")) }
+                catch (_: Exception) { JSONArray() }
+                val newIdx   = JSONObject().apply {
+                    put("name", idx.name); put("type", idx.type)
+                    put("fields", JSONArray(idx.fields))
+                    if (idx.unique) put("unique", true)
+                }
+                indexes.put(newIdx)
+                syncManager.pbPatch(
+                    "${AppConfig.BASE_URL}/api/collections/$collectionId", token,
+                    JSONObject().apply { put("indexes", indexes) }.toString())
+                syncManager.refreshAllCollections()
+                _state.update { it.copy(isLoading = false, successMsg = "Index '${idx.name}' created") }
+                loadCollectionFolders()
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
@@ -207,7 +401,7 @@ class DatabaseManagerViewModel @Inject constructor(
 
     fun clearMessages() = _state.update { it.copy(error = null, successMsg = null) }
 
-    // ── Tab loaders ───────────────────────────────────────────────────────────
+    // ── Non-collection tab loaders ────────────────────────────────────────────
 
     private fun loadTab(tab: DBTab) {
         viewModelScope.launch {
@@ -217,7 +411,7 @@ class DatabaseManagerViewModel @Inject constructor(
                     DBTab.USERS       -> loadUsers()
                     DBTab.DEPARTMENTS -> loadDepartments()
                     DBTab.COMPANIES   -> loadCompanies()
-                    DBTab.COLLECTIONS -> loadCollections()
+                    DBTab.COLLECTIONS -> return@launch
                 }
                 allRecords = records
                 _state.update { it.copy(
@@ -233,28 +427,20 @@ class DatabaseManagerViewModel @Inject constructor(
     }
 
     private suspend fun loadUsers(): List<DBRecord> {
-        val users = if (currentRole == "Administrator") db.userDao().getAll()
+        val users = if (currentRole == "Administrator" || _state.value.isDbAdmin)
+            db.userDao().getAll()
         else db.userDao().getByCompany(adminCompany)
         return users.map { u ->
-            DBRecord(
-                id    = u.id,
-                title = u.name.ifBlank { u.email },
-                sub1  = u.email,
-                sub2  = "${u.role} · ${u.department}",
+            DBRecord(id = u.id, title = u.name.ifBlank { u.email },
+                sub1 = u.email, sub2 = "${u.role} · ${u.department}",
                 badge = if (u.isActive) "Active" else "Inactive",
                 extra = mapOf(
-                    "Company"      to u.companyName,
-                    "Designation"  to u.designation,
-                    "Department"   to u.department,
-                    "Phone"        to u.phoneNumber,
-                    "Employee ID"  to u.employeeId,
-                    "Reporting To" to u.reportingTo,
-                    "Experience"   to if (u.experience > 0) "${u.experience} yrs" else "",
-                    "Active Proj"  to u.activeProjects.toString(),
-                    "Done Proj"    to u.completedProjects.toString(),
-                    "Salary"       to if (u.salary > 0) u.salary.toString() else ""
-                )
-            )
+                    "Company"     to u.companyName,
+                    "Designation" to u.designation,
+                    "Department"  to u.department,
+                    "Active Proj" to u.activeProjects.toString(),
+                    "Done Proj"   to u.completedProjects.toString()
+                ))
         }
     }
 
@@ -262,101 +448,24 @@ class DatabaseManagerViewModel @Inject constructor(
         val depts = db.deptDao().getByCompany(adminCompany)
         return depts.map { d ->
             val users = db.userDao().getByDepartment(adminCompany, d.sanitizedName)
-            DBRecord(
-                id    = d.id,
-                title = d.name,
-                sub1  = d.companyName,
-                sub2  = "${users.size} users · ${users.count { it.isActive }} active",
+            DBRecord(id = d.id, title = d.name, sub1 = d.companyName,
+                sub2 = "${users.size} users · ${users.count { it.isActive }} active",
                 badge = d.sanitizedName,
-                extra = mapOf(
-                    "Company"       to d.companyName,
-                    "Total Users"   to users.size.toString(),
-                    "Active Users"  to users.count { it.isActive }.toString(),
-                    "Roles Present" to users.map { it.role }.distinct().joinToString(", ")
-                )
-            )
+                extra = mapOf("Total Users" to users.size.toString(),
+                    "Active" to users.count { it.isActive }.toString()))
         }
     }
 
     private suspend fun loadCompanies(): List<DBRecord> {
-        // Try Room cache first
-        var companies = db.companyDao().getAll()
-
-        // If cache empty and server reachable, fetch directly
-        if (companies.isEmpty() && monitor.serverReachable.value) {
-            try {
-                val token = syncManager.getAdminToken()
-                val res   = syncManager.pbGet(
-                    "${AppConfig.BASE_URL}/api/collections/companies_metadata/records?perPage=200",
-                    token)
-                val items = JSONObject(res).optJSONArray("items") ?: return emptyList()
-                val fetched = (0 until items.length()).mapNotNull { i ->
-                    runCatching {
-                        val o = items.getJSONObject(i)
-                        val roles = try {
-                            val arr = JSONArray(o.optString("availableRoles", "[]"))
-                            (0 until arr.length()).map { arr.optString(it) }
-                        } catch (_: Exception) { emptyList() }
-                        val depts = try {
-                            val arr = JSONArray(o.optString("departments", "[]"))
-                            (0 until arr.length()).map { arr.optString(it) }
-                        } catch (_: Exception) { emptyList() }
-                        com.example.ritik_2.localdatabase.CompanyEntity(
-                            sanitizedName  = o.optString("sanitizedName"),
-                            originalName   = o.optString("originalName"),
-                            totalUsers     = o.optInt("totalUsers", 0),
-                            activeUsers    = o.optInt("activeUsers", 0),
-                            availableRoles = roles,
-                            departments    = depts
-                        )
-                    }.getOrNull()
-                }
-                db.companyDao().upsertAll(fetched)
-                companies = fetched
-            } catch (e: Exception) {
-                android.util.Log.e("DBManagerVM", "loadCompanies direct fetch: ${e.message}")
-            }
-        }
-
+        val companies = db.companyDao().getAll()
         return companies.map { c ->
-            DBRecord(
-                id    = c.sanitizedName,
-                title = c.originalName,
-                sub1  = "${c.totalUsers} total · ${c.activeUsers} active",
-                sub2  = c.sanitizedName,
-                badge = "${c.totalUsers} users",
+            DBRecord(id = c.sanitizedName, title = c.originalName,
+                sub1 = "${c.totalUsers} total · ${c.activeUsers} active",
+                sub2 = c.sanitizedName, badge = "${c.totalUsers} users",
                 extra = mapOf(
-                    "Roles"       to c.availableRoles.joinToString(", "),
-                    "Departments" to c.departments.joinToString(", ")
-                )
-            )
-        }
-    }
-
-    private suspend fun loadCollections(): List<DBRecord> {
-        val cols = db.collectionDao().getAll()
-        return cols.map { c ->
-            val fields  = try { JSONArray(c.fields).length()  } catch (_: Exception) { 0 }
-            val indexes = try { JSONArray(c.indexes).length() } catch (_: Exception) { 0 }
-            DBRecord(
-                id    = c.id,
-                title = c.name,
-                sub1  = "Type: ${c.type}",
-                sub2  = "$fields fields · $indexes indexes",
-                badge = c.type,
-                extra = mapOf(
-                    "List Rule"   to c.listRule.ifBlank  { "null (open)" },
-                    "View Rule"   to c.viewRule.ifBlank  { "null (open)" },
-                    "Create Rule" to c.createRule.ifBlank{ "null (open)" },
-                    "Update Rule" to c.updateRule.ifBlank{ "null (open)" },
-                    "Delete Rule" to c.deleteRule.ifBlank{ "null (open)" },
-                    "Fields"      to fields.toString(),
-                    "Indexes"     to indexes.toString()
-                ),
-                collectionId = c.id,
-                fieldsJson   = c.fields,
-                indexesJson  = c.indexes
-            )
+                    "Roles" to c.availableRoles.joinToString(", "),
+                    "Depts" to c.departments.joinToString(", ")
+                ))
         }
     }
 }

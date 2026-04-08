@@ -59,11 +59,12 @@ fun ServerConnectScreen(
         val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val ctrl = WindowInsetsControllerCompat(window, view)
-        // Use light icons on the dark primaryContainer top bar
-        ctrl.isAppearanceLightStatusBars = false
-        ctrl.isAppearanceLightNavigationBars = false
-        // Transparent bars — content draws underneath, padded by Scaffold
-        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        // Hide both bars — same as PC-control activities
+        ctrl.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        ctrl.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        // Transparent bars
+        window.statusBarColor     = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
     }
 

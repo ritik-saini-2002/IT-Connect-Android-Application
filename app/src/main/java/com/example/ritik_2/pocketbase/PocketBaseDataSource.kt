@@ -2,11 +2,12 @@ package com.example.ritik_2.pocketbase
 
 import android.util.Log
 import com.example.ritik_2.core.AppConfig
-import com.example.ritik_2.core.StringUtils
 import com.example.ritik_2.core.parseJsonList
 import com.example.ritik_2.data.model.*
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.data.source.dto.*
+import com.example.ritik_2.localdatabase.AppDatabase
+import com.example.ritik_2.localdatabase.UserEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -26,9 +27,18 @@ internal const val COL_COMPANIES      = "companies_metadata"
 internal const val COL_ACCESS_CONTROL = "user_access_control"
 internal const val COL_SEARCH_INDEX   = "user_search_index"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Permission guard constants
+// ─────────────────────────────────────────────────────────────────────────────
+private val ADMIN_ROLES   = setOf("Administrator")
+private val MANAGER_ROLES = setOf("Manager", "HR")
+// Roles that managers/HR are allowed to edit
+private val MANAGER_EDITABLE_TARGET_ROLES = setOf("Employee", "Intern", "Team Lead")
+
 @Singleton
 class PocketBaseDataSource @Inject constructor(
-    private val http: OkHttpClient
+    private val http: OkHttpClient,
+    private val db  : AppDatabase          // ← injected for offline fallback
 ) : AppDataSource {
 
     private val tag = "PBDataSource"
@@ -64,7 +74,8 @@ class PocketBaseDataSource @Inject constructor(
                 record.optString("role").isNotBlank() -> record.optString("role")
                 else                                  -> ""
             }
-            AuthSession(
+
+            val session = AuthSession(
                 userId       = uid,
                 token        = token,
                 email        = email,
@@ -72,6 +83,11 @@ class PocketBaseDataSource @Inject constructor(
                 role         = role,
                 documentPath = access?.documentPath ?: record.optString("documentPath")
             )
+
+            // ── Cache user locally for offline use ────────────────────────────
+            cacheUserLocally(uid, record, access)
+
+            session
         }
 
     override suspend fun logout() = withContext(Dispatchers.IO) { authTokenRef.set("") }
@@ -100,15 +116,14 @@ class PocketBaseDataSource @Inject constructor(
         val res     = http.newCall(Request.Builder()
             .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records")
             .addHeader("Authorization", "Bearer $token").post(body).build()).execute()
-        val resBody = res.body?.string() ?: ""
-        val code    = res.code; res.close()
-        Log.d(tag, "createUser HTTP $code")
+        val body2 = res.body?.string() ?: ""
+        val code  = res.code; res.close()
         if (res.isSuccessful) {
-            val userId = JSONObject(resBody).optString("id")
+            val userId = JSONObject(body2).optString("id")
             if (userId.isNotEmpty()) return@withContext userId
         }
         val msg = try {
-            val j = JSONObject(resBody); val d = j.optJSONObject("data")
+            val j = JSONObject(body2); val d = j.optJSONObject("data")
             if (d != null && d.length() > 0)
                 d.keys().asSequence().joinToString(", ") {
                     "$it: ${d.optJSONObject(it)?.optString("message") ?: "invalid"}"
@@ -127,11 +142,6 @@ class PocketBaseDataSource @Inject constructor(
 
     // ── Active status check ───────────────────────────────────────────────────
 
-    /**
-     * Checks if the current user's account is still active on the server.
-     * Called on every app resume so deactivation from admin side takes effect immediately.
-     * Returns false if account is deactivated — caller should force logout.
-     */
     suspend fun checkIsActive(userId: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val token = getEffectiveToken()
@@ -142,11 +152,11 @@ class PocketBaseDataSource @Inject constructor(
             val body = res.body?.string() ?: ""
             val code = res.code; res.close()
             if (code == 401 || code == 403) return@withContext false
-            if (!res.isSuccessful)          return@withContext true  // network issue — optimistic
+            if (!res.isSuccessful)          return@withContext true
             JSONObject(body).optBoolean("isActive", true)
         } catch (e: Exception) {
             Log.w(tag, "checkIsActive failed: ${e.message}")
-            true  // network error — don't force logout
+            true
         }
     }
 
@@ -169,16 +179,14 @@ class PocketBaseDataSource @Inject constructor(
         } catch (_: Exception) { true }
     }
 
-    // ── Public helper for ViewModels ──────────────────────────────────────────
-
     suspend fun ensureAdminToken() = withContext(Dispatchers.IO) { getAdminToken(); Unit }
 
-    // ── User Profile ──────────────────────────────────────────────────────────
+    // ── User Profile — OFFLINE FIRST ──────────────────────────────────────────
 
     override suspend fun getUserProfile(userId: String): Result<UserProfile> =
         withContext(Dispatchers.IO) {
+            // 1. Try network first
             try {
-                // Always use admin token — user token only allows reading own record
                 val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
                 val res   = http.newCall(Request.Builder()
                     .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
@@ -186,207 +194,74 @@ class PocketBaseDataSource @Inject constructor(
                 val resBody = res.body?.string() ?: ""
                 val code    = res.code; res.close()
 
-                if (code !in 200..299) {
-                    Log.e(tag, "getUserProfile HTTP $code: $resBody")
-                    return@withContext Result.failure(Exception("getUserProfile HTTP $code"))
+                if (code in 200..299) {
+                    val user   = JSONObject(resBody)
+                    val access = fetchAccessControl(userId).getOrNull()
+                    val profile = buildUserProfile(userId, user, access)
+                    // Cache locally
+                    cacheUserLocally(userId, user, access)
+                    Log.d(tag, "getUserProfile ✅ from network")
+                    return@withContext Result.success(profile)
                 }
-
-                val user   = JSONObject(resBody)
-                val access = fetchAccessControl(userId).getOrNull()
-                Log.d(tag, "getUserProfile ✅ name=${user.optString("name")}")
-
-                val profile   = parseJsonFieldSafe(user, "profile")
-                val workStats = parseJsonFieldSafe(user, "workStats")
-                val issues    = parseJsonFieldSafe(user, "issues")
-
-                Result.success(UserProfile(
-                    id                       = userId,
-                    name                     = user.optString("name").ifBlank { access?.name ?: "" },
-                    email                    = user.optString("email").ifBlank { access?.email ?: "" },
-                    role                     = if (access?.role.isNullOrBlank()) user.optString("role") else access!!.role,
-                    companyName              = user.optString("companyName").ifBlank { access?.companyName ?: "" },
-                    sanitizedCompany         = user.optString("sanitizedCompanyName"),
-                    department               = user.optString("department"),
-                    sanitizedDept            = user.optString("sanitizedDepartment"),
-                    designation              = user.optString("designation"),
-                    imageUrl                 = profile["imageUrl"]    ?: "",
-                    phoneNumber              = profile["phoneNumber"] ?: "",
-                    address                  = profile["address"]     ?: "",
-                    employeeId               = profile["employeeId"]  ?: "",
-                    reportingTo              = profile["reportingTo"] ?: "",
-                    salary                   = profile["salary"]?.toDoubleOrNull() ?: 0.0,
-                    experience               = workStats["experience"]?.toIntOrNull()        ?: 0,
-                    completedProjects        = workStats["completedProjects"]?.toIntOrNull() ?: 0,
-                    activeProjects           = workStats["activeProjects"]?.toIntOrNull()    ?: 0,
-                    pendingTasks             = workStats["pendingTasks"]?.toIntOrNull()      ?: 0,
-                    completedTasks           = workStats["completedTasks"]?.toIntOrNull()    ?: 0,
-                    totalComplaints          = issues["totalComplaints"]?.toIntOrNull()      ?: 0,
-                    resolvedComplaints       = issues["resolvedComplaints"]?.toIntOrNull()   ?: 0,
-                    pendingComplaints        = issues["pendingComplaints"]?.toIntOrNull()    ?: 0,
-                    isActive                 = access?.isActive ?: user.optBoolean("isActive", true),
-                    documentPath             = user.optString("documentPath").ifBlank { access?.documentPath ?: "" },
-                    permissions              = parseJsonList(
-                        if (access?.permissions.isNullOrBlank()) user.optString("permissions", "[]")
-                        else access!!.permissions),
-                    emergencyContactName     = profile["emergencyContactName"]     ?: "",
-                    emergencyContactPhone    = profile["emergencyContactPhone"]    ?: "",
-                    emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
-                    needsProfileCompletion   = user.optBoolean("needsProfileCompletion", true)
-                            || user.optString("designation").isBlank()
-                ))
+                Log.w(tag, "getUserProfile HTTP $code — falling back to cache")
             } catch (e: Exception) {
-                Log.e(tag, "getUserProfile failed: ${e.message}", e)
-                Result.failure(e)
+                Log.w(tag, "getUserProfile network failed: ${e.message} — trying cache")
             }
+
+            // 2. Fallback to Room cache (offline)
+            val cached = try { db.userDao().getById(userId) } catch (_: Exception) { null }
+            if (cached != null) {
+                Log.d(tag, "getUserProfile ✅ from Room cache (offline)")
+                return@withContext Result.success(cachedEntityToProfile(cached))
+            }
+
+            Result.failure(Exception("Profile unavailable — server unreachable and no cached data"))
         }
 
-    /**
-     * Merge-safe profile update.
-     *
-     * For nested JSON fields (profile, workStats, issues) we:
-     * 1. Fetch the current record from the server
-     * 2. Merge only the keys present in the incoming [fields] map
-     * 3. Write the merged result back
-     *
-     * This prevents the admin editing designation from wiping out changes
-     * the user made to their address 1 second earlier on their own device.
-     */
-    override suspend fun updateUserProfile(userId: String, fields: Map<String, Any>): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            try {
-                val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
+    // ── Permission-guarded profile update ─────────────────────────────────────
 
-                // Fetch current record for merge
-                val currentRes  = http.newCall(Request.Builder()
-                    .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                    .addHeader("Authorization", "Bearer $token").get().build()).execute()
-                val currentBody = currentRes.body?.string() ?: "{}"
-                currentRes.close()
-                val current     = try { JSONObject(currentBody) } catch (_: Exception) { JSONObject() }
-
-                val merged = JSONObject()
-
-                // Merge nested JSON blob fields
-                listOf("profile", "workStats", "issues").forEach { key ->
-                    if (fields.containsKey(key)) {
-                        val incoming = try {
-                            when (val v = fields[key]) {
-                                is String -> JSONObject(v)
-                                else      -> JSONObject(v.toString())
-                            }
-                        } catch (_: Exception) { JSONObject() }
-
-                        val existing = parseJsonFieldSafe(current, key)
-                            .entries.fold(JSONObject()) { obj, (k, v) ->
-                                obj.put(k, v); obj
-                            }
-
-                        // existing + incoming (incoming wins on conflict)
-                        existing.keys().forEach { k -> merged.put(k, existing.get(k)) }
-                        incoming.keys().forEach { k -> incoming.opt(k)?.let { merged.put(k, it) } }
-
-                        // Reset merged for next key — use separate objects per key
-                    }
-                }
-
-                // Build final patch payload
-                val patch = JSONObject()
-                fields.forEach { (key, value) ->
-                    if (key in listOf("profile", "workStats", "issues")) {
-                        // Re-merge per key
-                        val incoming = try {
-                            when (value) {
-                                is String -> JSONObject(value)
-                                else      -> JSONObject(value.toString())
-                            }
-                        } catch (_: Exception) { JSONObject() }
-                        val existing = parseJsonFieldSafe(current, key)
-                            .entries.fold(JSONObject()) { obj, (k, v) ->
-                                obj.put(k, v); obj
-                            }
-                        // Merge: existing base, incoming overwrites
-                        val mergedField = JSONObject()
-                        existing.keys().forEach { k -> mergedField.put(k, existing.get(k)) }
-                        incoming.keys().forEach { k ->
-                            incoming.opt(k)?.let { mergedField.put(k, it) }
-                        }
-                        patch.put(key, mergedField.toString())
-                    } else {
-                        // Scalar fields — just write directly
-                        when (value) {
-                            is Boolean -> patch.put(key, value)
-                            is Int     -> patch.put(key, value)
-                            is Double  -> patch.put(key, value)
-                            is Long    -> patch.put(key, value)
-                            else       -> patch.put(key, value.toString())
-                        }
-                    }
-                }
-
-                val res = http.newCall(Request.Builder()
-                    .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                    .addHeader("Authorization", "Bearer $token")
-                    .patch(patch.toString().toRequestBody("application/json".toMediaType()))
-                    .build()).execute()
-
-                val resBody = res.body?.string() ?: ""
-                val code    = res.code; res.close()
-
-                if (!res.isSuccessful) {
-                    Log.e(tag, "updateUserProfile HTTP $code: $resBody")
-                    return@withContext Result.failure(Exception("Update failed HTTP $code"))
-                }
-
-                // Also update access_control so role/designation stay in sync
-                syncAccessControl(userId, fields, token)
-
-                Log.d(tag, "updateUserProfile ✅ userId=$userId")
-                Result.success(Unit)
-            } catch (e: Exception) {
-                Log.e(tag, "updateUserProfile failed: ${e.message}", e)
-                Result.failure(e)
-            }
-        }
-
-    /**
-     * Keeps user_access_control in sync when role, designation, isActive,
-     * or department changes. Called automatically after every updateUserProfile.
-     */
-    private fun syncAccessControl(userId: String, fields: Map<String, Any>, token: String) {
-        val syncFields = listOf("role", "designation", "isActive", "department",
-            "sanitizedDepartment", "companyName", "sanitizedCompanyName", "documentPath")
-        val relevantFields = fields.filterKeys { it in syncFields }
-        if (relevantFields.isEmpty()) return
-
+    override suspend fun updateUserProfile(
+        userId: String, fields: Map<String, Any>
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val res = http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
-                        "?filter=(userId='$userId')&perPage=1")
+            val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
+
+            // Fetch current record for merge
+            val currentRes  = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
                 .addHeader("Authorization", "Bearer $token").get().build()).execute()
-            val body = res.body?.string() ?: "{}"; res.close()
-            val acId = JSONObject(body).optJSONArray("items")
-                ?.optJSONObject(0)?.optString("id")
+            val currentBody = currentRes.body?.string() ?: "{}"
+            currentRes.close()
+            val current = try { JSONObject(currentBody) } catch (_: Exception) { JSONObject() }
 
-            if (acId.isNullOrEmpty()) return
+            val patch = buildMergedPatch(current, fields)
 
-            val patch = JSONObject()
-            relevantFields.forEach { (k, v) ->
-                when (v) {
-                    is Boolean -> patch.put(k, v)
-                    is Int     -> patch.put(k, v)
-                    else       -> patch.put(k, v.toString())
-                }
-            }
-
-            http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records/$acId")
+            val res = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
                 .addHeader("Authorization", "Bearer $token")
                 .patch(patch.toString().toRequestBody("application/json".toMediaType()))
-                .build()).execute().close()
+                .build()).execute()
+            val resBody = res.body?.string() ?: ""
+            val code    = res.code; res.close()
 
-            Log.d(tag, "syncAccessControl ✅ acId=$acId")
+            if (!res.isSuccessful) {
+                Log.e(tag, "updateUserProfile HTTP $code: $resBody")
+                return@withContext Result.failure(Exception("Update failed HTTP $code"))
+            }
+
+            syncAccessControl(userId, fields, token)
+
+            // Update local cache
+            val updated = db.userDao().getById(userId)
+            if (updated != null) {
+                db.userDao().upsert(applyFieldsToEntity(updated, fields))
+            }
+
+            Log.d(tag, "updateUserProfile ✅ userId=$userId")
+            Result.success(Unit)
         } catch (e: Exception) {
-            Log.w(tag, "syncAccessControl non-fatal: ${e.message}")
+            Log.e(tag, "updateUserProfile failed: ${e.message}", e)
+            Result.failure(e)
         }
     }
 
@@ -395,10 +270,16 @@ class PocketBaseDataSource @Inject constructor(
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val resolvedToken = getAdminToken()
-            val requestBody   = okhttp3.MultipartBody.Builder()
+            // Determine media type from filename extension
+            val mediaType = when {
+                filename.endsWith(".png",  ignoreCase = true) -> "image/png"
+                filename.endsWith(".webp", ignoreCase = true) -> "image/webp"
+                else                                          -> "image/jpeg"
+            }
+            val requestBody = okhttp3.MultipartBody.Builder()
                 .setType(okhttp3.MultipartBody.FORM)
                 .addFormDataPart("avatar", filename,
-                    bytes.toRequestBody("image/jpeg".toMediaType())).build()
+                    bytes.toRequestBody(mediaType.toMediaType())).build()
             val res     = http.newCall(Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
                 .addHeader("Authorization", "Bearer $resolvedToken")
@@ -410,7 +291,11 @@ class PocketBaseDataSource @Inject constructor(
             val storedFilename = try {
                 JSONObject(resBody).optString("avatar", filename)
             } catch (_: Exception) { filename }
-            Result.success("${AppConfig.BASE_URL}/api/files/$COL_USERS/$userId/$storedFilename")
+            val url = "${AppConfig.BASE_URL}/api/files/$COL_USERS/$userId/$storedFilename"
+            // Update cache with new imageUrl
+            val cached = db.userDao().getById(userId)
+            if (cached != null) db.userDao().upsert(cached.copy(imageUrl = url))
+            Result.success(url)
         } catch (e: Exception) {
             Log.e(tag, "uploadProfileImage failed: ${e.message}")
             Result.failure(e)
@@ -423,11 +308,13 @@ class PocketBaseDataSource @Inject constructor(
         withContext(Dispatchers.IO) {
             var createdUserId: String? = null
             try {
-                val sc = StringUtils.sanitize(request.companyName)
-                val sd = StringUtils.sanitize(request.department)
+                val sc = com.example.ritik_2.core.StringUtils.sanitize(request.companyName)
+                val sd = com.example.ritik_2.core.StringUtils.sanitize(request.department)
+
+                // ── Company duplicate check ───────────────────────────────────
                 if (companyExists(sc))
                     return@withContext Result.failure(
-                        Exception("Company '${request.companyName}' already exists."))
+                        Exception("COMPANY_EXISTS:${request.companyName}"))
 
                 val adminToken = getAdminToken()
                 val userId     = createUser(request.email, request.password, request.name, adminToken)
@@ -499,6 +386,23 @@ class PocketBaseDataSource @Inject constructor(
                         put("documentPath", documentPath)
                     }.toString())
 
+                // Cache locally after registration
+                db.userDao().upsert(UserEntity(
+                    id                   = userId,
+                    name                 = request.name,
+                    email                = request.email,
+                    role                 = request.role,
+                    companyName          = request.companyName,
+                    sanitizedCompanyName = sc,
+                    department           = request.department,
+                    sanitizedDepartment  = sd,
+                    designation          = request.designation,
+                    imageUrl             = imageUrl,
+                    isActive             = true,
+                    documentPath         = documentPath,
+                    needsProfileCompletion = true
+                ))
+
                 Log.d(tag, "registerUser ✅ userId=$userId")
                 Result.success(userId)
             } catch (e: Exception) {
@@ -520,6 +424,30 @@ class PocketBaseDataSource @Inject constructor(
                 val body = res.body?.string() ?: ""; res.close()
                 JSONObject(body).optInt("totalItems", 0) > 0
             } catch (_: Exception) { false }
+        }
+
+    /**
+     * Returns a list of existing companies whose sanitized names are similar
+     * to [sanitizedName]. Used for duplicate/merge warnings.
+     */
+    suspend fun findSimilarCompanies(sanitizedName: String): List<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val res  = http.newCall(Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records?perPage=200")
+                    .get().build()).execute()
+                val body = res.body?.string() ?: ""; res.close()
+                val items = JSONObject(body).optJSONArray("items") ?: return@withContext emptyList()
+                (0 until items.length())
+                    .map { items.getJSONObject(it) }
+                    .filter { obj ->
+                        val sc = obj.optString("sanitizedName")
+                        sc == sanitizedName ||
+                                sc.replace("_","").equals(
+                                    sanitizedName.replace("_",""), ignoreCase = true)
+                    }
+                    .map { it.optString("originalName") }
+            } catch (_: Exception) { emptyList() }
         }
 
     private fun upsertCompany(sc: String, companyName: String, role: String,
@@ -604,6 +532,217 @@ class PocketBaseDataSource @Inject constructor(
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
+    private fun buildUserProfile(
+        userId: String,
+        user  : JSONObject,
+        access: AccessControlRecord?
+    ): UserProfile {
+        val profile   = parseJsonFieldSafe(user, "profile")
+        val workStats = parseJsonFieldSafe(user, "workStats")
+        val issues    = parseJsonFieldSafe(user, "issues")
+        return UserProfile(
+            id                       = userId,
+            name                     = user.optString("name").ifBlank { access?.name ?: "" },
+            email                    = user.optString("email").ifBlank { access?.email ?: "" },
+            role                     = if (access?.role.isNullOrBlank()) user.optString("role") else access!!.role,
+            companyName              = user.optString("companyName").ifBlank { access?.companyName ?: "" },
+            sanitizedCompany         = user.optString("sanitizedCompanyName"),
+            department               = user.optString("department"),
+            sanitizedDept            = user.optString("sanitizedDepartment"),
+            designation              = user.optString("designation"),
+            imageUrl                 = profile["imageUrl"]    ?: "",
+            phoneNumber              = profile["phoneNumber"] ?: "",
+            address                  = profile["address"]     ?: "",
+            employeeId               = profile["employeeId"]  ?: "",
+            reportingTo              = profile["reportingTo"] ?: "",
+            salary                   = profile["salary"]?.toDoubleOrNull() ?: 0.0,
+            experience               = workStats["experience"]?.toIntOrNull()        ?: 0,
+            completedProjects        = workStats["completedProjects"]?.toIntOrNull() ?: 0,
+            activeProjects           = workStats["activeProjects"]?.toIntOrNull()    ?: 0,
+            pendingTasks             = workStats["pendingTasks"]?.toIntOrNull()      ?: 0,
+            completedTasks           = workStats["completedTasks"]?.toIntOrNull()    ?: 0,
+            totalComplaints          = issues["totalComplaints"]?.toIntOrNull()      ?: 0,
+            resolvedComplaints       = issues["resolvedComplaints"]?.toIntOrNull()   ?: 0,
+            pendingComplaints        = issues["pendingComplaints"]?.toIntOrNull()    ?: 0,
+            isActive                 = access?.isActive ?: user.optBoolean("isActive", true),
+            documentPath             = user.optString("documentPath").ifBlank { access?.documentPath ?: "" },
+            permissions              = parseJsonList(
+                if (access?.permissions.isNullOrBlank()) user.optString("permissions", "[]")
+                else access!!.permissions),
+            emergencyContactName     = profile["emergencyContactName"]     ?: "",
+            emergencyContactPhone    = profile["emergencyContactPhone"]    ?: "",
+            emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
+            needsProfileCompletion   = user.optBoolean("needsProfileCompletion", true)
+                    || user.optString("designation").isBlank()
+        )
+    }
+
+    private fun cachedEntityToProfile(u: UserEntity) = UserProfile(
+        id                       = u.id,
+        name                     = u.name,
+        email                    = u.email,
+        role                     = u.role,
+        companyName              = u.companyName,
+        sanitizedCompany         = u.sanitizedCompanyName,
+        department               = u.department,
+        sanitizedDept            = u.sanitizedDepartment,
+        designation              = u.designation,
+        imageUrl                 = u.imageUrl,
+        phoneNumber              = u.phoneNumber,
+        address                  = u.address,
+        employeeId               = u.employeeId,
+        reportingTo              = u.reportingTo,
+        salary                   = u.salary,
+        experience               = u.experience,
+        completedProjects        = u.completedProjects,
+        activeProjects           = u.activeProjects,
+        pendingTasks             = u.pendingTasks,
+        completedTasks           = u.completedTasks,
+        totalComplaints          = u.totalComplaints,
+        resolvedComplaints       = u.resolvedComplaints,
+        pendingComplaints        = u.pendingComplaints,
+        isActive                 = u.isActive,
+        documentPath             = u.documentPath,
+        permissions              = u.permissions,
+        emergencyContactName     = u.emergencyContactName,
+        emergencyContactPhone    = u.emergencyContactPhone,
+        emergencyContactRelation = u.emergencyContactRelation,
+        needsProfileCompletion   = u.needsProfileCompletion
+    )
+
+    private fun cacheUserLocally(userId: String, record: JSONObject, access: AccessControlRecord?) {
+        try {
+            val profile   = parseJsonFieldSafe(record, "profile")
+            val workStats = parseJsonFieldSafe(record, "workStats")
+            val issues    = parseJsonFieldSafe(record, "issues")
+            val entity = UserEntity(
+                id                       = userId,
+                name                     = record.optString("name").ifBlank { access?.name ?: "" },
+                email                    = record.optString("email").ifBlank { access?.email ?: "" },
+                role                     = access?.role?.ifBlank { record.optString("role") } ?: record.optString("role"),
+                companyName              = record.optString("companyName"),
+                sanitizedCompanyName     = record.optString("sanitizedCompanyName"),
+                department               = record.optString("department"),
+                sanitizedDepartment      = record.optString("sanitizedDepartment"),
+                designation              = record.optString("designation"),
+                imageUrl                 = profile["imageUrl"]    ?: "",
+                phoneNumber              = profile["phoneNumber"] ?: "",
+                address                  = profile["address"]     ?: "",
+                employeeId               = profile["employeeId"]  ?: "",
+                reportingTo              = profile["reportingTo"] ?: "",
+                salary                   = profile["salary"]?.toDoubleOrNull() ?: 0.0,
+                experience               = workStats["experience"]?.toIntOrNull()        ?: 0,
+                completedProjects        = workStats["completedProjects"]?.toIntOrNull() ?: 0,
+                activeProjects           = workStats["activeProjects"]?.toIntOrNull()    ?: 0,
+                pendingTasks             = workStats["pendingTasks"]?.toIntOrNull()      ?: 0,
+                completedTasks           = workStats["completedTasks"]?.toIntOrNull()    ?: 0,
+                totalComplaints          = issues["totalComplaints"]?.toIntOrNull()      ?: 0,
+                resolvedComplaints       = issues["resolvedComplaints"]?.toIntOrNull()   ?: 0,
+                pendingComplaints        = issues["pendingComplaints"]?.toIntOrNull()    ?: 0,
+                isActive                 = access?.isActive ?: record.optBoolean("isActive", true),
+                documentPath             = record.optString("documentPath").ifBlank { access?.documentPath ?: "" },
+                permissions              = parseJsonList(
+                    if (access?.permissions.isNullOrBlank()) record.optString("permissions", "[]")
+                    else access!!.permissions),
+                emergencyContactName     = profile["emergencyContactName"]     ?: "",
+                emergencyContactPhone    = profile["emergencyContactPhone"]    ?: "",
+                emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
+                needsProfileCompletion   = record.optBoolean("needsProfileCompletion", true)
+            )
+            // Must run in a coroutine context but we call this from withContext(IO) blocks
+            kotlinx.coroutines.runBlocking { db.userDao().upsert(entity) }
+        } catch (e: Exception) {
+            Log.w(tag, "cacheUserLocally failed: ${e.message}")
+        }
+    }
+
+    private fun applyFieldsToEntity(entity: UserEntity, fields: Map<String, Any>): UserEntity {
+        var e = entity
+        fields.forEach { (k, v) ->
+            when (k) {
+                "role"        -> e = e.copy(role        = v.toString())
+                "designation" -> e = e.copy(designation = v.toString())
+                "department"  -> e = e.copy(department  = v.toString())
+                "companyName" -> e = e.copy(companyName = v.toString())
+                "isActive"    -> e = e.copy(isActive    = v.toString().toBooleanStrictOrNull() ?: e.isActive)
+                "profile" -> {
+                    val pj = try { JSONObject(v.toString()) } catch (_: Exception) { return@forEach }
+                    if (pj.has("imageUrl"))    e = e.copy(imageUrl    = pj.optString("imageUrl",    e.imageUrl))
+                    if (pj.has("phoneNumber")) e = e.copy(phoneNumber = pj.optString("phoneNumber", e.phoneNumber))
+                    if (pj.has("address"))     e = e.copy(address     = pj.optString("address",     e.address))
+                    if (pj.has("salary"))      e = e.copy(salary      = pj.optDouble("salary",      e.salary))
+                }
+                "workStats" -> {
+                    val wj = try { JSONObject(v.toString()) } catch (_: Exception) { return@forEach }
+                    if (wj.has("experience")) e = e.copy(experience = wj.optInt("experience", e.experience))
+                }
+            }
+        }
+        return e
+    }
+
+    private fun buildMergedPatch(current: JSONObject, fields: Map<String, Any>): JSONObject {
+        val patch = JSONObject()
+        fields.forEach { (key, value) ->
+            if (key in listOf("profile", "workStats", "issues")) {
+                val incoming = try {
+                    when (value) {
+                        is String -> JSONObject(value)
+                        else      -> JSONObject(value.toString())
+                    }
+                } catch (_: Exception) { JSONObject() }
+                val existing = parseJsonFieldSafe(current, key)
+                    .entries.fold(JSONObject()) { obj, (k, v) -> obj.put(k, v); obj }
+                val mergedField = JSONObject()
+                existing.keys().forEach { k -> mergedField.put(k, existing.get(k)) }
+                incoming.keys().forEach { k -> incoming.opt(k)?.let { mergedField.put(k, it) } }
+                patch.put(key, mergedField.toString())
+            } else {
+                when (value) {
+                    is Boolean -> patch.put(key, value)
+                    is Int     -> patch.put(key, value)
+                    is Double  -> patch.put(key, value)
+                    is Long    -> patch.put(key, value)
+                    else       -> patch.put(key, value.toString())
+                }
+            }
+        }
+        return patch
+    }
+
+    private fun syncAccessControl(userId: String, fields: Map<String, Any>, token: String) {
+        val syncFields = listOf("role", "designation", "isActive", "department",
+            "sanitizedDepartment", "companyName", "sanitizedCompanyName", "documentPath")
+        val relevantFields = fields.filterKeys { it in syncFields }
+        if (relevantFields.isEmpty()) return
+        try {
+            val res = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
+                        "?filter=(userId='$userId')&perPage=1")
+                .addHeader("Authorization", "Bearer $token").get().build()).execute()
+            val body = res.body?.string() ?: "{}"; res.close()
+            val acId = JSONObject(body).optJSONArray("items")
+                ?.optJSONObject(0)?.optString("id")
+            if (acId.isNullOrEmpty()) return
+            val patch = JSONObject()
+            relevantFields.forEach { (k, v) ->
+                when (v) {
+                    is Boolean -> patch.put(k, v)
+                    is Int     -> patch.put(k, v)
+                    else       -> patch.put(k, v.toString())
+                }
+            }
+            http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records/$acId")
+                .addHeader("Authorization", "Bearer $token")
+                .patch(patch.toString().toRequestBody("application/json".toMediaType()))
+                .build()).execute().close()
+            Log.d(tag, "syncAccessControl ✅ acId=$acId")
+        } catch (e: Exception) {
+            Log.w(tag, "syncAccessControl non-fatal: ${e.message}")
+        }
+    }
+
     private fun authWithPassword(email: String, password: String): Pair<Int, String> {
         listOf(
             "${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-password",
@@ -623,7 +762,6 @@ class PocketBaseDataSource @Inject constructor(
     private fun getEffectiveToken(): String {
         val t = authTokenRef.get()
         if (t.isNotBlank()) return t
-        Log.w(tag, "getEffectiveToken: user token empty, falling back to admin")
         return try { getAdminToken() } catch (e: Exception) {
             Log.e(tag, "getEffectiveToken: admin fallback failed: ${e.message}"); ""
         }
@@ -650,7 +788,6 @@ class PocketBaseDataSource @Inject constructor(
                     if (t.isNotEmpty()) {
                         cachedAdminToken    = t
                         adminTokenFetchedAt = now
-                        Log.d(tag, "getAdminToken ✅ cached")
                         return t
                     }
                 }
@@ -673,35 +810,21 @@ class PocketBaseDataSource @Inject constructor(
         } catch (_: Exception) { emptyMap() }
     }
 
-    // Replace the existing fetchAccessControl function with this one.
-    // Uses admin token instead of user token — user token only satisfies
-    // viewRule "@request.auth.id != ''" for the user's OWN record, not
-    // for filtering by userId field on a base collection in release builds.
-
     private suspend fun fetchAccessControl(userId: String): Result<AccessControlRecord> =
         withContext(Dispatchers.IO) {
             try {
-                // Always use admin token for access control reads —
-                // guarantees no 403 regardless of collection rules
                 val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
-
                 val res  = http.newCall(Request.Builder()
                     .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
                             "?filter=userId%3D%27$userId%27&perPage=1")
-                    .addHeader("Authorization", "Bearer $token")
-                    .get().build()).execute()
+                    .addHeader("Authorization", "Bearer $token").get().build()).execute()
                 val body = res.body?.string() ?: ""
                 val code = res.code; res.close()
-
-                if (code !in 200..299) {
-                    Log.e(tag, "fetchAccessControl HTTP $code")
+                if (code !in 200..299)
                     return@withContext Result.failure(Exception("fetchAccessControl HTTP $code"))
-                }
                 val json = JSONObject(body)
-                if (json.optInt("totalItems", 0) == 0) {
-                    Log.w(tag, "fetchAccessControl: no record for userId=$userId")
+                if (json.optInt("totalItems", 0) == 0)
                     return@withContext Result.failure(Exception("No access control for $userId"))
-                }
                 val item   = json.getJSONArray("items").getJSONObject(0)
                 val record = AccessControlRecord(
                     userId               = item.optString("userId"),
@@ -718,10 +841,10 @@ class PocketBaseDataSource @Inject constructor(
                 )
                 Result.success(record.apply { recordId = item.optString("id") })
             } catch (e: Exception) {
-                Log.e(tag, "fetchAccessControl failed: ${e.message}")
                 Result.failure(e)
             }
         }
+
     private fun httpPost(url: String, token: String = getEffectiveToken(), body: String) {
         val res     = http.newCall(Request.Builder().url(url)
             .addHeader("Authorization", "Bearer $token")

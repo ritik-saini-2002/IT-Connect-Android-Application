@@ -8,11 +8,12 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.*
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.administrator.manageuser.ManageUserActivity
 import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -26,21 +27,26 @@ class ProfileCompletionActivity : ComponentActivity() {
 
     @Inject lateinit var authRepository: AuthRepository
 
-    private val imagePicker = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? -> uri?.let { viewModel.setSelectedImage(it) } }
+    // ── Image picker restricted to JPEG / PNG / WebP ──────────────────────────
+    // The URI is forwarded into Compose state via a MutableState bridge.
+    private val _pickedUri  = mutableStateOf<Uri?>(null)
+    private val _showCrop   = mutableStateOf(false)
+
+    private val imageLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            _pickedUri.value = uri
+            _showCrop.value  = true
+        }
+    }
 
     companion object {
         private const val EXTRA_USER_ID        = "user_id"
         private const val EXTRA_EDIT_MODE      = "edit_mode"
-        private const val EXTRA_TARGET_ROLE    = "target_role"   // role of the user being edited
-        private const val EXTRA_EDITOR_ROLE    = "editor_role"   // role of the person doing the edit
+        private const val EXTRA_TARGET_ROLE    = "target_role"
+        private const val EXTRA_EDITOR_ROLE    = "editor_role"
 
-        /**
-         * Use this when an admin/manager/HR opens someone else's profile.
-         * [targetUserRole] = role of the user being edited (e.g. "Employee")
-         * [editorRole]     = role of the logged-in user doing the edit
-         */
         fun createIntent(
             context        : Context,
             userId         : String,
@@ -68,28 +74,23 @@ class ProfileCompletionActivity : ComponentActivity() {
             finish(); return
         }
 
-        // Determine actual editor role:
-        // prefer the intent argument (set by ManageUserActivity),
-        // fall back to session (when the user opens their own profile)
-        val sessionRole  = authRepository.getSession()?.role ?: ""
-        val sessionId    = authRepository.getSession()?.userId ?: ""
-        val editorRole   = editorRoleArg.ifBlank { sessionRole }
+        val session     = authRepository.getSession()
+        val sessionRole = session?.role  ?: ""
+        val sessionId   = session?.userId ?: ""
+        val isDbAdmin   = authRepository.isDbAdmin()
+        val editorRole  = editorRoleArg.ifBlank { sessionRole }
 
-        // Permission matrix:
-        // Administrator → can edit anyone
-        // Manager / HR  → can edit Employee, Intern, Team Lead
-        // Others        → can only edit their own profile
-        val canEdit = canEditorModifyTarget(
+        val canEdit = PermissionGuard.canEditProfile(
             editorRole = editorRole,
             targetRole = targetRole,
             editorId   = sessionId,
-            targetId   = userId
+            targetId   = userId,
+            isDbAdmin  = isDbAdmin
         )
 
-        // isAdmin flag controls which fields are shown as editable in the screen
-        // Admins see all fields editable; managers/HR see a restricted set
-        val isAdmin      = editorRole == "Administrator"
-        val isManager    = editorRole in setOf("Manager", "HR")
+        val isAdmin      = editorRole == "Administrator" || isDbAdmin
+        val isManager    = editorRole in setOf("Manager", "HR") &&
+                targetRole in setOf("Employee", "Intern", "Team Lead")
         val editingOther = sessionId != userId
 
         if (isEditMode && editingOther && !canEdit) {
@@ -103,21 +104,37 @@ class ProfileCompletionActivity : ComponentActivity() {
 
         setContent {
             ITConnectTheme {
+                // Read activity-level state bridges into Compose state
+                val pickedUri by _pickedUri
+                val showCrop  by _showCrop
+
+                // Show crop dialog when a valid URI has been picked
+                if (showCrop && pickedUri != null) {
+                    ImageCropDialog(
+                        sourceUri = pickedUri!!,
+                        onCropped = { bytes, filename ->
+                            viewModel.setSelectedImageBytes(bytes, filename)
+                            _showCrop.value  = false
+                            _pickedUri.value = null
+                        },
+                        onDismiss = {
+                            _showCrop.value  = false
+                            _pickedUri.value = null
+                        }
+                    )
+                }
+
                 ProfileCompletionScreen(
                     viewModel        = viewModel,
-                    onImagePickClick = { imagePicker.launch("image/*") },
+                    onImagePickClick = {
+                        // Launch picker with allowed MIME types only
+                        imageLauncher.launch(ELIGIBLE_IMAGE_MIME_TYPES)
+                    },
                     onSaveProfile    = { data ->
-                        val imageBytes = viewModel.uiState.value.selectedImageUri?.let { uri ->
-                            runCatching {
-                                contentResolver.openInputStream(uri)?.readBytes()
-                            }.getOrNull()
-                        }
-                        // Admins can change everything
-                        // Managers/HR can change a limited set (handled in ViewModel)
                         viewModel.saveProfile(
                             userId     = userId,
                             data       = data,
-                            imageBytes = imageBytes,
+                            imageBytes = viewModel.uiState.value.pendingImageBytes,
                             isAdmin    = isAdmin,
                             isManager  = isManager && editingOther
                         )
@@ -157,28 +174,6 @@ class ProfileCompletionActivity : ComponentActivity() {
                     }
                 }
             }
-        }
-    }
-
-    /**
-     * Returns true if [editorRole] is allowed to edit a user with [targetRole].
-     *
-     * Rules:
-     * - Administrator  → edit anyone
-     * - Manager / HR   → edit Employee, Intern, Team Lead (not other Managers/HR/Admin)
-     * - Anyone         → edit their own profile (editorId == targetId)
-     */
-    private fun canEditorModifyTarget(
-        editorRole: String,
-        targetRole: String,
-        editorId  : String,
-        targetId  : String
-    ): Boolean {
-        if (editorId == targetId) return true   // always can edit own profile
-        return when (editorRole) {
-            "Administrator" -> true
-            "Manager", "HR" -> targetRole in setOf("Employee", "Intern", "Team Lead")
-            else            -> false
         }
     }
 }

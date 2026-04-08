@@ -23,6 +23,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.administrator.AdministratorPanelActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.auth.SessionStatus
+import com.example.ritik_2.chat.ChatActivity
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.login.LoginActivity
@@ -108,7 +109,8 @@ class MainActivity : ComponentActivity() {
             4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
             5 -> startActivity(Intent(this, MACNetActivity::class.java))
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
-            7 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
+            7 -> startActivity(Intent(this, ChatActivity::class.java))
+            //7 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             8 -> {
                 val userId = authRepository.getSession()?.userId ?: return
                 startActivity(Intent(this, ContactActivity::class.java).apply {

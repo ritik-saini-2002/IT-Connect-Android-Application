@@ -15,6 +15,8 @@ data class ProfileCompletionUiState(
     val isLoading        : Boolean      = false,
     val userProfile      : UserProfile? = null,
     val selectedImageUri : Uri?         = null,
+    val pendingImageBytes: ByteArray?   = null,   // ← set after crop
+    val pendingImageName : String       = "",      // ← filename for upload
     val error            : String?      = null,
     val isSaved          : Boolean      = false,
     val isEditMode       : Boolean      = false,
@@ -52,8 +54,6 @@ class ProfileCompletionViewModel @Inject constructor(
     fun loadUser(userId: String, isEditMode: Boolean = false) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, isEditMode = isEditMode) }
-            // When editing another user (isEditMode = true), the current user's token
-            // may not have access to that record. Ensure admin token is active first.
             if (isEditMode) {
                 try { pbDataSource.ensureAdminToken() } catch (_: Exception) {}
             }
@@ -73,18 +73,26 @@ class ProfileCompletionViewModel @Inject constructor(
         }
     }
 
+    /** Called when the user picks an image URI (before crop) */
     fun setSelectedImage(uri: Uri) = _uiState.update { it.copy(selectedImageUri = uri) }
-    fun clearError()               = _uiState.update { it.copy(error = null) }
-    fun toggleEditing()            = _uiState.update { it.copy(isEditing = !it.isEditing) }
-    fun setEditing(v: Boolean)     = _uiState.update { it.copy(isEditing = v) }
+
+    /** Called after the crop dialog produces final bytes */
+    fun setSelectedImageBytes(bytes: ByteArray, filename: String) {
+        _uiState.update { it.copy(pendingImageBytes = bytes, pendingImageName = filename) }
+    }
+
+    fun clearError()           = _uiState.update { it.copy(error = null) }
+    fun toggleEditing()        = _uiState.update { it.copy(isEditing = !it.isEditing) }
+    fun setEditing(v: Boolean) = _uiState.update { it.copy(isEditing = v) }
 
     /**
      * Save the profile.
      *
-     * [isAdmin]   = current user is Administrator  → can edit all fields
-     * [isManager] = current user is Manager or HR  → can edit a restricted set
-     *               (designation, department, experience, emergency contact, address)
-     *               but NOT role, companyName, salary, employeeId, reportingTo
+     * [isAdmin]   = current user is Administrator or DB admin
+     * [isManager] = current user is Manager or HR editing a permitted target
+     *
+     * The function respects PermissionGuard field sets — fields not in the
+     * allowed set are silently dropped rather than overwriting server data.
      */
     fun saveProfile(
         userId    : String,
@@ -96,9 +104,14 @@ class ProfileCompletionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
+            // ── Upload image if we have pending bytes ─────────────────────────
             var imageUrl = data.existingImageUrl
-            if (imageBytes != null) {
-                dataSource.uploadProfileImage(userId, imageBytes, "profile_$userId.jpg", "")
+            val bytes    = imageBytes ?: _uiState.value.pendingImageBytes
+            val fname    = _uiState.value.pendingImageName.ifBlank {
+                "profile_$userId.jpg"
+            }
+            if (bytes != null) {
+                dataSource.uploadProfileImage(userId, bytes, fname, "")
                     .onSuccess { url -> imageUrl = url }
                     .onFailure { e ->
                         android.util.Log.w("ProfileVM", "Image upload failed: ${e.message}")
@@ -107,19 +120,18 @@ class ProfileCompletionViewModel @Inject constructor(
 
             val existing = _uiState.value.userProfile
 
+            // ── Build profile JSON (merge-safe) ───────────────────────────────
             val profileJson = JSONObject().apply {
                 put("imageUrl",    imageUrl)
                 put("address",     data.address)
                 put("emergencyContactName",     data.emergencyContactName)
                 put("emergencyContactPhone",    data.emergencyContactPhone)
                 put("emergencyContactRelation", data.emergencyContactRelation)
-                // phone: admin sets it freely; manager can't change it; user can change own
                 put("phoneNumber", when {
                     isAdmin   -> data.phoneNumber
-                    isManager -> existing?.phoneNumber ?: ""  // manager cannot change phone
-                    else      -> data.phoneNumber              // own profile
+                    isManager -> existing?.phoneNumber ?: ""
+                    else      -> data.phoneNumber
                 })
-                // employeeId / reportingTo / salary — admin only
                 put("employeeId",  if (isAdmin) data.employeeId  else existing?.employeeId  ?: "")
                 put("reportingTo", if (isAdmin) data.reportingTo else existing?.reportingTo ?: "")
                 put("salary",      if (isAdmin) data.salary       else existing?.salary      ?: 0.0)
@@ -141,9 +153,9 @@ class ProfileCompletionViewModel @Inject constructor(
                 "needsProfileCompletion" to false
             )
 
+            // ── Apply role-specific field permissions ─────────────────────────
             when {
                 isAdmin -> {
-                    // Administrator can change everything
                     if (data.name.isNotBlank())        fields["name"]        = data.name
                     if (data.designation.isNotBlank()) fields["designation"] = data.designation
                     if (data.role.isNotBlank())        fields["role"]        = data.role
@@ -151,16 +163,25 @@ class ProfileCompletionViewModel @Inject constructor(
                     if (data.companyName.isNotBlank()) fields["companyName"] = data.companyName
                 }
                 isManager -> {
-                    // Manager / HR can change designation and department only
-                    // (role, company, salary, employeeId, reportingTo stay locked)
+                    // Manager/HR: designation + department only
+                    // CANNOT change role from profile screen — use RoleManagement
                     if (data.designation.isNotBlank()) fields["designation"] = data.designation
                     if (data.department.isNotBlank())  fields["department"]  = data.department
                 }
-                // Regular user editing their own profile — no extra fields
+                // Regular user — no extra fields beyond what's in profileJson/workJson
             }
 
             dataSource.updateUserProfile(userId, fields)
-                .onSuccess { _uiState.update { it.copy(isLoading = false, isSaved = true) } }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isLoading         = false,
+                            isSaved           = true,
+                            pendingImageBytes = null,
+                            pendingImageName  = ""
+                        )
+                    }
+                }
                 .onFailure { e ->
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }

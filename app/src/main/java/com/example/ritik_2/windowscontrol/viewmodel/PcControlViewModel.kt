@@ -631,13 +631,8 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (horizontal) {
-                    api.executeQuickStep(
-                        PcStep(
-                            type  = "SYSTEM_CMD",
-                            value = "SCROLL_H",
-                            args  = listOf(amount.toString())
-                        )
-                    )
+                    // Agent v9 scroll endpoint supports horizontal flag natively
+                    input.scrollMouse(amount, horizontal = true)
                 } else {
                     input.scrollMouse(amount)
                 }
