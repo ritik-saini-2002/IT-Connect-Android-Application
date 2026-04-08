@@ -178,10 +178,21 @@ sealed class ServerConnectEvent {
 private const val PREFS_NAME        = "winshare_prefs"
 private const val KEY_SAVED_SERVERS = "saved_servers"
 
-// 🚀 SPEED FIX #1: Increased from 64KB → 4MB for maximum SMB throughput.
-// A larger buffer means fewer read/write syscalls per second, which is the
-// single biggest win for high-speed LAN transfers.
-private const val TRANSFER_BUFFER = 4 * 1024 * 1024  // 4 MB
+// READ buffer: how much we pull from the source (local file / ContentResolver) at once.
+// Large value = fewer ContentResolver/filesystem calls = fast reads.
+private const val READ_BUFFER = 4 * 1024 * 1024       // 4 MB — local read-ahead
+
+// WRITE chunk: the maximum bytes sent in a SINGLE SMB2_WRITE command.
+// The SMB server advertises its own MaxWriteSize (usually 65536 for older servers,
+// up to 8MB for modern SMB3 servers). Exceeding it causes:
+//   SmbException: Request size XXXXXX exceeds allowable size 65536
+// We stay safely under 64KB so ANY server accepts it. For SMB3 servers that support
+// larger writes, jCIFS-ng will automatically negotiate a higher limit and you can
+// raise this — but 60KB works universally without crashing.
+private const val SMB_WRITE_CHUNK = 60 * 1024         // 60 KB — safe for all SMB servers
+
+// Alias used for download (reading FROM smb into local file — not constrained by server write limit)
+private const val TRANSFER_BUFFER = READ_BUFFER
 
 // ─── ViewModel ──────────────────────────────────────────────────────────────
 
@@ -523,43 +534,59 @@ class ServerConnectModule : ViewModel() {
                     var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
                     val speedWindow = ArrayDeque<Pair<Long, Long>>()
 
-                    // 🚀 SPEED FIX #6: Wrap both streams in BufferedInputStream/BufferedOutputStream.
-                    // This adds an OS-level read-ahead buffer on the content resolver stream and
-                    // a write-behind buffer on the SMB output stream, dramatically reducing the
-                    // number of times the kernel has to context-switch for I/O operations.
+                    // UPLOAD STRATEGY:
+                    // ┌─────────────────────────────────────────────────────────────────┐
+                    // │  READ  large chunks (4MB) from ContentResolver for speed        │
+                    // │  WRITE small chunks (60KB) to SMB to stay within MaxWriteSize   │
+                    // │                                                                  │
+                    // │  The SMB server caps each SMB2_WRITE command at its negotiated  │
+                    // │  MaxWriteSize (often 65536 for older servers). Writing more than │
+                    // │  that in one call causes:                                        │
+                    // │    SmbException: Request size XXXXX exceeds allowable size 65536 │
+                    // │  So we read a big chunk into a local buffer, then loop-write it  │
+                    // │  to SMB in SMB_WRITE_CHUNK sized pieces. This gives us both      │
+                    // │  fast local reads AND protocol-compliant SMB writes.             │
+                    // └─────────────────────────────────────────────────────────────────┘
                     cr.openInputStream(uri)?.let { rawInput ->
-                        BufferedInputStream(rawInput, TRANSFER_BUFFER).use { input ->
-                            BufferedOutputStream(smbFile.outputStream, TRANSFER_BUFFER).use { output ->
-                                val buf = ByteArray(TRANSFER_BUFFER)
-                                var bytes = input.read(buf)
-                                while (bytes != -1 && isActive) {
-                                    output.write(buf, 0, bytes)
-                                    transferred += bytes
-                                    val now = System.currentTimeMillis()
-                                    val elapsed = now - lastTime
-                                    speedWindow.addLast(now to transferred)
-                                    while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
-                                    if (elapsed >= 300) {
-                                        val winSpeed = if (speedWindow.size >= 2) {
-                                            val d = speedWindow.last().first - speedWindow.first().first
-                                            if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L
-                                        } else 0L
-                                        val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                        val tot = now - startTime
-                                        val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                        if (cur > peakSpeed) peakSpeed = cur
-                                        lastTime = now; lastBytes = transferred
-                                        _uiState.update {
-                                            it.copy(transferStats = TransferStats(
-                                                fileName = fileName, totalBytes = fileSize, transferredBytes = transferred,
-                                                currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur),
-                                                peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg,
-                                                elapsedMs = tot, isUpload = true))
+                        BufferedInputStream(rawInput, READ_BUFFER).use { input ->
+                            smbFile.outputStream.use { smbOut ->
+                                val readBuf = ByteArray(READ_BUFFER)
+                                var readBytes = input.read(readBuf)
+                                while (readBytes != -1 && isActive) {
+                                    // Write the chunk we just read to SMB in SMB_WRITE_CHUNK pieces
+                                    var writeOffset = 0
+                                    while (writeOffset < readBytes && isActive) {
+                                        val writeLen = minOf(SMB_WRITE_CHUNK, readBytes - writeOffset)
+                                        smbOut.write(readBuf, writeOffset, writeLen)
+                                        writeOffset += writeLen
+                                        transferred += writeLen
+
+                                        val now = System.currentTimeMillis()
+                                        val elapsed = now - lastTime
+                                        speedWindow.addLast(now to transferred)
+                                        while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
+                                        if (elapsed >= 300) {
+                                            val winSpeed = if (speedWindow.size >= 2) {
+                                                val d = speedWindow.last().first - speedWindow.first().first
+                                                if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L
+                                            } else 0L
+                                            val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
+                                            val tot = now - startTime
+                                            val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                            if (cur > peakSpeed) peakSpeed = cur
+                                            lastTime = now; lastBytes = transferred
+                                            _uiState.update {
+                                                it.copy(transferStats = TransferStats(
+                                                    fileName = fileName, totalBytes = fileSize, transferredBytes = transferred,
+                                                    currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur),
+                                                    peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg,
+                                                    elapsedMs = tot, isUpload = true))
+                                            }
                                         }
                                     }
-                                    bytes = input.read(buf)
+                                    readBytes = input.read(readBuf)
                                 }
-                                output.flush()
+                                smbOut.flush()
                             }
                         }
                     }
