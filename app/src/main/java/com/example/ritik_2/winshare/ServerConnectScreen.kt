@@ -55,18 +55,18 @@ fun ServerConnectScreen(
     // ── System navigation / status bar sync ─────────────────────────────────
     val view = LocalView.current
     val colorScheme = MaterialTheme.colorScheme
-    SideEffect {
-        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        val ctrl = WindowInsetsControllerCompat(window, view)
-        // Hide both bars — same as PC-control activities
-        ctrl.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-        ctrl.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        // Transparent bars
-        window.statusBarColor     = android.graphics.Color.TRANSPARENT
-        window.navigationBarColor = android.graphics.Color.TRANSPARENT
-    }
+//    SideEffect {
+//        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+//        WindowCompat.setDecorFitsSystemWindows(window, false)
+//        val ctrl = WindowInsetsControllerCompat(window, view)
+//        // Hide both bars — same as PC-control activities
+//        ctrl.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+//        ctrl.systemBarsBehavior =
+//            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+//        // Transparent bars
+//        window.statusBarColor     = android.graphics.Color.TRANSPARENT
+//        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+//    }
 
     LaunchedEffect(Unit) { viewModel.loadSavedServers(context) }
 

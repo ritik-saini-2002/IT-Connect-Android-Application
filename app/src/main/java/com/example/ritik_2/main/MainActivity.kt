@@ -24,12 +24,13 @@ import com.example.ritik_2.administrator.AdministratorPanelActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.auth.SessionStatus
 import com.example.ritik_2.chat.ChatActivity
+import com.example.ritik_2.chat.ChatNotificationService
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.core.ConnectivityMonitor
+import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.macnet.MACNetActivity
 import com.example.ritik_2.profile.ProfileActivity
-import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.PcControlActivity
 import com.example.ritik_2.winshare.ServerConnectActivity
@@ -51,20 +52,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val showProfileBanner = intent.getBooleanExtra("SHOW_COMPLETE_PROFILE_TOGGLE", false)
 
+        // Start chat background notification service
+        val session = authRepository.getSession()
+        if (session != null) {
+            ChatNotificationService.start(this, session.userId, session.name)
+        }
+
         setContent {
             ITConnectTheme {
                 val uiState         by viewModel.uiState.collectAsStateWithLifecycle()
                 val serverReachable by connectMonitor.serverReachable.collectAsStateWithLifecycle()
                 val pendingCount    by viewModel.pendingCount.collectAsStateWithLifecycle()
 
-                // Delay showing the offline banner by 5 seconds after activity starts
-                // This prevents false-positive "unreachable" flash on startup
-                // while the first probe is still in flight
                 var bannerReady by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) {
-                    delay(5_000)
-                    bannerReady = true
-                }
+                LaunchedEffect(Unit) { delay(5_000); bannerReady = true }
 
                 Box(Modifier.fillMaxSize()) {
                     MainScreen(
@@ -72,12 +73,10 @@ class MainActivity : ComponentActivity() {
                         onLogout                  = { handleLogout() },
                         onCardClick               = { id -> handleCardClick(id) },
                         onProfileClick            = { handleProfileClick() },
+                        onNotificationClick       = { handleNotificationClick() },
                         showCompleteProfileBanner = showProfileBanner
                     )
 
-                    // Only show banner if:
-                    // 1. The initial probe delay has passed (bannerReady)
-                    // 2. Server is confirmed unreachable
                     AnimatedVisibility(
                         visible  = bannerReady && !serverReachable,
                         enter    = slideInVertically { -it } + fadeIn(),
@@ -95,11 +94,18 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.reload()
         lifecycleScope.launch {
-            // Probe server on every resume so banner updates quickly
             connectMonitor.probeNow()
             checkActiveStatus()
         }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Keep the service alive even when the activity is destroyed so
+        // background notifications keep working. Only stop on explicit logout.
+    }
+
+    // ── Card routing ──────────────────────────────────────────────────────────
 
     private fun handleCardClick(id: Int) {
         when (id) {
@@ -110,7 +116,6 @@ class MainActivity : ComponentActivity() {
             5 -> startActivity(Intent(this, MACNetActivity::class.java))
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
             7 -> startActivity(Intent(this, ChatActivity::class.java))
-            //7 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             8 -> {
                 val userId = authRepository.getSession()?.userId ?: return
                 startActivity(Intent(this, ContactActivity::class.java).apply {
@@ -127,8 +132,17 @@ class MainActivity : ComponentActivity() {
         })
     }
 
+    private fun handleNotificationClick() {
+        // For now open a simple activity; swap for your NotificationActivity when ready
+        Toast.makeText(this, "Notifications coming soon", Toast.LENGTH_SHORT).show()
+        // startActivity(Intent(this, NotificationActivity::class.java))
+    }
+
+    // ── Session / logout ──────────────────────────────────────────────────────
+
     private fun handleLogout() {
         lifecycleScope.launch {
+            ChatNotificationService.stop(this@MainActivity)
             authRepository.logout()
             startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -138,21 +152,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun checkActiveStatus() {
-        // Only check active status if server is reachable
         if (!connectMonitor.serverReachable.value) return
         when (authRepository.validateSession()) {
-            is SessionStatus.Deactivated  ->
-                forceLogout("Your account has been deactivated.")
-            is SessionStatus.TokenInvalid ->
-                forceLogout("Session expired. Please log in again.")
-            is SessionStatus.NoSession    ->
-                forceLogout("Please log in.")
+            is SessionStatus.Deactivated  -> forceLogout("Your account has been deactivated.")
+            is SessionStatus.TokenInvalid -> forceLogout("Session expired. Please log in again.")
+            is SessionStatus.NoSession    -> forceLogout("Please log in.")
             is SessionStatus.Valid        -> {}
         }
     }
 
     private fun forceLogout(message: String) {
         lifecycleScope.launch {
+            ChatNotificationService.stop(this@MainActivity)
             authRepository.logout()
             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
             startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
@@ -176,8 +187,7 @@ private fun OfflineBanner(pendingCount: Int) {
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(Icons.Default.CloudOff, null,
-                tint = Color.White, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.CloudOff, null, tint = Color.White, modifier = Modifier.size(18.dp))
             Column(Modifier.weight(1f)) {
                 Text("Server unreachable — working offline",
                     style = MaterialTheme.typography.labelMedium, color = Color.White)
@@ -187,8 +197,7 @@ private fun OfflineBanner(pendingCount: Int) {
                         color = Color.White.copy(0.8f))
             }
             if (pendingCount > 0)
-                Icon(Icons.Default.Sync, null,
-                    tint = Color.White, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.Sync, null, tint = Color.White, modifier = Modifier.size(16.dp))
         }
     }
 }

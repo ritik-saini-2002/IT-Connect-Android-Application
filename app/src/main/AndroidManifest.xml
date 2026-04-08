@@ -12,12 +12,14 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission
-        android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission
-        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+    <!-- Required for DownloadManager -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Required for foreground notification service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <uses-feature android:name="android.hardware.camera"    android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -120,7 +122,6 @@
         <activity android:name=".administrator.departmentmanager.DepartmentActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <!-- Fixed: was Base.Theme.Ritik_2 which caused runtime crash -->
         <activity android:name=".administrator.companysettings.CompanySettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
@@ -138,6 +139,12 @@
             android:name=".chat.MemberPickerActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
+
+        <!-- Background chat notification service -->
+        <service
+            android:name=".chat.ChatNotificationService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- ── File Provider ──────────────────────────────── -->
         <provider

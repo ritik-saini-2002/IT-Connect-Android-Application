@@ -7,9 +7,11 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -21,43 +23,37 @@ class ChatActivity : ComponentActivity() {
     private val listVm: ChatListViewModel by viewModels()
     private val roomVm: ChatRoomViewModel by viewModels()
 
-    // ── File pickers — all return Uri? so we guard with ?: return ────────────
+    // ── File pickers ──────────────────────────────────────────────────────────
 
     private val imagePicker = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
+        ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@registerForActivityResult
         handleFilePicked(uri)
     }
 
     private val filePicker = registerForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
+        ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri ?: return@registerForActivityResult
         handleFilePicked(uri)
     }
 
-    // TakePicture returns Boolean — URI is stored before launch
     private var cameraUri: Uri? = null
     private val cameraPicker = registerForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { saved: Boolean ->
+        ActivityResultContracts.TakePicture()) { saved: Boolean ->
         if (!saved) return@registerForActivityResult
         val uri = cameraUri ?: return@registerForActivityResult
         handleFilePicked(uri)
     }
 
-    // ── MemberPickerActivity result ───────────────────────────────────────────
+    // ── MemberPicker result ───────────────────────────────────────────────────
 
     private val memberPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+        ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
         val data      = result.data ?: return@registerForActivityResult
         val ids       = data.getStringArrayListExtra(MemberPickerActivity.RESULT_IDS)
             ?: return@registerForActivityResult
-        val names     = data.getStringArrayListExtra(MemberPickerActivity.RESULT_NAMES)
-            ?: arrayListOf()
+        val names     = data.getStringArrayListExtra(MemberPickerActivity.RESULT_NAMES) ?: arrayListOf()
         val groupName = data.getStringExtra(MemberPickerActivity.RESULT_GROUP_NAME) ?: "New Group"
         val isGroup   = data.getBooleanExtra(MemberPickerActivity.RESULT_IS_GROUP, false)
 
@@ -65,9 +61,7 @@ class ChatActivity : ComponentActivity() {
             if (isGroup) {
                 val room = listVm.createGroup(groupName, ids, names, null)
                 if (room != null) openRoom(room)
-                else Toast.makeText(
-                    this@ChatActivity, "Failed to create group", Toast.LENGTH_SHORT
-                ).show()
+                else Toast.makeText(this@ChatActivity, "Failed to create group", Toast.LENGTH_SHORT).show()
             } else if (ids.size == 1) {
                 val room = listVm.getOrCreateDM(ids[0], names.firstOrNull() ?: "")
                 if (room != null) openRoom(room)
@@ -75,12 +69,16 @@ class ChatActivity : ComponentActivity() {
         }
     }
 
-    // ── Compose state bridge ──────────────────────────────────────────────────
+    // ── State ─────────────────────────────────────────────────────────────────
 
     private val _currentRoom = mutableStateOf<ChatRoom?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // KEY FIX: let the window resize when the keyboard appears
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        enableEdgeToEdge()
 
         val directRoomId = intent.getStringExtra(EXTRA_ROOM_ID)
 
@@ -97,12 +95,13 @@ class ChatActivity : ComponentActivity() {
 
                 if (currentRoom != null) {
                     ChatRoomScreen(
-                        room         = currentRoom!!,
-                        viewModel    = roomVm,
-                        onBack       = { _currentRoom.value = null },
-                        onPickFile   = { filePicker.launch("*/*") },
-                        onPickImage  = { imagePicker.launch("image/*") },
-                        onPickCamera = { launchCamera() }
+                        room          = currentRoom!!,
+                        viewModel     = roomVm,
+                        onBack        = { _currentRoom.value = null },
+                        onPickFile    = { filePicker.launch("*/*") },
+                        onPickImage   = { imagePicker.launch("image/*") },
+                        onPickCamera  = { launchCamera() },
+                        onViewProfile = { userId -> openMemberProfile(userId) }
                     )
                 } else {
                     ChatListScreen(
@@ -137,19 +136,25 @@ class ChatActivity : ComponentActivity() {
 
     private fun openRoom(room: ChatRoom) {
         _currentRoom.value = room
-        roomVm.init(room.id)
+        roomVm.init(room)
+    }
+
+    private fun openMemberProfile(userId: String) {
+        startActivity(
+            android.content.Intent(this, com.example.ritik_2.profile.ProfileActivity::class.java)
+                .putExtra("userId", userId)
+        )
     }
 
     private fun launchCamera() {
         val file = java.io.File(cacheDir, "chat_photo_${System.currentTimeMillis()}.jpg")
         val uri  = androidx.core.content.FileProvider.getUriForFile(
-            this, "${packageName}.fileprovider", file
-        )
-        cameraUri = uri          // store before launch so callback can read it
+            this, "${packageName}.fileprovider", file)
+        cameraUri = uri
         cameraPicker.launch(uri)
     }
 
-    private fun handleFilePicked(uri: Uri) {           // non-null Uri — safe to use directly
+    private fun handleFilePicked(uri: Uri) {
         val mime = contentResolver.getType(uri) ?: "application/octet-stream"
         val name = getFileNameFromUri(uri)
         roomVm.setSelectedFile(uri, name, mime)
@@ -166,7 +171,6 @@ class ChatActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_ROOM_ID = "room_id"
-
         fun newIntent(context: Context, roomId: String? = null): Intent =
             Intent(context, ChatActivity::class.java).apply {
                 roomId?.let { putExtra(EXTRA_ROOM_ID, it) }

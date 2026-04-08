@@ -11,23 +11,31 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val TAG           = "ChatRepository"
-private const val COL_ROOMS     = "chat_rooms"
-private const val COL_MESSAGES  = "chat_messages"
+private const val TAG          = "ChatRepository"
+private const val COL_ROOMS    = "chat_rooms"
+private const val COL_MESSAGES = "chat_messages"
 
 @Singleton
 class ChatRepository @Inject constructor(
     private val syncManager: SyncManager
 ) {
-    // Long-lived SSE client for realtime
+    // SSE client — readTimeout(0) keeps the connection open indefinitely.
+    // pingInterval is intentionally NOT set: it only works for WebSocket/HTTP2.
+    // PocketBase SSE runs over HTTP/1.1 — reconnect logic handles drops instead.
     private val sseClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)   // infinite — SSE never closes
+        .readTimeout(0, TimeUnit.SECONDS)
+        .build()
+
+    // Regular client for uploads / short requests
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
         .build()
 
     // ── Rooms ─────────────────────────────────────────────────────────────────
@@ -37,148 +45,143 @@ class ChatRepository @Inject constructor(
             val token = syncManager.getAdminToken()
             val res   = syncManager.pbGet(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records" +
-                        "?filter=(members~'$userId')&sort=-lastMessageAt&perPage=100",
-                token
-            )
+                        "?filter=(members~'$userId')&sort=-lastMessageAt&perPage=100", token)
             val items = JSONObject(res).optJSONArray("items") ?: return@withContext emptyList()
-            (0 until items.length()).map { i -> items.getJSONObject(i).toRoom(userId) }
-        } catch (e: Exception) {
-            Log.e(TAG, "getRooms: ${e.message}")
-            emptyList()
-        }
+            (0 until items.length()).map { items.getJSONObject(it).toRoom(userId) }
+        } catch (e: Exception) { Log.e(TAG, "getRooms: ${e.message}"); emptyList() }
     }
 
     suspend fun getOrCreateDirectRoom(
-        myId: String, myName: String,
-        otherId: String, otherName: String,
+        myId: String, myName: String, myAvatarUrl: String,
+        otherId: String, otherName: String, otherAvatarUrl: String,
         companyName: String
     ): ChatRoom? = withContext(Dispatchers.IO) {
         try {
             val token = syncManager.getAdminToken()
-            // Check if DM room already exists between these two users
             val res   = syncManager.pbGet(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records" +
                         "?filter=(type='direct'%26%26members~'$myId'%26%26members~'$otherId')&perPage=1",
-                token
-            )
+                token)
             val existing = JSONObject(res).optJSONArray("items")?.optJSONObject(0)
             if (existing != null) return@withContext existing.toRoom(myId)
 
-            // Create new DM room
-            val membersJson = JSONArray().apply { put(myId); put(otherId) }.toString()
             val body = JSONObject().apply {
-                put("name",         "$myName & $otherName")
-                put("type",         "direct")
-                put("members",      membersJson)
-                put("memberNames",  JSONArray().apply { put(myName); put(otherName) }.toString())
-                put("adminIds",     JSONArray().apply { put(myId) }.toString())
-                put("companyName",  companyName)
-                put("lastMessage",  "")
+                put("name",          "$myName & $otherName")
+                put("type",          "direct")
+                put("members",       JSONArray().apply { put(myId); put(otherId) }.toString())
+                put("memberNames",   JSONArray().apply { put(myName); put(otherName) }.toString())
+                put("memberAvatars", JSONArray().apply { put(myAvatarUrl); put(otherAvatarUrl) }.toString())
+                put("adminIds",      JSONArray().apply { put(myId) }.toString())
+                put("companyName",   companyName)
+                put("lastMessage",   "")
                 put("lastMessageAt", System.currentTimeMillis())
             }.toString()
-
-            val created = syncManager.pbPost(
+            JSONObject(syncManager.pbPost(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records", token, body)
-            JSONObject(created).toRoom(myId)
-        } catch (e: Exception) {
-            Log.e(TAG, "getOrCreateDirectRoom: ${e.message}")
-            null
-        }
+            ).toRoom(myId)
+        } catch (e: Exception) { Log.e(TAG, "getOrCreateDirectRoom: ${e.message}"); null }
     }
 
     suspend fun createGroupRoom(
-        name       : String,
-        creatorId  : String,
-        memberIds  : List<String>,
-        memberNames: List<String>,
-        companyName: String,
-        avatarBytes: ByteArray? = null
+        name: String, creatorId: String, creatorName: String,
+        memberIds: List<String>, memberNames: List<String>, memberAvatars: List<String>,
+        companyName: String, avatarBytes: ByteArray? = null
     ): ChatRoom? = withContext(Dispatchers.IO) {
         try {
-            val token   = syncManager.getAdminToken()
-            val allIds  = (listOf(creatorId) + memberIds).distinct()
-            val allNames= (listOf("") + memberNames).distinct() // creator name filled below
+            val token    = syncManager.getAdminToken()
+            val allIds   = (listOf(creatorId) + memberIds).distinct()
+            val allNames = (listOf(creatorName) + memberNames).distinct()
 
             val body = JSONObject().apply {
                 put("name",          name)
                 put("type",          "group")
                 put("members",       JSONArray(allIds).toString())
-                put("memberNames",   JSONArray(memberNames).toString())
+                put("memberNames",   JSONArray(allNames).toString())
+                put("memberAvatars", JSONArray(memberAvatars).toString())
                 put("adminIds",      JSONArray().apply { put(creatorId) }.toString())
                 put("companyName",   companyName)
                 put("lastMessage",   "Group created")
                 put("lastMessageAt", System.currentTimeMillis())
             }.toString()
 
-            val res     = syncManager.pbPost(
+            val res  = syncManager.pbPost(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records", token, body)
-            val room    = JSONObject(res).toRoom(creatorId)
+            var room = JSONObject(res).toRoom(creatorId)
 
-            // Upload group avatar if provided
             if (avatarBytes != null) {
-                uploadRoomAvatar(room.id, avatarBytes, token)
+                val updated = uploadRoomAvatar(room.id, avatarBytes, token)
+                if (updated != null) room = updated
             }
-
-            // Post system message
-            sendMessage(room.id, creatorId, "You",
+            sendMessage(room.id, creatorId, creatorName,
                 MessageType.TEXT, "Group \"$name\" created", null, "", "")
-
             room
-        } catch (e: Exception) {
-            Log.e(TAG, "createGroupRoom: ${e.message}")
-            null
-        }
+        } catch (e: Exception) { Log.e(TAG, "createGroupRoom: ${e.message}"); null }
     }
 
-    suspend fun updateGroupInfo(
-        roomId     : String,
-        name       : String,
-        avatarBytes: ByteArray?
+    suspend fun updateGroupInfo(roomId: String, name: String, avatarBytes: ByteArray?): ChatRoom? =
+        withContext(Dispatchers.IO) {
+            try {
+                val token = syncManager.getAdminToken()
+                if (avatarBytes != null) {
+                    // Single multipart PATCH — name + avatar together
+                    val mpBody = MultipartBody.Builder()
+                        .setType(MultipartBody.FORM)
+                        .addFormDataPart("name", name)
+                        .addFormDataPart("avatar", "avatar_$roomId.jpg",
+                            avatarBytes.toRequestBody("image/jpeg".toMediaType()))
+                        .build()
+                    val res = httpClient.newCall(Request.Builder()
+                        .url("${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId")
+                        .addHeader("Authorization", "Bearer $token")
+                        .patch(mpBody).build()).execute()
+                    val body = res.body?.string() ?: "{}"; res.close()
+                    JSONObject(body).toRoom("")
+                } else {
+                    syncManager.pbPatch(
+                        "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId",
+                        token, JSONObject().apply { put("name", name) }.toString())
+                    null
+                }
+            } catch (e: Exception) { Log.e(TAG, "updateGroupInfo: ${e.message}"); null }
+        }
+
+    suspend fun addMembers(
+        roomId: String,
+        currentMembers: List<String>, newIds: List<String>,
+        currentNames: List<String>,   newNames: List<String>,
+        currentAvatars: List<String>, newAvatars: List<String>
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val token = syncManager.getAdminToken()
             syncManager.pbPatch(
-                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId",
-                token,
-                JSONObject().apply { put("name", name) }.toString()
-            )
-            if (avatarBytes != null) uploadRoomAvatar(roomId, avatarBytes, token)
+                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId", token,
+                JSONObject().apply {
+                    put("members",       JSONArray((currentMembers + newIds).distinct()).toString())
+                    put("memberNames",   JSONArray((currentNames + newNames).distinct()).toString())
+                    put("memberAvatars", JSONArray((currentAvatars + newAvatars).distinct()).toString())
+                }.toString())
             true
-        } catch (e: Exception) {
-            Log.e(TAG, "updateGroupInfo: ${e.message}")
-            false
-        }
+        } catch (e: Exception) { false }
     }
 
-    suspend fun addMembers(roomId: String, currentMembers: List<String>,
-                           newIds: List<String>, newNames: List<String>): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val token   = syncManager.getAdminToken()
-                val allIds  = (currentMembers + newIds).distinct()
-                syncManager.pbPatch(
-                    "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId",
-                    token,
-                    JSONObject().apply {
-                        put("members", JSONArray(allIds).toString())
-                    }.toString()
-                )
-                true
-            } catch (e: Exception) { false }
-        }
-
-    suspend fun removeMember(roomId: String, currentMembers: List<String>,
-                             removeId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun removeMember(
+        roomId: String,
+        currentMembers: List<String>, currentNames: List<String>, currentAvatars: List<String>,
+        removeId: String
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val token  = syncManager.getAdminToken()
-            val newIds = currentMembers.filter { it != removeId }
+            val token   = syncManager.getAdminToken()
+            val idx     = currentMembers.indexOf(removeId)
+            val newIds  = currentMembers.filterIndexed { i, _ -> i != idx }
+            val newNames  = currentNames.filterIndexed  { i, _ -> i != idx }
+            val newAvatars = currentAvatars.filterIndexed { i, _ -> i != idx }
             syncManager.pbPatch(
-                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId",
-                token,
+                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId", token,
                 JSONObject().apply {
-                    put("members", JSONArray(newIds).toString())
-                }.toString()
-            )
+                    put("members",       JSONArray(newIds).toString())
+                    put("memberNames",   JSONArray(newNames).toString())
+                    put("memberAvatars", JSONArray(newAvatars).toString())
+                }.toString())
             true
         } catch (e: Exception) { false }
     }
@@ -191,155 +194,185 @@ class ChatRepository @Inject constructor(
                 val token = syncManager.getAdminToken()
                 val res   = syncManager.pbGet(
                     "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records" +
-                            "?filter=(roomId='$roomId')&sort=-sentAt&perPage=50&page=$page",
-                    token
-                )
+                            "?filter=(roomId='$roomId')&sort=-sentAt&perPage=50&page=$page", token)
                 val items = JSONObject(res).optJSONArray("items") ?: return@withContext emptyList()
-                (0 until items.length()).map { i -> items.getJSONObject(i).toMessage() }
-                    .reversed()   // oldest first for display
-            } catch (e: Exception) {
-                Log.e(TAG, "getMessages: ${e.message}")
-                emptyList()
-            }
+                (0 until items.length()).map { items.getJSONObject(it).toMessage() }.reversed()
+            } catch (e: Exception) { Log.e(TAG, "getMessages: ${e.message}"); emptyList() }
         }
 
     suspend fun sendMessage(
-        roomId     : String,
-        senderId   : String,
-        senderName : String,
-        type       : MessageType,
-        text       : String,
-        fileBytes  : ByteArray?,
-        fileName   : String,
-        fileMime   : String,
-        replyToId  : String = "",
-        replyToText: String = ""
+        roomId: String, senderId: String, senderName: String,
+        type: MessageType, text: String, fileBytes: ByteArray?,
+        fileName: String, fileMime: String,
+        replyToId: String = "", replyToText: String = "",
+        senderAvatarUrl: String = ""
     ): ChatMessage? = withContext(Dispatchers.IO) {
         try {
             val token = syncManager.getAdminToken()
-            val msgId = java.util.UUID.randomUUID().toString()
             val now   = System.currentTimeMillis()
+            val res: String
 
-            var fileUrl  = ""
-            var fileSize = 0L
-
-            // Upload attachment first if present
             if (fileBytes != null && fileName.isNotBlank()) {
-                val uploadRes = uploadMessageFile(msgId, fileBytes, fileName, fileMime, token)
-                fileUrl  = uploadRes.first
-                fileSize = uploadRes.second
+                // Single multipart POST — all fields + file together
+                // PocketBase returns the record with server-assigned id and stored filename
+                val safeMime = fileMime.ifBlank { "application/octet-stream" }
+                val mpBody   = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("roomId",      roomId)
+                    .addFormDataPart("senderId",    senderId)
+                    .addFormDataPart("senderName",  senderName)
+                    .addFormDataPart("senderAvatar",senderAvatarUrl)
+                    .addFormDataPart("type",        type.name)
+                    .addFormDataPart("text",        text.ifBlank { fileName })
+                    .addFormDataPart("fileName",    fileName)
+                    .addFormDataPart("fileSize",    fileBytes.size.toString())
+                    .addFormDataPart("fileMime",    fileMime)
+                    .addFormDataPart("sentAt",      now.toString())
+                    .addFormDataPart("editedAt",    "0")
+                    .addFormDataPart("replyToId",   replyToId)
+                    .addFormDataPart("replyToText", replyToText)
+                    // "file" is the PocketBase field name for the attachment
+                    .addFormDataPart("file", fileName,
+                        fileBytes.toRequestBody(safeMime.toMediaType()))
+                    .build()
+
+                val httpRes = httpClient.newCall(Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records")
+                    .addHeader("Authorization", "Bearer $token")
+                    .post(mpBody).build()).execute()
+                res = httpRes.body?.string() ?: "{}"; httpRes.close()
+            } else {
+                val body = JSONObject().apply {
+                    put("roomId",      roomId)
+                    put("senderId",    senderId)
+                    put("senderName",  senderName)
+                    put("senderAvatar",senderAvatarUrl)
+                    put("type",        type.name)
+                    put("text",        text)
+                    put("fileName",    "")
+                    put("fileSize",    0L)
+                    put("fileMime",    "")
+                    put("sentAt",      now)
+                    put("editedAt",    0L)
+                    put("replyToId",   replyToId)
+                    put("replyToText", replyToText)
+                }.toString()
+                res = syncManager.pbPost(
+                    "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records", token, body)
             }
 
-            val body = JSONObject().apply {
-                put("roomId",      roomId)
-                put("senderId",    senderId)
-                put("senderName",  senderName)
-                put("type",        type.name)
-                put("text",        text)
-                put("fileUrl",     fileUrl)
-                put("fileName",    fileName)
-                put("fileSize",    fileSize)
-                put("fileMime",    fileMime)
-                put("sentAt",      now)
-                put("replyToId",   replyToId)
-                put("replyToText", replyToText)
-            }.toString()
+            val created    = JSONObject(res)
+            val recordId   = created.optString("id")
+            // PocketBase stores only the filename in the "file" field — build the full URL
+            val storedFile = created.optString("file", "")
+            val fileUrl    = buildFileUrl(recordId, storedFile)
 
-            val res = syncManager.pbPost(
-                "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records", token, body)
-
-            // Update room's last message
             syncManager.pbPatch(
-                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId",
-                token,
+                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId", token,
                 JSONObject().apply {
                     put("lastMessage",   if (type == MessageType.TEXT) text
                     else "📎 ${fileName.ifBlank { type.name }}")
                     put("lastMessageAt", now)
-                }.toString()
-            )
+                }.toString())
 
-            JSONObject(res).toMessage()
-        } catch (e: Exception) {
-            Log.e(TAG, "sendMessage: ${e.message}")
-            null
-        }
+            created.put("computedFileUrl", fileUrl)
+            created.toMessage()
+        } catch (e: Exception) { Log.e(TAG, "sendMessage: ${e.message}"); null }
     }
+
+    suspend fun editMessage(messageId: String, newText: String, sentAt: Long): Boolean =
+        withContext(Dispatchers.IO) {
+            if (System.currentTimeMillis() - sentAt > 5 * 60_000L) return@withContext false
+            try {
+                val token = syncManager.getAdminToken()
+                syncManager.pbPatch(
+                    "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records/$messageId",
+                    token,
+                    JSONObject().apply {
+                        put("text",     newText)
+                        put("editedAt", System.currentTimeMillis())
+                    }.toString())
+                true
+            } catch (e: Exception) { Log.e(TAG, "editMessage: ${e.message}"); false }
+        }
 
     suspend fun deleteMessage(messageId: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val token = syncManager.getAdminToken()
             syncManager.pbDelete(
-                "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records/$messageId", token)
+                "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records/$messageId",
+                syncManager.getAdminToken())
             true
         } catch (e: Exception) { false }
     }
 
-    // ── PocketBase Realtime (SSE) ─────────────────────────────────────────────
+    // ── Realtime SSE ──────────────────────────────────────────────────────────
+    // Wraps the raw SSE flow with automatic reconnect so the calling ViewModel
+    // never sees a timeout — it just keeps receiving messages.
 
-    /**
-     * Subscribes to new messages in [roomId] via PocketBase SSE realtime.
-     * Emits each new [ChatMessage] as it arrives.
-     * The flow is cancelled when the coroutine scope is cancelled.
-     */
-    fun subscribeToRoom(roomId: String): Flow<ChatMessage> = callbackFlow {
-        val token = try { syncManager.getAdminToken() } catch (e: Exception) {
-            close(e); return@callbackFlow
+    fun subscribeToRoom(roomId: String): Flow<ChatMessage> = flow {
+        while (currentCoroutineContext().isActive) {
+            try {
+                rawSseFlow(roomId).collect { emit(it) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "SSE drop, reconnecting in 3s: ${e.message}")
+                delay(3_000)
+            }
         }
+    }.flowOn(Dispatchers.IO)
 
-        // Step 1: Get a client ID from PocketBase
+    private fun rawSseFlow(roomId: String): Flow<ChatMessage> = callbackFlow {
+        val token = try { syncManager.getAdminToken() }
+        catch (e: Exception) { close(e); return@callbackFlow }
+
+        // Step 1: get client ID
         val clientId = try {
-            val initRes = syncManager.pbGet(
-                "${AppConfig.BASE_URL}/api/realtime", token)
-            JSONObject(initRes).optString("clientId")
+            JSONObject(syncManager.pbGet("${AppConfig.BASE_URL}/api/realtime", token))
+                .optString("clientId")
         } catch (e: Exception) { close(e); return@callbackFlow }
 
-        // Step 2: Subscribe to the messages collection filtered by roomId
+        if (clientId.isBlank()) { close(Exception("No clientId")); return@callbackFlow }
+
+        // Step 2: subscribe
         try {
             syncManager.pbPost(
-                "${AppConfig.BASE_URL}/api/realtime",
-                token,
+                "${AppConfig.BASE_URL}/api/realtime", token,
                 JSONObject().apply {
                     put("clientId",      clientId)
                     put("subscriptions", JSONArray().apply {
                         put("$COL_MESSAGES?filter=(roomId='$roomId')")
                     }.toString())
-                }.toString()
-            )
-        } catch (e: Exception) {
-            close(e); return@callbackFlow
-        }
+                }.toString())
+        } catch (e: Exception) { close(e); return@callbackFlow }
 
-        // Step 3: Open SSE stream
-        val request = Request.Builder()
-            .url("${AppConfig.BASE_URL}/api/realtime?clientId=$clientId")
-            .addHeader("Authorization", "Bearer $token")
-            .build()
+        // Step 3: open SSE stream
+        val call = sseClient.newCall(
+            Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/realtime?clientId=$clientId")
+                .addHeader("Authorization", "Bearer $token").build()
+        )
+        val response = try { call.execute() }
+        catch (e: Exception) { close(e); return@callbackFlow }
 
-        val call = sseClient.newCall(request)
-        val response = try { call.execute() } catch (e: Exception) { close(e); return@callbackFlow }
+        val source = response.body?.source()
+            ?: run { response.close(); close(Exception("No body")); return@callbackFlow }
 
-        val source = response.body?.source() ?: run { close(); return@callbackFlow }
-
-        // Read SSE events line by line
         val job = launch(Dispatchers.IO) {
             try {
-                val buffer = StringBuilder()
+                val buf = StringBuilder()
                 while (isActive) {
                     val line = source.readUtf8Line() ?: break
                     when {
-                        line.startsWith("data:") -> {
-                            buffer.append(line.removePrefix("data:").trim())
-                        }
-                        line.isEmpty() && buffer.isNotEmpty() -> {
-                            // Full SSE event received
-                            val data = buffer.toString()
-                            buffer.clear()
+                        line.startsWith("data:") ->
+                            buf.append(line.removePrefix("data:").trim())
+                        line.isEmpty() && buf.isNotEmpty() -> {
+                            val data = buf.toString(); buf.clear()
                             try {
                                 val json   = JSONObject(data)
                                 val action = json.optString("action")
-                                if (action == "create") {
-                                    val record = json.optJSONObject("record") ?: continue
+                                if (action == "create" || action == "update") {
+                                    val record = json.optJSONObject("record") ?: return@launch
                                     trySend(record.toMessage())
                                 }
                             } catch (_: Exception) {}
@@ -347,18 +380,13 @@ class ChatRepository @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                if (isActive) Log.w(TAG, "SSE stream ended: ${e.message}")
+                if (isActive) Log.w(TAG, "SSE ended: ${e.message}")
             }
         }
+        awaitClose { job.cancel(); call.cancel(); response.close() }
+    }
 
-        awaitClose {
-            job.cancel()
-            call.cancel()
-            response.close()
-        }
-    }.flowOn(Dispatchers.IO)
-
-    // ── Members (company-scoped) ───────────────────────────────────────────────
+    // ── Members ───────────────────────────────────────────────────────────────
 
     suspend fun getCompanyMembers(sanitizedCompany: String): List<ChatMember> =
         withContext(Dispatchers.IO) {
@@ -367,85 +395,81 @@ class ChatRepository @Inject constructor(
                 val res   = syncManager.pbGet(
                     "${AppConfig.BASE_URL}/api/collections/users/records" +
                             "?filter=(sanitizedCompanyName='$sanitizedCompany'%26%26isActive=true)" +
-                            "&perPage=200&sort=name",
-                    token
-                )
+                            "&perPage=200&sort=name", token)
                 val items = JSONObject(res).optJSONArray("items") ?: return@withContext emptyList()
                 (0 until items.length()).map { i ->
-                    val o       = items.getJSONObject(i)
-                    val profile = try {
-                        val raw = o.optString("profile", "{}")
-                        JSONObject(if (raw.isBlank()) "{}" else raw)
-                    } catch (_: Exception) { JSONObject() }
+                    val o  = items.getJSONObject(i)
+                    val uid = o.optString("id")
                     ChatMember(
-                        userId      = o.optString("id"),
-                        name        = o.optString("name"),
-                        role        = o.optString("role"),
-                        department  = o.optString("department"),
-                        imageUrl    = profile.optString("imageUrl", ""),
-                        companyName = o.optString("companyName"),
+                        userId           = uid,
+                        name             = o.optString("name"),
+                        role             = o.optString("role"),
+                        department       = o.optString("department"),
+                        imageUrl         = AppConfig.avatarUrl(uid, o.optString("avatar")) ?: "",
+                        companyName      = o.optString("companyName"),
                         sanitizedCompany = o.optString("sanitizedCompanyName")
                     )
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "getCompanyMembers: ${e.message}")
-                emptyList()
-            }
+            } catch (e: Exception) { Log.e(TAG, "getCompanyMembers: ${e.message}"); emptyList() }
         }
 
-    // ── File upload ───────────────────────────────────────────────────────────
-
-    private fun uploadMessageFile(
-        msgId   : String,
-        bytes   : ByteArray,
-        filename: String,
-        mime    : String,
-        token   : String
-    ): Pair<String, Long> {
-        val safeMime = mime.ifBlank { "application/octet-stream" }
-        val body     = okhttp3.MultipartBody.Builder()
-            .setType(okhttp3.MultipartBody.FORM)
-            .addFormDataPart("file", filename, bytes.toRequestBody(safeMime.toMediaType()))
-            .build()
-        val res = sseClient.newCall(
-            Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records")
-                .addHeader("Authorization", "Bearer $token")
-                .post(body).build()
-        ).execute()
-        val resBody = res.body?.string() ?: "{}"
-        res.close()
-        val storedFile = JSONObject(resBody).optString("file", filename)
-        val url = "${AppConfig.BASE_URL}/api/files/$COL_MESSAGES/$msgId/$storedFile"
-        return url to bytes.size.toLong()
+    suspend fun getMemberProfile(userId: String): ChatMember? = withContext(Dispatchers.IO) {
+        try {
+            val token = syncManager.getAdminToken()
+            val o     = JSONObject(syncManager.pbGet(
+                "${AppConfig.BASE_URL}/api/collections/users/records/$userId", token))
+            ChatMember(
+                userId           = userId,
+                name             = o.optString("name"),
+                role             = o.optString("role"),
+                department       = o.optString("department"),
+                imageUrl         = AppConfig.avatarUrl(userId, o.optString("avatar")) ?: "",
+                companyName      = o.optString("companyName"),
+                sanitizedCompany = o.optString("sanitizedCompanyName")
+            )
+        } catch (e: Exception) { Log.e(TAG, "getMemberProfile: ${e.message}"); null }
     }
 
-    private fun uploadRoomAvatar(roomId: String, bytes: ByteArray, token: String) {
-        val body = okhttp3.MultipartBody.Builder()
-            .setType(okhttp3.MultipartBody.FORM)
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Build the PocketBase file URL from a record ID and stored filename. */
+    fun buildFileUrl(recordId: String, storedFile: String): String {
+        if (recordId.isBlank() || storedFile.isBlank()) return ""
+        return "${AppConfig.BASE_URL}/api/files/$COL_MESSAGES/$recordId/$storedFile"
+    }
+
+    private fun uploadRoomAvatar(roomId: String, bytes: ByteArray, token: String): ChatRoom? {
+        val body = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
             .addFormDataPart("avatar", "avatar_$roomId.jpg",
-                bytes.toRequestBody("image/jpeg".toMediaType()))
-            .build()
-        sseClient.newCall(
-            Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId")
-                .addHeader("Authorization", "Bearer $token")
-                .patch(body).build()
-        ).execute().close()
+                bytes.toRequestBody("image/jpeg".toMediaType())).build()
+        val res  = httpClient.newCall(Request.Builder()
+            .url("${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId")
+            .addHeader("Authorization", "Bearer $token")
+            .patch(body).build()).execute()
+        val resBody = res.body?.string() ?: "{}"; res.close()
+        return try { JSONObject(resBody).toRoom("") } catch (_: Exception) { null }
     }
 
-    // ── JSON → Model helpers ──────────────────────────────────────────────────
+    // ── JSON helpers ──────────────────────────────────────────────────────────
 
     private fun JSONObject.toRoom(myId: String): ChatRoom {
+        val id      = optString("id")
         val members = parseJsonArray(optString("members", "[]"))
         val type    = if (optString("type") == "direct") RoomType.DIRECT else RoomType.GROUP
+        // Avatar: PocketBase stores filename, build full URL
+        val avatarFile = optString("avatar", "")
+        val avatarUrl  = if (avatarFile.isNotBlank())
+            "${AppConfig.BASE_URL}/api/files/$COL_ROOMS/$id/$avatarFile"
+        else optString("avatarUrl", "")
         return ChatRoom(
-            id            = optString("id"),
+            id            = id,
             name          = optString("name"),
             type          = type,
-            avatarUrl     = optString("avatarUrl", ""),
+            avatarUrl     = avatarUrl,
             members       = members,
             memberNames   = parseJsonArray(optString("memberNames", "[]")),
+            memberAvatars = parseJsonArray(optString("memberAvatars", "[]")),
             adminIds      = parseJsonArray(optString("adminIds", "[]")),
             companyName   = optString("companyName"),
             lastMessage   = optString("lastMessage"),
@@ -455,26 +479,34 @@ class ChatRepository @Inject constructor(
     }
 
     private fun JSONObject.toMessage(): ChatMessage {
+        val id         = optString("id")
+        val storedFile = optString("file", "")
+        // Prefer pre-computed URL, fall back to building from stored filename
+        val fileUrl    = optString("computedFileUrl", "").ifBlank {
+            buildFileUrl(id, storedFile)
+        }
         val typeStr = optString("type", "TEXT")
         val type    = try { MessageType.valueOf(typeStr) } catch (_: Exception) { MessageType.TEXT }
         return ChatMessage(
-            id           = optString("id"),
-            roomId       = optString("roomId"),
-            senderId     = optString("senderId"),
-            senderName   = optString("senderName"),
-            type         = type,
-            text         = optString("text"),
-            fileUrl      = optString("fileUrl"),
-            fileName     = optString("fileName"),
-            fileSize     = optLong("fileSize", 0L),
-            fileMime     = optString("fileMime"),
-            sentAt       = optLong("sentAt", System.currentTimeMillis()),
-            replyToId    = optString("replyToId"),
-            replyToText  = optString("replyToText")
+            id          = id,
+            roomId      = optString("roomId"),
+            senderId    = optString("senderId"),
+            senderName  = optString("senderName"),
+            senderAvatar= optString("senderAvatar", ""),
+            type        = type,
+            text        = optString("text"),
+            fileUrl     = fileUrl,
+            fileName    = optString("fileName"),
+            fileSize    = optLong("fileSize", 0L),
+            fileMime    = optString("fileMime"),
+            sentAt      = optLong("sentAt", System.currentTimeMillis()),
+            editedAt    = optLong("editedAt", 0L),
+            replyToId   = optString("replyToId"),
+            replyToText = optString("replyToText")
         )
     }
 
     private fun parseJsonArray(json: String): List<String> = try {
-        val arr = JSONArray(json); List(arr.length()) { arr.optString(it) }
+        val a = JSONArray(json); List(a.length()) { a.optString(it) }
     } catch (_: Exception) { emptyList() }
 }

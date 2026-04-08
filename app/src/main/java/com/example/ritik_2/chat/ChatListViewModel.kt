@@ -23,6 +23,7 @@ class ChatListViewModel @Inject constructor(
 
     private var currentUserId    = ""
     private var currentUserName  = ""
+    private var currentUserAvatar = ""
     private var sanitizedCompany = ""
 
     init { load() }
@@ -31,12 +32,13 @@ class ChatListViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val session     = authRepository.getSession() ?: error("Not logged in")
+                val session = authRepository.getSession() ?: error("Not logged in")
                 currentUserId   = session.userId
                 currentUserName = session.name
 
                 val profile = dataSource.getUserProfile(session.userId).getOrThrow()
-                sanitizedCompany = profile.sanitizedCompany
+                sanitizedCompany  = profile.sanitizedCompany
+                currentUserAvatar = profile.imageUrl  // ← store avatar for use in DM creation
 
                 val rooms = repo.getRooms(currentUserId)
                 _state.update {
@@ -53,38 +55,48 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    fun getSanitizedCompany() = sanitizedCompany
-    fun getCurrentUserId()    = currentUserId
-    fun getCurrentUserName()  = currentUserName
+    fun getSanitizedCompany()  = sanitizedCompany
+    fun getCurrentUserId()     = currentUserId
+    fun getCurrentUserName()   = currentUserName
+    fun getCurrentUserAvatar() = currentUserAvatar
 
-    suspend fun getOrCreateDM(otherId: String, otherName: String): ChatRoom? {
+    suspend fun getOrCreateDM(
+        otherId    : String,
+        otherName  : String,
+        otherAvatar: String = ""
+    ): ChatRoom? {
         val profile = try {
             dataSource.getUserProfile(currentUserId).getOrNull()
         } catch (_: Exception) { null }
 
         return repo.getOrCreateDirectRoom(
-            myId        = currentUserId,
-            myName      = currentUserName,
-            otherId     = otherId,
-            otherName   = otherName,
-            companyName = profile?.companyName ?: ""
+            myId          = currentUserId,
+            myName        = currentUserName,
+            myAvatarUrl   = currentUserAvatar,
+            otherId       = otherId,
+            otherName     = otherName,
+            otherAvatarUrl= otherAvatar,
+            companyName   = profile?.companyName ?: ""
         ).also { load() }
     }
 
     suspend fun createGroup(
-        name       : String,
-        memberIds  : List<String>,
-        memberNames: List<String>,
-        avatarBytes: ByteArray?
+        name        : String,
+        memberIds   : List<String>,
+        memberNames : List<String>,
+        avatarBytes : ByteArray?,
+        memberAvatars: List<String> = List(memberIds.size) { "" }
     ): ChatRoom? {
         val profile = dataSource.getUserProfile(currentUserId).getOrNull()
         return repo.createGroupRoom(
-            name        = name,
-            creatorId   = currentUserId,
-            memberIds   = memberIds,
-            memberNames = memberNames,
-            companyName = profile?.companyName ?: "",
-            avatarBytes = avatarBytes
+            name         = name,
+            creatorId    = currentUserId,
+            creatorName  = currentUserName,
+            memberIds    = memberIds,
+            memberNames  = memberNames,
+            memberAvatars= memberAvatars,
+            companyName  = profile?.companyName ?: "",
+            avatarBytes  = avatarBytes
         ).also { load() }
     }
 }

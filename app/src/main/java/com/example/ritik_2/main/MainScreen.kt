@@ -37,6 +37,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -44,6 +45,7 @@ fun MainScreen(
     onLogout                 : () -> Unit,
     onCardClick              : (Int) -> Unit,
     onProfileClick           : () -> Unit,
+    onNotificationClick      : () -> Unit,       // ← NEW
     showCompleteProfileBanner: Boolean = false
 ) {
     val userProfile = uiState.userProfile
@@ -53,15 +55,13 @@ fun MainScreen(
     val scope       = rememberCoroutineScope()
     var totalDragX  by remember { mutableFloatStateOf(0f) }
 
-    BackHandler(enabled = drawerState.isOpen) {
-        scope.launch { drawerState.close() }
-    }
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     ModalNavigationDrawer(
-        drawerState   = drawerState,
+        drawerState     = drawerState,
         gesturesEnabled = false,
-        scrimColor    = Color.Black.copy(alpha = 0.45f),
-        drawerContent = {
+        scrimColor      = Color.Black.copy(alpha = 0.45f),
+        drawerContent   = {
             ModalDrawerSheet(
                 drawerShape          = RectangleShape,
                 drawerContainerColor = MaterialTheme.colorScheme.surface,
@@ -82,8 +82,8 @@ fun MainScreen(
                 .fillMaxSize()
                 .pointerInput(drawerState.isClosed) {
                     detectHorizontalDragGestures(
-                        onDragStart = { totalDragX = 0f },
-                        onDragEnd   = {
+                        onDragStart      = { totalDragX = 0f },
+                        onDragEnd        = {
                             if (totalDragX > 80f && drawerState.isClosed)
                                 scope.launch { drawerState.open() }
                             else if (totalDragX < -80f && drawerState.isOpen)
@@ -94,7 +94,28 @@ fun MainScreen(
                     )
                 }
         ) {
-            Scaffold { paddingValues ->
+            Scaffold(
+                // ── NEW: top app bar with notification bell ────────────────────
+                topBar = {
+                    TopAppBar(
+                        title = {
+                            Text("ITConnect",
+                                style      = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold)
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, "Menu")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = onNotificationClick) {
+                                Icon(Icons.Default.Notifications, "Notifications")
+                            }
+                        }
+                    )
+                }
+            ) { paddingValues ->
                 Box(Modifier.fillMaxSize().padding(paddingValues)) {
 
                     AnimatedVisibility(
@@ -106,7 +127,7 @@ fun MainScreen(
                                 CircularProgressIndicator(Modifier.size(56.dp),
                                     color = MaterialTheme.colorScheme.primary, strokeWidth = 4.dp)
                                 Spacer(Modifier.height(16.dp))
-                                Text("Loading your profile...",
+                                Text("Loading your profile…",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodyMedium)
                             }
@@ -119,14 +140,14 @@ fun MainScreen(
                         exit    = fadeOut(spring())
                     ) {
                         val features = listOf(
-                            FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,     Color(0xFFE53935)),
-                            FeatureItem(2, "Manage Complaints",  Icons.Outlined.List,              Color(0xFF8E24AA)),
-                            FeatureItem(3, "Admin Panel",        Icons.Outlined.AdminPanelSettings, Color(0xFFFF6F00)),
-                            FeatureItem(4, "Server Connect",     Icons.Outlined.Code,              Color(0xFF6200EA)),
-                            FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,          Color(0xFF00796B)),
-                            FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,          Color(0xFFC51162)),
-                            FeatureItem(7, "Chats",           Icons.Outlined.Settings,          MaterialTheme.colorScheme.tertiary),
-                            FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,      MaterialTheme.colorScheme.primary)
+                            FeatureItem(1, "Register Complaint",  Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
+                            FeatureItem(2, "Manage Complaints",   Icons.Outlined.List,               Color(0xFF8E24AA)),
+                            FeatureItem(3, "Admin Panel",         Icons.Outlined.AdminPanelSettings, Color(0xFFFF6F00)),
+                            FeatureItem(4, "Server Connect",      Icons.Outlined.Code,               Color(0xFF6200EA)),
+                            FeatureItem(5, "Knowledge Base",      Icons.Outlined.MenuBook,           Color(0xFF00796B)),
+                            FeatureItem(6, "Windows Control",     Icons.Outlined.Computer,           Color(0xFFC51162)),
+                            FeatureItem(7, "Chats",               Icons.Outlined.Chat,               MaterialTheme.colorScheme.tertiary),
+                            FeatureItem(8, "Help & Support",      Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary)
                         )
 
                         LazyVerticalGrid(

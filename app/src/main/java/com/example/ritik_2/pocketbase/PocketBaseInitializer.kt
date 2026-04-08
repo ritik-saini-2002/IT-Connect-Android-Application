@@ -33,32 +33,29 @@ object PocketBaseInitializer {
         }
         Log.d(TAG, "✅ Admin token obtained")
 
-        // Step 1: Fix users collection API rules — this is the key fix.
-        // PocketBase does NOT allow patching the users auth collection by name,
-        // so we find its ID first and patch by ID.
+        // Always re-apply users rules — PocketBase can reset auth collection
+        // rules on its own restart, so we enforce them every launch.
         openUsersRules(token)
 
-        // Step 2: Create/verify base collections
+        // Create/verify base collections.
+        // openRules() is called ONLY when a collection is newly created.
+        // If it already exists we only add missing fields — rules are never touched.
+        // This prevents the app from overwriting manually-set rules on every launch.
         ensureBaseCollection(token, "companies_metadata",  companiesFields())
         ensureBaseCollection(token, "user_access_control", accessControlFields())
         ensureBaseCollection(token, "user_search_index",   searchIndexFields())
 
-        // Step 3: Open API rules for base collections
-        listOf("companies_metadata", "user_access_control", "user_search_index")
-            .forEach { openRules(token, it) }
+        // chat_rooms and chat_messages rules are managed manually in PocketBase UI.
+        // Do NOT call openRules() on them here.
 
         Log.d(TAG, "✅ Init complete")
         Log.d(TAG, "========================================")
     }
 
-    // ── Fix for 403 on users collection ──────────────────────────────────────
-    // Finds the users auth collection by listing all collections,
-    // then patches its API rules using the collection ID (not name).
-    // This runs on every app start so rules can never drift back to locked.
+    // ── Fix users collection API rules ────────────────────────────────────────
 
     private fun openUsersRules(token: String) {
         try {
-            // List all collections to find the users auth collection ID
             val listRes  = http.newCall(req("GET",
                 "${AppConfig.BASE_URL}/api/collections?perPage=200", token)).execute()
             val listBody = listRes.body?.string() ?: ""
@@ -66,16 +63,13 @@ object PocketBaseInitializer {
             listRes.close()
 
             if (listCode !in 200..299) {
-                Log.e(TAG, "❌ Cannot list collections: HTTP $listCode $listBody")
-                return
+                Log.e(TAG, "❌ Cannot list collections: HTTP $listCode $listBody"); return
             }
 
-            val json  = JSONObject(listBody)
-            val items = json.optJSONArray("items") ?: JSONArray()
-
-            // Find the users auth collection — could be named "users" or "_pb_users_auth_"
+            val items = JSONObject(listBody).optJSONArray("items") ?: JSONArray()
             var usersId   = ""
             var usersName = ""
+
             for (i in 0 until items.length()) {
                 val col  = items.getJSONObject(i)
                 val name = col.optString("name")
@@ -87,35 +81,28 @@ object PocketBaseInitializer {
                 }
             }
 
-            // Fallback: use the first auth collection found
             if (usersId.isEmpty()) {
                 for (i in 0 until items.length()) {
                     val col = items.getJSONObject(i)
                     if (col.optString("type") == "auth") {
                         usersId   = col.optString("id")
                         usersName = col.optString("name")
-                        Log.w(TAG, "⚠️ 'users' not found by name, using first auth collection: $usersName")
+                        Log.w(TAG, "⚠️ 'users' not found by name, using first auth: $usersName")
                         break
                     }
                 }
             }
 
             if (usersId.isEmpty()) {
-                Log.e(TAG, "❌ No auth collection found — cannot open users rules")
-                return
+                Log.e(TAG, "❌ No auth collection found"); return
             }
 
             Log.d(TAG, "Found users collection: name=$usersName id=$usersId")
 
-            // Patch rules using collection ID — this works even for built-in auth collections
-            // Rule: any authenticated user can list/view their own data
-            // Create is open (needed for registration)
-            // Update only by the record owner
-            // Delete only by superusers (null = locked to admins only)
             val rulesBody = JSONObject().apply {
                 put("listRule",   "@request.auth.id != \"\"")
                 put("viewRule",   "@request.auth.id != \"\"")
-                put("createRule", "")          // open — needed for registration
+                put("createRule", "")
                 put("updateRule", "@request.auth.id = id")
                 put("deleteRule", JSONObject.NULL)
             }.toString()
@@ -126,17 +113,16 @@ object PocketBaseInitializer {
             val patchBody = patchRes.body?.string() ?: ""
             patchRes.close()
 
-            if (patchCode in 200..299) {
+            if (patchCode in 200..299)
                 Log.d(TAG, "✅ users API rules opened (id=$usersId)")
-            } else {
+            else
                 Log.e(TAG, "❌ Failed to open users rules: HTTP $patchCode $patchBody")
-            }
         } catch (e: Exception) {
             Log.e(TAG, "❌ openUsersRules: ${e.message}", e)
         }
     }
 
-    // ── Existing helpers (unchanged) ──────────────────────────────────────────
+    // ── Ensure collection exists — never resets rules on existing collections ─
 
     private fun ensureBaseCollection(token: String, name: String, fields: List<JSONObject>) {
         try {
@@ -147,10 +133,14 @@ object PocketBaseInitializer {
             checkRes.close()
 
             if (exists) {
-                Log.d(TAG, "Collection '$name' exists — checking fields...")
+                // Collection already exists — only add missing fields, do NOT touch rules.
+                Log.d(TAG, "Collection '$name' exists — checking fields…")
                 patchBaseCollectionFields(token, name, fields, checkBody)
             } else {
+                // New collection — create it and open rules once.
                 createBaseCollection(token, name, fields)
+                openRules(token, name)
+                Log.d(TAG, "✅ '$name' created with open rules")
             }
         } catch (e: Exception) {
             Log.e(TAG, "❌ ensureBaseCollection '$name': ${e.message}", e)
@@ -213,6 +203,7 @@ object PocketBaseInitializer {
         }
     }
 
+    // Opens all API rules to null (admin token bypasses these anyway)
     private fun openRules(token: String, name: String) {
         try {
             val body = JSONObject().apply {
@@ -273,7 +264,7 @@ object PocketBaseInitializer {
         return builder.build()
     }
 
-    // ── Schema definitions (unchanged) ────────────────────────────────────────
+    // ── Schema definitions ────────────────────────────────────────────────────
 
     private fun companiesFields(): List<JSONObject> = listOf(
         f("originalName",   "text", required = true),
