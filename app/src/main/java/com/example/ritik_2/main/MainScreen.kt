@@ -125,7 +125,7 @@ fun MainScreen(
                             FeatureItem(4, "Server Connect",     Icons.Outlined.Code,              Color(0xFF6200EA)),
                             FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,          Color(0xFF00796B)),
                             FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,          Color(0xFFC51162)),
-                            FeatureItem(7, "Settings",           Icons.Outlined.Settings,          MaterialTheme.colorScheme.tertiary),
+                            FeatureItem(7, "Chats",           Icons.Outlined.Settings,          MaterialTheme.colorScheme.tertiary),
                             FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,      MaterialTheme.colorScheme.primary)
                         )
 
