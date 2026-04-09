@@ -74,7 +74,7 @@ fun AdministratorPanelScreen(
             add(AdminFunction("department_mgr",  "Department Manager",   "Create, delete and move users across depts",  Icons.Default.AccountTree,       Color(0xFF00897B)))
             if (isAdmin) add(AdminFunction("role_management",  "Role Management",      "Change user roles and update permissions",    Icons.Default.AdminPanelSettings,Color(0xFFF44336), adminOnly = true))
             if (isAdmin) add(AdminFunction("database_manager", "Database Manager",     "Manage collections, rules, indexes and data", Icons.Default.Cloud,             Color(0xFF9C27B0), adminOnly = true))
-            add(AdminFunction("company_settings","Company Settings",     "Manage company information and branding",     Icons.Default.Business,          Color(0xFFFF9800)))
+            if (isAdmin) add(AdminFunction("company_settings","Company Settings",     "Manage company information and branding",      Icons.Default.Business,          Color(0xFFFF9800), adminOnly = true))
             add(AdminFunction("reports",         "Reports & Export",     "Generate reports and export data",            Icons.Default.Assessment,        Color(0xFF607D8B)))
         }
     }
