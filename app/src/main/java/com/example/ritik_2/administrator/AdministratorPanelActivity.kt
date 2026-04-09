@@ -200,7 +200,11 @@ class AdministratorPanelActivity : ComponentActivity() {
                     startActivity(Intent(this, DatabaseManagerActivity::class.java))
                 else toast("You need the 'database_manager' permission.")
             }
-            "company_settings" -> startActivity(Intent(this, CompanySettingsActivity::class.java))
+            "company_settings" -> {
+                if (ad.role == "Administrator" || isDbAdmin)
+                    startActivity(Intent(this, CompanySettingsActivity::class.java))
+                else toast("Only Administrator can manage company.")
+            }
             "reports"          -> startActivity(Intent(this, ReportsActivity::class.java))
             else -> toast("Feature coming soon!")
         }
