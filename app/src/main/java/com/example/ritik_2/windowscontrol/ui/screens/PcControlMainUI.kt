@@ -1,5 +1,6 @@
 package com.example.ritik_2.windowscontrol.ui.screens
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -12,9 +13,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.windowscontrol.data.PcStep
 import com.example.ritik_2.windowscontrol.pccontrolappdirectory.PcControlAppDirectoryUI
@@ -33,6 +38,24 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
     val scope         = rememberCoroutineScope()
     val cfg           = LocalConfiguration.current
     val isLandscape   = cfg.screenWidthDp > cfg.screenHeightDp
+
+    // ── Hide/show system bars based on touchpad + landscape ──
+    val context = LocalContext.current
+    val isTouchpadFullscreen = isLandscape && currentScreen == PcScreen.TOUCHPAD
+
+    LaunchedEffect(isTouchpadFullscreen) {
+        val activity = context as? Activity ?: return@LaunchedEffect
+        val window = activity.window
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        if (isTouchpadFullscreen) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
 
     if (editingPlan != null) {
         BackHandler { viewModel.cancelEdit() }
@@ -64,39 +87,46 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
         }
     ) {
         if (isLandscape) {
-            // Landscape: nav rail on RIGHT side
-            Row(modifier = Modifier.fillMaxSize()) {
-                Box(modifier = Modifier.weight(1f)) {
-                    AnimatedContent(
-                        targetState   = currentScreen,
-                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
-                        label          = "screen"
-                    ) { screen -> ScreenContent(screen, viewModel) }
+            if (currentScreen == PcScreen.TOUCHPAD) {
+                // ── TOUCHPAD FULLSCREEN: no nav rail, no system bars ──
+                Box(modifier = Modifier.fillMaxSize()) {
+                    PcControlTouchpadUI(viewModel)
                 }
-                NavigationRail(
-                    modifier = Modifier.fillMaxHeight(),
-                    header   = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, "Menu")
-                        }
+            } else {
+                // ── Other screens: show nav rail on right ──
+                Row(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        AnimatedContent(
+                            targetState   = currentScreen,
+                            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
+                            label          = "screen"
+                        ) { screen -> ScreenContent(screen, viewModel) }
                     }
-                ) {
-                    Spacer(Modifier.weight(1f))
-                    railItems.forEach { item ->
-                        val selected = currentScreen == item.screen
-                        NavigationRailItem(
-                            selected = selected,
-                            onClick  = { navigateTo(item.screen) },
-                            icon     = { Icon(if (selected) item.selectedIcon else item.icon, item.label) },
-                            label    = {
-                                Text(item.label,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    style      = MaterialTheme.typography.labelSmall,
-                                    fontSize   = 10.sp)
+                    NavigationRail(
+                        modifier = Modifier.fillMaxHeight(),
+                        header   = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, "Menu")
                             }
-                        )
+                        }
+                    ) {
+                        Spacer(Modifier.weight(1f))
+                        railItems.forEach { item ->
+                            val selected = currentScreen == item.screen
+                            NavigationRailItem(
+                                selected = selected,
+                                onClick  = { navigateTo(item.screen) },
+                                icon     = { Icon(if (selected) item.selectedIcon else item.icon, item.label) },
+                                label    = {
+                                    Text(item.label,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                        style      = MaterialTheme.typography.labelSmall,
+                                        fontSize   = 10.sp)
+                                }
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
                     }
-                    Spacer(Modifier.weight(1f))
                 }
             }
         } else {

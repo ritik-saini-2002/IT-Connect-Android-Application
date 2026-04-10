@@ -1,6 +1,5 @@
 package com.example.ritik_2.winshare
 
-import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -17,6 +18,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -25,48 +28,91 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+
+// ─── Theme-aware colors ──────────────────────────────────────────────────────
+
+data class AppColors(
+    val bg: Color,
+    val bgGradientEnd: Color,
+    val glassBg: Color,
+    val glassBorder: Color,
+    val glassHighlight: Color,
+    val surface: Color,
+    val accent: Color,
+    val accentSecondary: Color,
+    val danger: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val textTertiary: Color
+)
+
+@Composable
+private fun appColors(): AppColors {
+    val dark = isSystemInDarkTheme()
+    return if (dark) AppColors(
+        bg = Color(0xFF0D0D1A), bgGradientEnd = Color(0xFF0F0F23),
+        glassBg = Color.White.copy(alpha = 0.08f), glassBorder = Color.White.copy(alpha = 0.15f),
+        glassHighlight = Color.White.copy(alpha = 0.04f), surface = Color(0xFF1A1A2E),
+        accent = Color(0xFF6C63FF), accentSecondary = Color(0xFF00D4AA),
+        danger = Color(0xFFFF6B9D),
+        textPrimary = Color.White, textSecondary = Color.White.copy(0.65f), textTertiary = Color.White.copy(0.4f)
+    ) else AppColors(
+        bg = Color(0xFFF0F2F5), bgGradientEnd = Color(0xFFE8EBF0),
+        glassBg = Color.White.copy(alpha = 0.65f), glassBorder = Color.Black.copy(alpha = 0.08f),
+        glassHighlight = Color.White.copy(alpha = 0.5f), surface = Color.White,
+        accent = Color(0xFF5B52E0), accentSecondary = Color(0xFF00B894),
+        danger = Color(0xFFE74C6F),
+        textPrimary = Color(0xFF1A1A2E), textSecondary = Color(0xFF555770), textTertiary = Color(0xFF9094A6)
+    )
+}
+
+// ─── Glass Card helpers ──────────────────────────────────────────────────────
+
+@Composable
+private fun GlassCard(c: AppColors, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(modifier = modifier.border(1.dp, c.glassBorder, RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = c.glassBg),
+        elevation = CardDefaults.cardElevation(0.dp)) { content() }
+}
+
+@Composable
+private fun SmallGlassCard(c: AppColors, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Card(modifier = modifier.border(0.5.dp, c.glassBorder, RoundedCornerShape(12.dp)),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = c.glassBg),
+        elevation = CardDefaults.cardElevation(0.dp)) { content() }
+}
+
+// ─── Main Screen ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ServerConnectScreen(
-    onNavigateBack: () -> Boolean,
-    viewModel: ServerConnectModule = viewModel()
-) {
+fun ServerConnectScreen(viewModel: ServerConnectModule = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-
-    // ── System navigation / status bar sync ─────────────────────────────────
-    val view = LocalView.current
-    val colorScheme = MaterialTheme.colorScheme
-//    SideEffect {
-//        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
-//        WindowCompat.setDecorFitsSystemWindows(window, false)
-//        val ctrl = WindowInsetsControllerCompat(window, view)
-//        // Hide both bars — same as PC-control activities
-//        ctrl.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-//        ctrl.systemBarsBehavior =
-//            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-//        // Transparent bars
-//        window.statusBarColor     = android.graphics.Color.TRANSPARENT
-//        window.navigationBarColor = android.graphics.Color.TRANSPARENT
-//    }
+    val c = appColors()
 
     LaunchedEffect(Unit) { viewModel.loadSavedServers(context) }
 
@@ -74,274 +120,131 @@ fun ServerConnectScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? -> uri?.let { scope.launch { viewModel.uploadFile(it, context) } } }
 
-    LaunchedEffect(Unit) { viewModel.navigationEvents.collect { if (!it) onNavigateBack() } }
-    LaunchedEffect(Unit) {
-        viewModel.errorMessages.collect { msg ->
-            snackbarHostState.showSnackbar(msg, actionLabel = "OK", duration = SnackbarDuration.Long)
-        }
-    }
-    LaunchedEffect(Unit) {
-        viewModel.successMessages.collect { msg ->
-            snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Short)
+    LaunchedEffect(Unit) { viewModel.errorMessages.collect { msg -> snackbarHostState.showSnackbar(msg, actionLabel = "OK", duration = SnackbarDuration.Long) } }
+    LaunchedEffect(Unit) { viewModel.successMessages.collect { msg -> snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Short) } }
+
+    LaunchedEffect(uiState.autoConnectServerId) {
+        uiState.autoConnectServerId?.let { id ->
+            uiState.savedServers.find { it.id == id }?.let { viewModel.autoConnectSavedServer(it, context) }
         }
     }
 
-    Scaffold(
-        // Scaffold handles system window insets automatically when edge-to-edge is on
-        contentWindowInsets = WindowInsets.systemBars,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            SMBTopBar(
-                uiState = uiState,
-                onRefresh = { viewModel.refreshFiles() },
-                onNavigateUp = { viewModel.navigateUp() },
-                onToggleMultiSelect = { viewModel.handleEvent(ServerConnectEvent.ToggleMultiSelectMode) },
-                onCreateFolder = { viewModel.handleEvent(ServerConnectEvent.ShowCreateFolderDialog) },
-                onUploadFile = { filePickerLauncher.launch("*/*") },
-                onDeleteSelected = { viewModel.deleteSelectedFiles() },
-                onDisconnect = { viewModel.disconnect() },
-                onToggleSort = { viewModel.handleEvent(ServerConnectEvent.ToggleSortOrder) },
-                onShowSaved = { viewModel.handleEvent(ServerConnectEvent.ShowSavedServersDialog) }
-            )
-        },
-        floatingActionButton = {
-            if (uiState.isConnected && !uiState.isMultiSelectMode && !uiState.isTransferring) {
-                SMBFab(
-                    onUpload = { filePickerLauncher.launch("*/*") },
-                    onNewFolder = { viewModel.handleEvent(ServerConnectEvent.ShowCreateFolderDialog) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(c.bg, c.bgGradientEnd)))
+            .statusBarsPadding()
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Action bar + search (when connected)
+            if (uiState.isConnected) {
+                ConnectedActionBar(c = c, uiState = uiState,
+                    onRefresh = { viewModel.refreshFiles() },
+                    onNavigateUp = { viewModel.navigateUp() },
+                    onDeleteSelected = { viewModel.deleteSelectedFiles() },
+                    onDisconnect = { viewModel.disconnect() },
+                    onToggleSort = { viewModel.handleEvent(ServerConnectEvent.ToggleSortOrder) },
+                    onToggleSearch = { viewModel.handleEvent(ServerConnectEvent.ToggleSearch) },
+                    onSearchQueryChange = { viewModel.handleEvent(ServerConnectEvent.UpdateSearchQuery(it)) },
+                    onExitMultiSelect = { viewModel.handleEvent(ServerConnectEvent.ToggleMultiSelectMode) }
                 )
             }
-        },
-        containerColor = MaterialTheme.colorScheme.background
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .padding(paddingValues)
-                .fillMaxSize()
-        ) {
-            // Connected status / breadcrumb bar
+
             AnimatedVisibility(visible = uiState.isConnected) {
-                ConnectionStatusSection(
-                    uiState = uiState,
-                    onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) }
-                )
+                ConnectionStatusSection(c = c, uiState = uiState, onBreadcrumbClick = { viewModel.navigateToBreadcrumb(it) })
             }
 
-            // Transfer progress panel — slides in/out
-            AnimatedVisibility(
-                visible = uiState.isTransferring,
+            AnimatedVisibility(visible = uiState.isTransferring,
                 enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
-            ) {
-                TransferPanel(
-                    stats = uiState.transferStats,
-                    onCancel = { viewModel.handleEvent(ServerConnectEvent.CancelTransfer) }
-                )
-            }
+            ) { TransferPanel(c = c, stats = uiState.transferStats, onCancel = { viewModel.handleEvent(ServerConnectEvent.CancelTransfer) }) }
 
-            // Main content area
             when {
-                uiState.isLoading && !uiState.isTransferring -> LoadingScreen()
-                !uiState.isConnected -> DisconnectedScreen(
+                uiState.isLoading && !uiState.isTransferring -> GlassLoadingScreen(c)
+                !uiState.isConnected -> GlassDisconnectedScreen(c = c,
                     onConnect = { viewModel.handleEvent(ServerConnectEvent.ShowConnectionDialog) },
-                    onShowSaved = { viewModel.handleEvent(ServerConnectEvent.ShowSavedServersDialog) },
-                    hasSavedServers = uiState.savedServers.isNotEmpty()
-                )
-                uiState.fileList.isEmpty() -> EmptyDirectoryScreen(
-                    onUploadFile = { filePickerLauncher.launch("*/*") },
-                    onCreateFolder = { viewModel.handleEvent(ServerConnectEvent.ShowCreateFolderDialog) }
-                )
-                else -> FileListSection(
-                    fileList = uiState.fileList,
-                    selectedFiles = uiState.selectedFiles,
-                    isMultiSelectMode = uiState.isMultiSelectMode,
+                    savedServers = uiState.savedServers,
+                    onAutoConnect = { viewModel.autoConnectSavedServer(it, context) },
+                    onEditServer = { viewModel.handleEvent(ServerConnectEvent.ShowEditServerDialog(it)) },
+                    onDeleteServer = { viewModel.handleEvent(ServerConnectEvent.DeleteSavedServer(it)) })
+                uiState.fileList.isEmpty() -> GlassEmptyDirectoryScreen(c)
+                else -> FileListSection(c = c, fileList = uiState.fileList, selectedFiles = uiState.selectedFiles, isMultiSelectMode = uiState.isMultiSelectMode,
                     onFileClick = { fileItem ->
-                        if (uiState.isMultiSelectMode) {
-                            viewModel.handleEvent(ServerConnectEvent.ToggleFileSelection(fileItem.name))
-                        } else if (fileItem.isDirectory) {
-                            viewModel.navigateToDirectory(fileItem.name)
-                        } else {
-                            scope.launch {
-                                val uri = viewModel.downloadFile(fileItem, context)
-                                uri?.let {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(it, context.contentResolver.getType(it))
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    try { context.startActivity(intent) } catch (_: Exception) {}
-                                }
-                            }
-                        }
+                        if (uiState.isMultiSelectMode) viewModel.handleEvent(ServerConnectEvent.ToggleFileSelection(fileItem.name))
+                        else if (fileItem.isDirectory) viewModel.navigateToDirectory(fileItem.name)
+                        else scope.launch { viewModel.downloadFile(fileItem, context) }
                     },
-                    onFileLongClick = { fileItem ->
-                        if (!uiState.isMultiSelectMode) viewModel.handleEvent(ServerConnectEvent.ToggleMultiSelectMode)
-                        viewModel.handleEvent(ServerConnectEvent.ToggleFileSelection(fileItem.name))
-                    }
+                    onFileLongClick = { fileItem -> viewModel.handleEvent(ServerConnectEvent.LongPressFile(fileItem.name)) },
+                    onFileContextMenu = { fileItem -> viewModel.handleEvent(ServerConnectEvent.ShowFileContextMenu(fileItem)) }
                 )
             }
         }
 
-        // ── Dialogs ──────────────────────────────────────────────────────────
-        if (uiState.showConnectionDialog) {
-            ConnectionDialog(
-                uiState = uiState,
-                onEvent = viewModel::handleEvent,
-                onConnect = { scope.launch { viewModel.connectToServer(context) } }
-            )
+        // ── Draggable FAB ──
+        if (uiState.isConnected && !uiState.isMultiSelectMode && !uiState.isTransferring) {
+            DraggableFab(c = c,
+                onUpload = { filePickerLauncher.launch("*/*") },
+                onNewFolder = { viewModel.handleEvent(ServerConnectEvent.ShowCreateFolderDialog) })
         }
-        if (uiState.showCreateFolderDialog) {
-            CreateFolderDialog(
-                folderName = uiState.newFolderName,
-                onFolderNameChange = { viewModel.handleEvent(ServerConnectEvent.UpdateNewFolderName(it)) },
-                onDismiss = { viewModel.handleEvent(ServerConnectEvent.HideCreateFolderDialog) },
-                onConfirm = { viewModel.createFolder() }
-            )
+
+        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+
+        // ── Dialogs ──
+        if (uiState.showConnectionDialog) GlassConnectionDialog(c, uiState, viewModel::handleEvent) { scope.launch { viewModel.connectToServer(context) } }
+        if (uiState.showCreateFolderDialog) GlassCreateFolderDialog(c, uiState.newFolderName, { viewModel.handleEvent(ServerConnectEvent.UpdateNewFolderName(it)) }, { viewModel.handleEvent(ServerConnectEvent.HideCreateFolderDialog) }, { viewModel.createFolder() })
+        if (uiState.showFileContextMenu && uiState.contextMenuFile != null) {
+            FileContextMenuDialog(c, uiState.contextMenuFile!!,
+                onDismiss = { viewModel.handleEvent(ServerConnectEvent.HideFileContextMenu) },
+                onRename = { viewModel.handleEvent(ServerConnectEvent.ShowRenameDialog(it)) },
+                onMove = { viewModel.handleEvent(ServerConnectEvent.ShowMoveDialog(it)) },
+                onDelete = { viewModel.deleteSingleFile(it) },
+                onProperties = { viewModel.handleEvent(ServerConnectEvent.ShowPropertiesDialog(it)) },
+                onDownload = { f -> viewModel.handleEvent(ServerConnectEvent.HideFileContextMenu); scope.launch { viewModel.downloadFile(f, context) } })
         }
-        if (uiState.showSavedServersDialog) {
-            SavedServersDialog(
-                servers = uiState.savedServers,
-                onSelect = { viewModel.handleEvent(ServerConnectEvent.LoadSavedServer(it)) },
-                onDelete = { viewModel.handleEvent(ServerConnectEvent.DeleteSavedServer(it)) },
-                onDismiss = { viewModel.handleEvent(ServerConnectEvent.HideSavedServersDialog) },
-                onNewConnection = {
-                    viewModel.handleEvent(ServerConnectEvent.HideSavedServersDialog)
-                    viewModel.handleEvent(ServerConnectEvent.ShowConnectionDialog)
-                }
-            )
-        }
+        if (uiState.showRenameDialog && uiState.renameTarget != null) RenameDialog(c, uiState.renameTarget!!.name, uiState.renameNewName, { viewModel.handleEvent(ServerConnectEvent.UpdateRenameName(it)) }, { viewModel.handleEvent(ServerConnectEvent.HideRenameDialog) }, { viewModel.renameFile() })
+        if (uiState.showMoveDialog && uiState.moveTarget != null) MoveDialog(c, uiState.moveTarget!!.name, uiState.moveDestination, { viewModel.handleEvent(ServerConnectEvent.UpdateMoveDestination(it)) }, { viewModel.handleEvent(ServerConnectEvent.HideMoveDialog) }, { viewModel.moveFile() })
+        if (uiState.showPropertiesDialog && uiState.propertiesTarget != null) PropertiesDialog(c, uiState.propertiesTarget!!, uiState.currentPath, uiState.currentServer, uiState.currentShare) { viewModel.handleEvent(ServerConnectEvent.HidePropertiesDialog) }
+        if (uiState.showEditServerDialog && uiState.editingServer != null) EditServerDialog(c, uiState.editingServer!!, { viewModel.handleEvent(ServerConnectEvent.HideEditServerDialog) }, { viewModel.updateSavedServer(context, it) }, { viewModel.updateSavedServer(context, it); viewModel.autoConnectSavedServer(it, context) })
     }
 }
 
-// ─── Top App Bar ─────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SMBTopBar(
-    uiState: ServerConnectionState,
-    onRefresh: () -> Unit,
-    onNavigateUp: () -> Unit,
-    onToggleMultiSelect: () -> Unit,
-    onCreateFolder: () -> Unit,
-    onUploadFile: () -> Unit,
-    onDeleteSelected: () -> Unit,
-    onDisconnect: () -> Unit,
-    onToggleSort: () -> Unit,
-    onShowSaved: () -> Unit
-) {
-    var showMenu by remember { mutableStateOf(false) }
-
-    TopAppBar(
-        title = {
-            if (uiState.isMultiSelectMode) {
-                Text(
-                    "${uiState.selectedFiles.size} selected",
-                    fontWeight = FontWeight.SemiBold
-                )
-            } else {
-                Text(
-                    "SMB Explorer",
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        },
-        navigationIcon = {
-            if (uiState.isMultiSelectMode) {
-                IconButton(onClick = onToggleMultiSelect) {
-                    Icon(Icons.Default.Close, contentDescription = "Exit selection mode")
-                }
-            }
-        },
-        actions = {
-            if (uiState.isConnected) {
-                if (uiState.isMultiSelectMode) {
-                    if (uiState.selectedFiles.isNotEmpty()) {
-                        IconButton(onClick = onDeleteSelected) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete selected")
-                        }
-                    }
-                } else {
-                    IconButton(onClick = onToggleSort) {
-                        Icon(
-                            if (uiState.sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-                            contentDescription = "Toggle sort"
-                        )
-                    }
-                    IconButton(onClick = onRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                    }
-                    if (uiState.breadcrumbs.size > 1) {
-                        IconButton(onClick = onNavigateUp) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = "Navigate up")
-                        }
-                    }
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                    }
-                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Upload File") },
-                            leadingIcon = { Icon(Icons.Default.Upload, contentDescription = null) },
-                            onClick = { showMenu = false; onUploadFile() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Create Folder") },
-                            leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
-                            onClick = { showMenu = false; onCreateFolder() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Multi Select") },
-                            leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
-                            onClick = { showMenu = false; onToggleMultiSelect() }
-                        )
-                        Divider()
-                        DropdownMenuItem(
-                            text = { Text("Disconnect") },
-                            leadingIcon = { Icon(Icons.Default.CloudOff, contentDescription = null) },
-                            onClick = { showMenu = false; onDisconnect() }
-                        )
-                    }
-                }
-            } else {
-                IconButton(onClick = onShowSaved) {
-                    Icon(Icons.Default.Bookmarks, contentDescription = "Saved servers")
-                }
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-    )
-}
-
-// ─── FAB ─────────────────────────────────────────────────────────────────────
+// ─── Draggable FAB (Upload + Folder) ─────────────────────────────────────────
 
 @Composable
-private fun SMBFab(onUpload: () -> Unit, onNewFolder: () -> Unit) {
+private fun BoxScope.DraggableFab(c: AppColors, onUpload: () -> Unit, onNewFolder: () -> Unit) {
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
     var expanded by remember { mutableStateOf(false) }
-    Column(horizontalAlignment = Alignment.End) {
-        AnimatedVisibility(
-            visible = expanded,
+
+    Column(
+        horizontalAlignment = Alignment.End,
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+            .padding(16.dp)
+            .navigationBarsPadding()
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    offsetX += dragAmount.x
+                    offsetY += dragAmount.y
+                }
+            }
+    ) {
+        AnimatedVisibility(visible = expanded,
             enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
             exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
         ) {
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(bottom = 8.dp)
-            ) {
-                SmallFabItem(Icons.Default.CreateNewFolder, "New Folder", onNewFolder) { expanded = false }
-                SmallFabItem(Icons.Default.Upload, "Upload File", onUpload) { expanded = false }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 10.dp)) {
+                MiniFabItem(c, Icons.Default.CreateNewFolder, "New Folder") { onNewFolder(); expanded = false }
+                MiniFabItem(c, Icons.Default.Upload, "Upload File") { onUpload(); expanded = false }
             }
         }
         FloatingActionButton(
             onClick = { expanded = !expanded },
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            containerColor = c.accent,
+            contentColor = Color.White,
+            shape = CircleShape
         ) {
             Icon(if (expanded) Icons.Default.Close else Icons.Default.Add, contentDescription = "Actions")
         }
@@ -349,100 +252,98 @@ private fun SMBFab(onUpload: () -> Unit, onNewFolder: () -> Unit) {
 }
 
 @Composable
-private fun SmallFabItem(icon: ImageVector, label: String, action: () -> Unit, collapse: () -> Unit) {
+private fun MiniFabItem(c: AppColors, icon: ImageVector, label: String, onClick: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(8.dp),
-            shadowElevation = 2.dp
-        ) {
-            Text(
-                label,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                fontSize = 13.sp
-            )
+        Surface(color = c.surface, shape = RoundedCornerShape(8.dp), shadowElevation = 2.dp) {
+            Text(label, color = c.textSecondary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), fontSize = 12.sp)
         }
         Spacer(Modifier.width(8.dp))
-        SmallFloatingActionButton(
-            onClick = { action(); collapse() },
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            shape = CircleShape
-        ) {
+        SmallFloatingActionButton(onClick = onClick, containerColor = c.accentSecondary, contentColor = Color.White, shape = CircleShape) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
         }
+    }
+}
+
+// ─── Connected Action Bar ────────────────────────────────────────────────────
+
+@Composable
+private fun ConnectedActionBar(
+    c: AppColors, uiState: ServerConnectionState,
+    onRefresh: () -> Unit, onNavigateUp: () -> Unit,
+    onDeleteSelected: () -> Unit, onDisconnect: () -> Unit,
+    onToggleSort: () -> Unit, onToggleSearch: () -> Unit,
+    onSearchQueryChange: (String) -> Unit, onExitMultiSelect: () -> Unit
+) {
+    val focusManager = LocalFocusManager.current
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        // Search bar — stays open until user closes it
+        AnimatedVisibility(visible = uiState.isSearchActive) {
+            SmallGlassCard(c, Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                OutlinedTextField(
+                    value = uiState.searchQuery, onValueChange = onSearchQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search files…", color = c.textTertiary) },
+                    leadingIcon = { Icon(Icons.Default.Search, null, tint = c.accentSecondary) },
+                    trailingIcon = { IconButton(onClick = { onSearchQueryChange(""); onToggleSearch(); focusManager.clearFocus() }) { Icon(Icons.Default.Close, "Close", tint = c.textSecondary) } },
+                    colors = OutlinedTextFieldDefaults.colors(focusedTextColor = c.textPrimary, unfocusedTextColor = c.textPrimary, cursorColor = c.accentSecondary, focusedBorderColor = Color.Transparent, unfocusedBorderColor = Color.Transparent),
+                    singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() })
+                )
+            }
+        }
+
+        if (uiState.isMultiSelectMode) {
+            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp), Alignment.CenterVertically) {
+                Text("${uiState.selectedFiles.size} selected", color = c.accentSecondary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(start = 4.dp))
+                Spacer(Modifier.weight(1f))
+                if (uiState.selectedFiles.isNotEmpty()) ActionBox(c, "Delete", Icons.Default.Delete, c.danger, onDeleteSelected)
+                ActionBox(c, "Cancel", Icons.Default.Close, c.textSecondary, onExitMultiSelect)
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(6.dp)) {
+                if (uiState.breadcrumbs.size > 1) ActionBox(c, "Back", Icons.Default.ArrowBack, c.textSecondary, onNavigateUp)
+                ActionBox(c, "Search", Icons.Default.Search, c.accentSecondary, onToggleSearch)
+                ActionBox(c, "Sort", if (uiState.sortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward, c.textSecondary, onToggleSort)
+                ActionBox(c, "Refresh", Icons.Default.Refresh, c.textSecondary, onRefresh)
+                Spacer(Modifier.weight(1f))
+                ActionBox(c, "Exit", Icons.Default.CloudOff, c.danger, onDisconnect)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionBox(c: AppColors, label: String, icon: ImageVector, tint: Color, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clip(RoundedCornerShape(10.dp)).border(0.5.dp, c.glassBorder, RoundedCornerShape(10.dp)).background(c.glassBg).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Icon(icon, label, tint = tint, modifier = Modifier.size(18.dp))
+        Text(label, fontSize = 9.sp, color = tint, maxLines = 1, fontWeight = FontWeight.Medium)
     }
 }
 
 // ─── Connection Status + Breadcrumbs ─────────────────────────────────────────
 
 @Composable
-private fun ConnectionStatusSection(uiState: ServerConnectionState, onBreadcrumbClick: (Int) -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Icon(
-                    imageVector = Icons.Default.CloudDone,
-                    contentDescription = "Connected",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
+private fun ConnectionStatusSection(c: AppColors, uiState: ServerConnectionState, onBreadcrumbClick: (Int) -> Unit) {
+    GlassCard(c, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Column(Modifier.padding(10.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(c.accentSecondary))
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "\\\\${uiState.currentServer}\\${uiState.currentShare}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                if (uiState.fileList.isNotEmpty()) {
-                    Text(
-                        text = "${uiState.fileList.size} items",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
-                    )
-                }
+                Text("\\\\${uiState.currentServer}\\${uiState.currentShare}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (uiState.fileList.isNotEmpty()) Text("${uiState.fileList.size} items", style = MaterialTheme.typography.labelSmall, color = c.textTertiary)
             }
             if (uiState.breadcrumbs.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     itemsIndexed(uiState.breadcrumbs) { index, crumb ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (index > 0) {
-                                Icon(
-                                    Icons.Default.ChevronRight, contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
+                            if (index > 0) Icon(Icons.Default.ChevronRight, null, tint = c.textTertiary, modifier = Modifier.size(14.dp))
                             val isLast = index == uiState.breadcrumbs.lastIndex
-                            AssistChip(
-                                onClick = { onBreadcrumbClick(index) },
-                                label = {
-                                    Text(
-                                        text = crumb,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        fontSize = 12.sp
-                                    )
-                                },
-                                modifier = Modifier.heightIn(max = 28.dp),
-                                colors = AssistChipDefaults.assistChipColors(
-                                    containerColor = if (isLast) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surface,
-                                    labelColor = if (isLast) MaterialTheme.colorScheme.onPrimary
-                                    else MaterialTheme.colorScheme.onSurface
-                                ),
-                                border = null
-                            )
+                            Surface(onClick = { onBreadcrumbClick(index) }, shape = RoundedCornerShape(6.dp), color = if (isLast) c.accent.copy(0.25f) else c.glassBg, modifier = Modifier.heightIn(max = 26.dp)) {
+                                Text(crumb, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = if (isLast) c.accentSecondary else c.textSecondary, fontWeight = if (isLast) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
                         }
                     }
                 }
@@ -451,120 +352,34 @@ private fun ConnectionStatusSection(uiState: ServerConnectionState, onBreadcrumb
     }
 }
 
-// ─── Transfer Panel ───────────────────────────────────────────────────────────
+// ─── Transfer Panel ──────────────────────────────────────────────────────────
 
 @Composable
-private fun TransferPanel(stats: TransferStats, onCancel: () -> Unit) {
-    val pulseAnim = rememberInfiniteTransition(label = "pulse")
-    val pulseAlpha by pulseAnim.animateFloat(
-        initialValue = 0.7f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
-        label = "alpha"
-    )
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            // Header row: icon + filename + cancel
+private fun TransferPanel(c: AppColors, stats: TransferStats, onCancel: () -> Unit) {
+    val pulse = rememberInfiniteTransition("pulse")
+    val alpha by pulse.animateFloat(0.7f, 1f, infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse), "a")
+    GlassCard(c, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (stats.isUpload) Icons.Default.CloudUpload else Icons.Default.CloudDownload,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = pulseAlpha),
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(if (stats.isUpload) Icons.Default.CloudUpload else Icons.Default.CloudDownload, null, tint = c.accentSecondary.copy(alpha), modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (stats.isUpload) "Uploading" else "Downloading",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    )
-                    Text(
-                        text = stats.fileName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                Column(Modifier.weight(1f)) {
+                    Text(if (stats.isUpload) "Uploading" else "Downloading → Downloads/WinShare", style = MaterialTheme.typography.labelSmall, color = c.textTertiary)
+                    Text(stats.fileName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Cancel, contentDescription = "Cancel transfer",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                IconButton(onClick = onCancel, Modifier.size(32.dp)) { Icon(Icons.Default.Cancel, "Cancel", tint = c.danger, modifier = Modifier.size(20.dp)) }
             }
-
             Spacer(Modifier.height(8.dp))
-
-            // Progress bar
-            LinearProgressIndicator(
-                progress = { stats.progress },
-                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f)
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            // Stats row 1: transferred / total and percentage
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stats.formattedTransferred,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Text(
-                    text = "${(stats.progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
-
+            LinearProgressIndicator(progress = { stats.progress }, Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)), color = c.accentSecondary, trackColor = c.glassHighlight)
             Spacer(Modifier.height(6.dp))
-
-            // Stats row 2: speed chips
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text(stats.formattedTransferred, style = MaterialTheme.typography.bodySmall, color = c.textSecondary); Text("${(stats.progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = c.accentSecondary) }
+            Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SpeedChip(label = "Now", value = stats.formattedCurrentSpeed)
-                SpeedChip(label = "Avg", value = stats.formattedAvgSpeed)
-                SpeedChip(label = "Peak", value = stats.formattedPeakSpeed)
+                SpeedChip(c, "Now", stats.formattedCurrentSpeed); SpeedChip(c, "Avg", stats.formattedAvgSpeed); SpeedChip(c, "Peak", stats.formattedPeakSpeed)
                 Spacer(Modifier.weight(1f))
-                // ETA / elapsed
                 Column(horizontalAlignment = Alignment.End) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Schedule, contentDescription = null,
-                            modifier = Modifier.size(11.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
-                        Spacer(Modifier.width(3.dp))
-                        Text(
-                            text = stats.formattedElapsed,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                        )
-                    }
-                    if (stats.etaSeconds >= 0) {
-                        Text(
-                            text = "ETA ${stats.formattedEta}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                        )
-                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Schedule, null, Modifier.size(11.dp), c.textTertiary); Spacer(Modifier.width(3.dp)); Text(stats.formattedElapsed, style = MaterialTheme.typography.labelSmall, color = c.textTertiary) }
+                    if (stats.etaSeconds >= 0) Text("ETA ${stats.formattedEta}", style = MaterialTheme.typography.labelSmall, color = c.textTertiary)
                 }
             }
         }
@@ -572,519 +387,206 @@ private fun TransferPanel(stats: TransferStats, onCancel: () -> Unit) {
 }
 
 @Composable
-private fun SpeedChip(label: String, value: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f),
-        shape = RoundedCornerShape(6.dp)
-    ) {
-        Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) {
-            Text(
-                text = "$label ",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        }
+private fun SpeedChip(c: AppColors, label: String, value: String) {
+    Surface(color = c.accent.copy(0.12f), shape = RoundedCornerShape(6.dp)) {
+        Row(Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) { Text("$label ", style = MaterialTheme.typography.labelSmall, color = c.textTertiary); Text(value, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = c.accentSecondary) }
     }
 }
 
-// ─── Loading ──────────────────────────────────────────────────────────────────
+// ─── Loading / Disconnected / Empty ──────────────────────────────────────────
 
 @Composable
-private fun LoadingScreen() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator()
-            Spacer(Modifier.height(16.dp))
-            Text("Loading...", style = MaterialTheme.typography.bodyMedium)
-        }
-    }
+private fun GlassLoadingScreen(c: AppColors) {
+    Box(Modifier.fillMaxSize(), Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { CircularProgressIndicator(color = c.accentSecondary, strokeWidth = 2.dp); Spacer(Modifier.height(16.dp)); Text("Loading…", color = c.textSecondary, fontSize = 14.sp) } }
 }
 
-// ─── Disconnected ─────────────────────────────────────────────────────────────
-
 @Composable
-private fun DisconnectedScreen(onConnect: () -> Unit, onShowSaved: () -> Unit, hasSavedServers: Boolean) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(24.dp)
-            ) {
-                Icon(
-                    Icons.Default.CloudOff, contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Not Connected",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Connect to an SMB server to browse and manage files",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(24.dp))
-                Button(
-                    onClick = onConnect,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.CloudSync, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Connect to Server")
+private fun GlassDisconnectedScreen(c: AppColors, onConnect: () -> Unit, savedServers: List<SavedServer>, onAutoConnect: (SavedServer) -> Unit, onEditServer: (SavedServer) -> Unit, onDeleteServer: (String) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Spacer(Modifier.height(40.dp))
+            GlassCard(c, Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(72.dp).clip(CircleShape).background(c.accent.copy(0.15f)), Alignment.Center) { Icon(Icons.Default.CloudOff, null, Modifier.size(36.dp), c.accent) }
+                    Spacer(Modifier.height(16.dp)); Text("WinShare", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = c.textPrimary)
+                    Spacer(Modifier.height(4.dp)); Text("Connect to SMB server for fast file sharing", fontSize = 13.sp, color = c.textSecondary, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(24.dp))
+                    Button(onClick = onConnect, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(c.accent, Color.White), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("New Connection", fontWeight = FontWeight.SemiBold) }
                 }
-                if (hasSavedServers) {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = onShowSaved,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Bookmarks, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Saved Servers")
+            }
+        }
+        if (savedServers.isNotEmpty()) {
+            item { Text("Saved Servers", color = c.textSecondary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, top = 8.dp)) }
+            items(savedServers, key = { it.id }) { server ->
+                GlassCard(c, Modifier.fillMaxWidth().clickable { onAutoConnect(server) }) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(42.dp).clip(CircleShape).background(c.accentSecondary.copy(0.12f)), Alignment.Center) { Icon(Icons.Default.Storage, null, tint = c.accentSecondary, modifier = Modifier.size(22.dp)) }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(server.label.ifBlank { server.serverAddress }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+                            Text("\\\\${server.serverAddress}${if (server.shareName.isNotEmpty()) "\\${server.shareName}" else ""}", fontSize = 11.sp, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(server.username, fontSize = 10.sp, color = c.textTertiary)
+                        }
+                        IconButton(onClick = { onEditServer(server) }, Modifier.size(34.dp)) { Icon(Icons.Default.Edit, "Edit", tint = c.accent, modifier = Modifier.size(18.dp)) }
+                        IconButton(onClick = { onDeleteServer(server.id) }, Modifier.size(34.dp)) { Icon(Icons.Outlined.DeleteOutline, "Delete", tint = c.danger, modifier = Modifier.size(18.dp)) }
                     }
                 }
             }
-        }
-    }
-}
-
-// ─── Empty Directory ──────────────────────────────────────────────────────────
-
-@Composable
-private fun EmptyDirectoryScreen(onUploadFile: () -> Unit, onCreateFolder: () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
-        ) {
-            Icon(Icons.Default.FolderOpen, contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(16.dp))
-            Text("Empty Directory", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "This directory is empty. You can upload files or create new folders.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(24.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onCreateFolder, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.CreateNewFolder, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("New Folder")
-                }
-                Button(onClick = onUploadFile, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.Upload, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Upload")
-                }
-            }
-        }
-    }
-}
-
-// ─── File List ────────────────────────────────────────────────────────────────
-
-@Composable
-private fun FileListSection(
-    fileList: List<SMBFileItem>,
-    selectedFiles: Set<String>,
-    isMultiSelectMode: Boolean,
-    onFileClick: (SMBFileItem) -> Unit,
-    onFileLongClick: (SMBFileItem) -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 8.dp)
-    ) {
-        items(fileList, key = { it.name }) { fileItem ->
-            FileListItem(
-                fileItem = fileItem,
-                isSelected = selectedFiles.contains(fileItem.name),
-                isMultiSelectMode = isMultiSelectMode,
-                onClick = { onFileClick(fileItem) },
-                onLongClick = { onFileLongClick(fileItem) }
-            )
         }
         item { Spacer(Modifier.height(80.dp)) }
     }
 }
 
+@Composable
+private fun GlassEmptyDirectoryScreen(c: AppColors) {
+    Box(Modifier.fillMaxSize(), Alignment.Center) {
+        GlassCard(c, Modifier.padding(32.dp)) { Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.FolderOpen, null, Modifier.size(56.dp), c.textTertiary); Spacer(Modifier.height(12.dp)); Text("Empty Directory", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary); Spacer(Modifier.height(6.dp)); Text("Use the + button to upload or create folders", fontSize = 13.sp, color = c.textSecondary, textAlign = TextAlign.Center) } }
+    }
+}
+
+// ─── File List ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun FileListSection(c: AppColors, fileList: List<SMBFileItem>, selectedFiles: Set<String>, isMultiSelectMode: Boolean, onFileClick: (SMBFileItem) -> Unit, onFileLongClick: (SMBFileItem) -> Unit, onFileContextMenu: (SMBFileItem) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items(fileList, key = { it.name }) { fileItem ->
+            FileListItem(c, fileItem, selectedFiles.contains(fileItem.name), isMultiSelectMode,
+                onClick = { onFileClick(fileItem) },
+                onLongClick = { if (isMultiSelectMode) onFileLongClick(fileItem) else onFileContextMenu(fileItem) },
+                onSelectToggle = { onFileLongClick(fileItem) })
+        }
+        item { Spacer(Modifier.height(100.dp)) }
+    }
+}
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun FileListItem(
-    fileItem: SMBFileItem,
-    isSelected: Boolean,
-    isMultiSelectMode: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit
-) {
-    val bgColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-        else Color.Transparent,
-        label = "itemBg"
-    )
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(bgColor)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        color = bgColor
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (isMultiSelectMode) {
-                Icon(
-                    imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
-                    contentDescription = null,
-                    tint = if (isSelected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(Modifier.width(12.dp))
+private fun FileListItem(c: AppColors, fileItem: SMBFileItem, isSelected: Boolean, isMultiSelectMode: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, onSelectToggle: () -> Unit) {
+    val bgColor by animateColorAsState(if (isSelected) c.accent.copy(0.15f) else Color.Transparent, label = "bg")
+    SmallGlassCard(c, Modifier.fillMaxWidth().combinedClickable(onClick = { if (isMultiSelectMode) onSelectToggle() else onClick() }, onLongClick = onLongClick)) {
+        Row(Modifier.background(bgColor).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (isMultiSelectMode) { Icon(if (isSelected) Icons.Default.CheckCircle else Icons.Outlined.RadioButtonUnchecked, null, tint = if (isSelected) c.accentSecondary else c.textTertiary, modifier = Modifier.size(22.dp)); Spacer(Modifier.width(10.dp)) }
+            FileIcon(c, fileItem, Modifier.size(38.dp)); Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(fileItem.name, fontSize = 14.sp, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+                Row(verticalAlignment = Alignment.CenterVertically) { if (!fileItem.isDirectory) { Text(fileItem.formattedSize, fontSize = 11.sp, color = c.textTertiary); Text(" · ", fontSize = 11.sp, color = c.textTertiary) }; Text(fileItem.formattedDate, fontSize = 11.sp, color = c.textTertiary) }
             }
-
-            FileIcon(fileItem = fileItem, modifier = Modifier.size(40.dp))
-            Spacer(Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = fileItem.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (!fileItem.isDirectory) {
-                        Text(
-                            text = fileItem.formattedSize,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(" • ", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text(
-                        text = fileItem.formattedDate,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (!isMultiSelectMode) {
-                if (fileItem.isDirectory) {
-                    Icon(
-                        Icons.Default.ChevronRight, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    IconButton(onClick = onClick) {
-                        Icon(Icons.Default.Download, contentDescription = "Download")
-                    }
-                }
-            }
+            if (!isMultiSelectMode) { if (fileItem.isDirectory) Icon(Icons.Default.ChevronRight, null, tint = c.textTertiary, modifier = Modifier.size(20.dp)) else Icon(Icons.Default.Download, "Download", tint = c.accent, modifier = Modifier.size(20.dp)) }
         }
     }
-    HorizontalDivider(
-        modifier = Modifier.padding(start = if (isMultiSelectMode) 88.dp else 72.dp),
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-    )
 }
 
-// ─── File Icon ────────────────────────────────────────────────────────────────
-
 @Composable
-private fun FileIcon(fileItem: SMBFileItem, modifier: Modifier = Modifier) {
+private fun FileIcon(c: AppColors, fileItem: SMBFileItem, modifier: Modifier = Modifier) {
     val (icon, color) = when {
-        fileItem.isDirectory -> Icons.Default.Folder to MaterialTheme.colorScheme.primary
+        fileItem.isDirectory -> Icons.Default.Folder to c.accent
         else -> when (fileItem.fileExtension.lowercase()) {
-            "pdf" -> Icons.Default.PictureAsPdf to Color.Red
-            "doc", "docx" -> Icons.Default.Description to Color.Blue
-            "xls", "xlsx" -> Icons.Default.TableChart to Color(0xFF2E7D32)
-            "ppt", "pptx" -> Icons.Default.Slideshow to Color(0xFFE65100)
-            "jpg", "jpeg", "png", "gif", "bmp", "webp" -> Icons.Default.Image to Color.Magenta
-            "mp4", "avi", "mkv", "mov", "wmv" -> Icons.Default.Movie to Color.Cyan
-            "mp3", "wav", "flac", "aac" -> Icons.Default.AudioFile to Color(0xFFFF9800)
-            "zip", "rar", "7z", "tar", "gz" -> Icons.Default.Archive to Color(0xFF78909C)
-            "txt", "md", "log" -> Icons.Default.TextSnippet to MaterialTheme.colorScheme.onSurfaceVariant
-            "apk", "exe", "msi" -> Icons.Default.Apps to Color(0xFF66BB6A)
-            else -> Icons.Default.InsertDriveFile to MaterialTheme.colorScheme.onSurfaceVariant
+            "pdf" -> Icons.Default.PictureAsPdf to Color(0xFFFF5252); "doc","docx" -> Icons.Default.Description to Color(0xFF448AFF); "xls","xlsx" -> Icons.Default.TableChart to Color(0xFF66BB6A); "ppt","pptx" -> Icons.Default.Slideshow to Color(0xFFFF7043)
+            "jpg","jpeg","png","gif","bmp","webp" -> Icons.Default.Image to Color(0xFFCE93D8); "mp4","avi","mkv","mov","wmv" -> Icons.Default.Movie to Color(0xFF4DD0E1); "mp3","wav","flac","aac" -> Icons.Default.AudioFile to Color(0xFFFFB74D)
+            "zip","rar","7z","tar","gz" -> Icons.Default.Archive to Color(0xFF90A4AE); "txt","md","log" -> Icons.Default.TextSnippet to c.textSecondary; "apk","exe","msi" -> Icons.Default.Apps to c.accentSecondary
+            else -> Icons.Default.InsertDriveFile to c.textSecondary
         }
     }
-    Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(color.copy(alpha = 0.1f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+    Box(modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(0.12f)), Alignment.Center) { Icon(icon, null, tint = color, modifier = Modifier.size(20.dp)) }
+}
+
+// ─── Dialogs ─────────────────────────────────────────────────────────────────
+
+@Composable private fun FileContextMenuDialog(c: AppColors, file: SMBFileItem, onDismiss: () -> Unit, onRename: (SMBFileItem) -> Unit, onMove: (SMBFileItem) -> Unit, onDelete: (SMBFileItem) -> Unit, onProperties: (SMBFileItem) -> Unit, onDownload: (SMBFileItem) -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = c.surface, titleContentColor = c.textPrimary,
+        title = { Row(verticalAlignment = Alignment.CenterVertically) { FileIcon(c, file, Modifier.size(32.dp)); Spacer(Modifier.width(10.dp)); Text(file.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (!file.isDirectory) CtxItem(c, Icons.Default.Download, "Download to Phone", c.accentSecondary) { onDownload(file) }
+            CtxItem(c, Icons.Default.DriveFileRenameOutline, "Rename", c.accent) { onRename(file) }
+            CtxItem(c, Icons.Default.DriveFileMove, "Move to…", c.accentSecondary) { onMove(file) }
+            CtxItem(c, Icons.Default.Info, "Properties", c.textSecondary) { onProperties(file) }
+            HorizontalDivider(color = c.glassBorder, modifier = Modifier.padding(vertical = 4.dp))
+            CtxItem(c, Icons.Default.Delete, "Delete", c.danger) { onDelete(file) }
+        } }, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = c.textSecondary) } })
+}
+
+@Composable private fun CtxItem(c: AppColors, icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(10.dp), color = Color.Transparent) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, tint = color, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(14.dp)); Text(label, fontSize = 14.sp, color = c.textPrimary, fontWeight = FontWeight.Medium) }
     }
 }
 
-// ─── Connection Dialog ────────────────────────────────────────────────────────
-
-@Composable
-private fun ConnectionDialog(
-    uiState: ServerConnectionState,
-    onEvent: (ServerConnectEvent) -> Unit,
-    onConnect: () -> Unit
-) {
-    var showPassword by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = { onEvent(ServerConnectEvent.HideConnectionDialog) },
-        title = { Text("Connect to SMB Server", style = MaterialTheme.typography.headlineSmall) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SMBTextField(
-                    value = uiState.connectionLabel,
-                    onValueChange = { onEvent(ServerConnectEvent.UpdateConnectionLabel(it)) },
-                    label = "Label (optional)",
-                    placeholder = "Home NAS, Work Server…",
-                    icon = Icons.Default.Label
-                )
-                SMBTextField(
-                    value = uiState.serverAddress,
-                    onValueChange = { onEvent(ServerConnectEvent.UpdateServerAddress(it)) },
-                    label = "Server Address *",
-                    placeholder = "192.168.1.100 or server-name",
-                    icon = Icons.Default.Computer
-                )
-                SMBTextField(
-                    value = uiState.shareName,
-                    onValueChange = { onEvent(ServerConnectEvent.UpdateShareName(it)) },
-                    label = "Share Name",
-                    placeholder = "shared-folder",
-                    icon = Icons.Default.FolderShared
-                )
-                SMBTextField(
-                    value = uiState.username,
-                    onValueChange = { onEvent(ServerConnectEvent.UpdateUsername(it)) },
-                    label = "Username *",
-                    placeholder = "administrator",
-                    icon = Icons.Default.Person
-                )
-                SMBTextField(
-                    value = uiState.password,
-                    onValueChange = { onEvent(ServerConnectEvent.UpdatePassword(it)) },
-                    label = "Password",
-                    placeholder = "••••••••",
-                    icon = Icons.Default.Lock,
-                    isPassword = true,
-                    showPassword = showPassword,
-                    onTogglePassword = { showPassword = !showPassword }
-                )
-                Text(
-                    "Credentials are saved automatically for future use.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onConnect,
-                enabled = uiState.serverAddress.isNotBlank() && uiState.username.isNotBlank()
-            ) {
-                Text("Connect")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { onEvent(ServerConnectEvent.HideConnectionDialog) }) {
-                Text("Cancel")
-            }
-        }
-    )
+@Composable private fun RenameDialog(c: AppColors, currentName: String, newName: String, onChange: (String) -> Unit, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = c.surface, titleContentColor = c.textPrimary,
+        title = { Text("Rename", fontWeight = FontWeight.SemiBold) },
+        text = { Column { Text("Current: $currentName", fontSize = 12.sp, color = c.textTertiary); Spacer(Modifier.height(10.dp)); GlassTextField(c, newName, onChange, "New name", "", Icons.Default.DriveFileRenameOutline) } },
+        confirmButton = { Button(onClick = onConfirm, enabled = newName.trim().isNotEmpty() && newName.trim() != currentName, colors = ButtonDefaults.buttonColors(c.accent)) { Text("Rename") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = c.textSecondary) } })
 }
 
-@Composable
-private fun SMBTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    placeholder: String,
-    icon: ImageVector,
-    isPassword: Boolean = false,
-    showPassword: Boolean = false,
-    onTogglePassword: (() -> Unit)? = null
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-        leadingIcon = { Icon(icon, contentDescription = null) },
-        trailingIcon = if (isPassword && onTogglePassword != null) {
-            {
-                IconButton(onClick = onTogglePassword) {
-                    Icon(
-                        if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = "Toggle password visibility"
-                    )
-                }
-            }
-        } else null,
-        visualTransformation = if (isPassword && !showPassword) PasswordVisualTransformation() else VisualTransformation.None
-    )
+@Composable private fun MoveDialog(c: AppColors, fileName: String, dest: String, onChange: (String) -> Unit, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = c.surface, titleContentColor = c.textPrimary,
+        title = { Text("Move '$fileName'", fontWeight = FontWeight.SemiBold, fontSize = 16.sp) },
+        text = { Column { Text("Destination path within the share:", fontSize = 12.sp, color = c.textTertiary); Spacer(Modifier.height(10.dp)); GlassTextField(c, dest, onChange, "Destination path", "e.g. Documents/Archive", Icons.Default.DriveFileMove) } },
+        confirmButton = { Button(onClick = onConfirm, enabled = dest.trim().isNotEmpty(), colors = ButtonDefaults.buttonColors(c.accent)) { Text("Move") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = c.textSecondary) } })
 }
 
-// ─── Create Folder Dialog ─────────────────────────────────────────────────────
-
-@Composable
-private fun CreateFolderDialog(
-    folderName: String,
-    onFolderNameChange: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create New Folder") },
-        text = {
-            OutlinedTextField(
-                value = folderName,
-                onValueChange = onFolderNameChange,
-                label = { Text("Folder Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) }
-            )
-        },
-        confirmButton = {
-            Button(onClick = onConfirm, enabled = folderName.trim().isNotEmpty()) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
+@Composable private fun PropertiesDialog(c: AppColors, file: SMBFileItem, currentPath: String, server: String, share: String, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = c.surface, titleContentColor = c.textPrimary,
+        title = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Info, null, tint = c.accentSecondary, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Properties", fontWeight = FontWeight.SemiBold) } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PropRow(c, "Name", file.name); PropRow(c, "Type", if (file.isDirectory) "Folder" else "File (.${file.fileExtension})")
+            if (!file.isDirectory) PropRow(c, "Size", file.formattedSize); PropRow(c, "Modified", file.formattedDate)
+            PropRow(c, "Path", "\\\\$server\\$share${if (currentPath.isNotEmpty()) "\\$currentPath" else ""}\\${file.name}")
+            PropRow(c, "Readable", if (file.canRead) "Yes" else "No"); PropRow(c, "Writable", if (file.canWrite) "Yes" else "No")
+        } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = c.accentSecondary) } }, dismissButton = {})
 }
 
-// ─── Saved Servers Dialog ─────────────────────────────────────────────────────
+@Composable private fun PropRow(c: AppColors, label: String, value: String) { Row(Modifier.fillMaxWidth()) { Text(label, fontSize = 12.sp, color = c.textTertiary, modifier = Modifier.width(80.dp), fontWeight = FontWeight.Medium); Text(value, fontSize = 12.sp, color = c.textPrimary, modifier = Modifier.weight(1f)) } }
 
-@Composable
-private fun SavedServersDialog(
-    servers: List<SavedServer>,
-    onSelect: (SavedServer) -> Unit,
-    onDelete: (String) -> Unit,
-    onDismiss: () -> Unit,
-    onNewConnection: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Bookmarks, contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(10.dp))
-                Text("Saved Servers", style = MaterialTheme.typography.headlineSmall)
-            }
-        },
-        text = {
-            if (servers.isEmpty()) {
-                Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Storage, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(40.dp))
-                        Spacer(Modifier.height(8.dp))
-                        Text("No saved servers yet",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(servers, key = { it.id }) { server ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primaryContainer),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.Storage, contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.size(22.dp))
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f).clickable { onSelect(server) }) {
-                                    Text(
-                                        server.label.ifBlank { server.serverAddress },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        "\\\\${server.serverAddress}${if (server.shareName.isNotEmpty()) "\\${server.shareName}" else ""}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        server.username,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { onDelete(server.id) },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete",
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(20.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = onNewConnection) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("New Connection")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
-        }
-    )
+@Composable private fun EditServerDialog(c: AppColors, server: SavedServer, onDismiss: () -> Unit, onSave: (SavedServer) -> Unit, onSaveAndConnect: (SavedServer) -> Unit) {
+    var label by remember { mutableStateOf(server.label) }; var address by remember { mutableStateOf(server.serverAddress) }; var username by remember { mutableStateOf(server.username) }; var password by remember { mutableStateOf(server.password) }; var share by remember { mutableStateOf(server.shareName) }; var showPw by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = onDismiss, containerColor = c.surface, titleContentColor = c.textPrimary,
+        title = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Edit, null, tint = c.accent, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Edit Server", fontWeight = FontWeight.SemiBold) } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassTextField(c, label, { label = it }, "Label", icon = Icons.Default.Label)
+            GlassTextField(c, address, { address = it }, "Server Address", icon = Icons.Default.Computer)
+            GlassTextField(c, share, { share = it }, "Share Name", icon = Icons.Default.FolderShared)
+            GlassTextField(c, username, { username = it }, "Username", icon = Icons.Default.Person)
+            GlassTextField(c, password, { password = it }, "Password", icon = Icons.Default.Lock, isPassword = true, showPassword = showPw, onTogglePassword = { showPw = !showPw })
+        } },
+        confirmButton = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { onSave(server.copy(label = label, serverAddress = address, username = username, password = password, shareName = share)) }, colors = ButtonDefaults.outlinedButtonColors(contentColor = c.accentSecondary)) { Text("Save", fontSize = 12.sp) }
+            Button(onClick = { onSaveAndConnect(server.copy(label = label, serverAddress = address, username = username, password = password, shareName = share)) }, colors = ButtonDefaults.buttonColors(c.accent)) { Text("Save & Connect", fontSize = 12.sp) }
+        } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = c.textSecondary) } })
+}
+
+@Composable private fun GlassConnectionDialog(c: AppColors, uiState: ServerConnectionState, onEvent: (ServerConnectEvent) -> Unit, onConnect: () -> Unit) {
+    var showPw by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = { onEvent(ServerConnectEvent.HideConnectionDialog) }, containerColor = c.surface, titleContentColor = c.textPrimary,
+        title = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.CloudSync, null, tint = c.accentSecondary, modifier = Modifier.size(22.dp)); Spacer(Modifier.width(8.dp)); Text("Connect to Server", fontWeight = FontWeight.SemiBold) } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassTextField(c, uiState.connectionLabel, { onEvent(ServerConnectEvent.UpdateConnectionLabel(it)) }, "Label (optional)", "Home NAS…", Icons.Default.Label)
+            GlassTextField(c, uiState.serverAddress, { onEvent(ServerConnectEvent.UpdateServerAddress(it)) }, "Server Address *", "192.168.1.100", Icons.Default.Computer)
+            GlassTextField(c, uiState.shareName, { onEvent(ServerConnectEvent.UpdateShareName(it)) }, "Share Name", "shared-folder", Icons.Default.FolderShared)
+            GlassTextField(c, uiState.username, { onEvent(ServerConnectEvent.UpdateUsername(it)) }, "Username *", "administrator", Icons.Default.Person)
+            GlassTextField(c, uiState.password, { onEvent(ServerConnectEvent.UpdatePassword(it)) }, "Password", "••••••••", Icons.Default.Lock, isPassword = true, showPassword = showPw, onTogglePassword = { showPw = !showPw })
+            Text("Credentials saved automatically.", fontSize = 11.sp, color = c.textTertiary)
+        } },
+        confirmButton = { Button(onClick = onConnect, enabled = uiState.serverAddress.isNotBlank() && uiState.username.isNotBlank(), colors = ButtonDefaults.buttonColors(c.accent)) { Text("Connect") } },
+        dismissButton = { TextButton(onClick = { onEvent(ServerConnectEvent.HideConnectionDialog) }) { Text("Cancel", color = c.textSecondary) } })
+}
+
+@Composable private fun GlassCreateFolderDialog(c: AppColors, name: String, onChange: (String) -> Unit, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, containerColor = c.surface, titleContentColor = c.textPrimary,
+        title = { Text("Create New Folder", fontWeight = FontWeight.SemiBold) },
+        text = { GlassTextField(c, name, onChange, "Folder Name", icon = Icons.Default.CreateNewFolder) },
+        confirmButton = { Button(onClick = onConfirm, enabled = name.trim().isNotEmpty(), colors = ButtonDefaults.buttonColors(c.accent)) { Text("Create") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = c.textSecondary) } })
+}
+
+@Composable private fun GlassTextField(c: AppColors, value: String, onValueChange: (String) -> Unit, label: String, placeholder: String = "", icon: ImageVector, isPassword: Boolean = false, showPassword: Boolean = false, onTogglePassword: (() -> Unit)? = null) {
+    OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text(label, color = c.textTertiary) },
+        placeholder = if (placeholder.isNotEmpty()) {{ Text(placeholder, color = c.textTertiary.copy(0.5f)) }} else null,
+        singleLine = true, modifier = Modifier.fillMaxWidth(),
+        leadingIcon = { Icon(icon, null, tint = c.accent.copy(0.7f)) },
+        trailingIcon = if (isPassword && onTogglePassword != null) {{ IconButton(onClick = onTogglePassword) { Icon(if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Toggle", tint = c.textTertiary) } }} else null,
+        visualTransformation = if (isPassword && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
+        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = c.textPrimary, unfocusedTextColor = c.textPrimary, cursorColor = c.accentSecondary, focusedBorderColor = c.accent, unfocusedBorderColor = c.glassBorder, focusedLabelColor = c.accentSecondary, unfocusedLabelColor = c.textTertiary))
 }

@@ -4,6 +4,7 @@ import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.Window
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -23,17 +24,42 @@ class ServerConnectActivity : ComponentActivity() {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         super.onCreate(savedInstanceState)
 
-        // ✅ FIX: Lock to portrait so the screen never rotates into landscape.
-        // Landscape mode was showing a fullscreen/distorted layout because edge-to-edge
-        // with transparent bars + horizontal insets in landscape causes the Scaffold
-        // content to fill the full display width including notch/cutout areas.
-        // Locking portrait eliminates this entirely without needing custom inset handling.
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-
-        // Ensure decor does NOT fit system windows before setContent() creates Compose UI.
-        // This prevents a 1-frame layout jump on activity start.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         enableEdgeToEdge()
+
+        // ── Back button: folder-by-folder → close dialogs → disconnect → finish ──
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val state = viewModel.uiState.value
+                when {
+                    // Close multi-select first
+                    state.isMultiSelectMode -> {
+                        viewModel.handleEvent(ServerConnectEvent.ToggleMultiSelectMode)
+                    }
+                    // Close search
+                    state.isSearchActive -> {
+                        viewModel.handleEvent(ServerConnectEvent.ToggleSearch)
+                    }
+                    // Close any open dialog
+                    state.showConnectionDialog -> viewModel.handleEvent(ServerConnectEvent.HideConnectionDialog)
+                    state.showCreateFolderDialog -> viewModel.handleEvent(ServerConnectEvent.HideCreateFolderDialog)
+                    state.showFileContextMenu -> viewModel.handleEvent(ServerConnectEvent.HideFileContextMenu)
+                    state.showRenameDialog -> viewModel.handleEvent(ServerConnectEvent.HideRenameDialog)
+                    state.showMoveDialog -> viewModel.handleEvent(ServerConnectEvent.HideMoveDialog)
+                    state.showPropertiesDialog -> viewModel.handleEvent(ServerConnectEvent.HidePropertiesDialog)
+                    state.showEditServerDialog -> viewModel.handleEvent(ServerConnectEvent.HideEditServerDialog)
+                    // Navigate up through folders one by one
+                    viewModel.canNavigateBack() -> viewModel.navigateUp()
+                    // At root? Disconnect first
+                    state.isConnected -> viewModel.disconnect()
+                    // Nothing left — exit activity
+                    else -> finish()
+                }
+            }
+        })
+
+        val autoConnectId = intent.getStringExtra("auto_connect_server_id")
 
         setContent {
             Ritik_2Theme {
@@ -43,28 +69,10 @@ class ServerConnectActivity : ComponentActivity() {
                 ) {
                     ServerConnectApp(
                         viewModel = viewModel,
-                        onNavigateBack = { handleBackNavigation() }
+                        autoConnectServerId = autoConnectId
                     )
                 }
             }
-        }
-    }
-
-    private fun handleBackNavigation(): Boolean {
-        return if (viewModel.canNavigateBack()) {
-            viewModel.navigateUp()
-            true
-        } else {
-            finish()
-            false
-        }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (!handleBackNavigation()) {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
         }
     }
 }
@@ -72,10 +80,10 @@ class ServerConnectActivity : ComponentActivity() {
 @Composable
 private fun ServerConnectApp(
     viewModel: ServerConnectModule,
-    onNavigateBack: () -> Boolean
+    autoConnectServerId: String? = null
 ) {
-    ServerConnectScreen(
-        onNavigateBack = onNavigateBack,
-        viewModel = viewModel
-    )
+    if (autoConnectServerId != null) {
+        viewModel.handleEvent(ServerConnectEvent.AutoConnectServer(autoConnectServerId))
+    }
+    ServerConnectScreen(viewModel = viewModel)
 }

@@ -1,7 +1,11 @@
 package com.example.ritik_2.winshare
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.content.FileProvider
@@ -11,6 +15,7 @@ import jcifs.CIFSContext
 import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
 import jcifs.smb.NtlmPasswordAuthenticator
+import jcifs.smb.SmbAuthException
 import jcifs.smb.SmbException
 import jcifs.smb.SmbFile
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +63,7 @@ data class SMBFileItem(
             size < 1024 -> "$size B"
             size < 1024 * 1024 -> "${String.format("%.1f", size / 1024.0)} KB"
             size < 1024 * 1024 * 1024 -> "${String.format("%.1f", size / (1024.0 * 1024.0))} MB"
-            else -> "${String.format("%.1f", size / (1024.0 * 1024.0 * 1024.0))} GB"
+            else -> "${String.format("%.2f", size / (1024.0 * 1024.0 * 1024.0))} GB"
         }
 
     val formattedDate: String
@@ -68,7 +73,6 @@ data class SMBFileItem(
         get() = if (isDirectory) "" else name.substringAfterLast(".", "")
 }
 
-// Rich transfer statistics exposed to UI
 data class TransferStats(
     val fileName: String = "",
     val totalBytes: Long = 0L,
@@ -148,7 +152,22 @@ data class ServerConnectionState(
     val connectionLabel: String = "",
     val savedServers: List<SavedServer> = emptyList(),
     val sortByName: Boolean = true,
-    val sortAscending: Boolean = true
+    val sortAscending: Boolean = true,
+    val searchQuery: String = "",
+    val isSearchActive: Boolean = false,
+    val showRenameDialog: Boolean = false,
+    val showMoveDialog: Boolean = false,
+    val showPropertiesDialog: Boolean = false,
+    val showFileContextMenu: Boolean = false,
+    val showEditServerDialog: Boolean = false,
+    val contextMenuFile: SMBFileItem? = null,
+    val renameTarget: SMBFileItem? = null,
+    val renameNewName: String = "",
+    val moveTarget: SMBFileItem? = null,
+    val propertiesTarget: SMBFileItem? = null,
+    val moveDestination: String = "",
+    val editingServer: SavedServer? = null,
+    val autoConnectServerId: String? = null
 )
 
 sealed class ServerConnectEvent {
@@ -171,6 +190,23 @@ sealed class ServerConnectEvent {
     data class ToggleFileSelection(val fileName: String) : ServerConnectEvent()
     data class LoadSavedServer(val server: SavedServer) : ServerConnectEvent()
     data class DeleteSavedServer(val id: String) : ServerConnectEvent()
+    data class UpdateSearchQuery(val query: String) : ServerConnectEvent()
+    object ToggleSearch : ServerConnectEvent()
+    data class ShowFileContextMenu(val file: SMBFileItem) : ServerConnectEvent()
+    object HideFileContextMenu : ServerConnectEvent()
+    data class ShowRenameDialog(val file: SMBFileItem) : ServerConnectEvent()
+    object HideRenameDialog : ServerConnectEvent()
+    data class UpdateRenameName(val name: String) : ServerConnectEvent()
+    data class ShowMoveDialog(val file: SMBFileItem) : ServerConnectEvent()
+    object HideMoveDialog : ServerConnectEvent()
+    data class UpdateMoveDestination(val dest: String) : ServerConnectEvent()
+    data class ShowPropertiesDialog(val file: SMBFileItem) : ServerConnectEvent()
+    object HidePropertiesDialog : ServerConnectEvent()
+    data class ShowEditServerDialog(val server: SavedServer) : ServerConnectEvent()
+    object HideEditServerDialog : ServerConnectEvent()
+    data class AutoConnectServer(val serverId: String) : ServerConnectEvent()
+    // Long-press enters multi-select and selects that file
+    data class LongPressFile(val fileName: String) : ServerConnectEvent()
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -178,21 +214,21 @@ sealed class ServerConnectEvent {
 private const val PREFS_NAME        = "winshare_prefs"
 private const val KEY_SAVED_SERVERS = "saved_servers"
 
-// READ buffer: how much we pull from the source (local file / ContentResolver) at once.
-// Large value = fewer ContentResolver/filesystem calls = fast reads.
-private const val READ_BUFFER = 4 * 1024 * 1024       // 4 MB — local read-ahead
+// LOCAL read buffer: large chunks from ContentResolver / local disk (fast)
+private const val READ_BUFFER = 8 * 1024 * 1024       // 8 MB
 
-// WRITE chunk: the maximum bytes sent in a SINGLE SMB2_WRITE command.
-// The SMB server advertises its own MaxWriteSize (usually 65536 for older servers,
-// up to 8MB for modern SMB3 servers). Exceeding it causes:
-//   SmbException: Request size XXXXXX exceeds allowable size 65536
-// We stay safely under 64KB so ANY server accepts it. For SMB3 servers that support
-// larger writes, jCIFS-ng will automatically negotiate a higher limit and you can
-// raise this — but 60KB works universally without crashing.
-private const val SMB_WRITE_CHUNK = 60 * 1024         // 60 KB — safe for all SMB servers
+// SMB read buffer: must stay within the server's negotiated MaxReadSize.
+// Most SMB2/3 servers cap at 64KB–1MB. Using 60KB is safe for ALL servers
+// (including older ones with 64KB limit). jCIFS wraps this into SMB2_READ
+// commands — if the buffer exceeds MaxReadSize the server returns
+// "The parameter is incorrect" (STATUS_INVALID_PARAMETER).
+private const val SMB_READ_BUFFER = 60 * 1024          // 60 KB — safe for all SMB servers
 
-// Alias used for download (reading FROM smb into local file — not constrained by server write limit)
-private const val TRANSFER_BUFFER = READ_BUFFER
+// SMB write chunk: same constraint as reads — stay within MaxWriteSize.
+private const val SMB_WRITE_CHUNK = 60 * 1024          // 60 KB
+
+// Local file write buffer (downloading FROM smb TO local disk)
+private const val LOCAL_WRITE_BUFFER = 4 * 1024 * 1024 // 4 MB
 
 // ─── ViewModel ──────────────────────────────────────────────────────────────
 
@@ -207,12 +243,10 @@ class ServerConnectModule : ViewModel() {
     private val _successMessages = MutableSharedFlow<String>()
     val successMessages: SharedFlow<String> = _successMessages
 
-    private val _navigationEvents = MutableSharedFlow<Boolean>()
-    val navigationEvents: SharedFlow<Boolean> = _navigationEvents
-
     private var cifsContext: CIFSContext? = null
     private val pathStack = mutableListOf<String>()
     private var activeTransferJob: Job? = null
+    private var unfilteredFileList: List<SMBFileItem> = emptyList()
 
     // ─── SharedPreferences ──────────────────────────────────────────────────
 
@@ -245,15 +279,18 @@ class ServerConnectModule : ViewModel() {
         if (s.serverAddress.isBlank() || s.username.isBlank()) return
         val label = s.connectionLabel.ifBlank { s.serverAddress }
         val newSrv = SavedServer(
-            id = System.currentTimeMillis().toString(),
-            label = label,
-            serverAddress = s.serverAddress,
-            username = s.username,
-            password = s.password,
-            shareName = s.shareName
+            id = System.currentTimeMillis().toString(), label = label,
+            serverAddress = s.serverAddress, username = s.username,
+            password = s.password, shareName = s.shareName
         )
         val updated = _uiState.value.savedServers.filter { it.serverAddress != newSrv.serverAddress } + newSrv
         _uiState.update { it.copy(savedServers = updated) }
+        persistServers(context, updated)
+    }
+
+    fun updateSavedServer(context: Context, server: SavedServer) {
+        val updated = _uiState.value.savedServers.map { if (it.id == server.id) server else it }
+        _uiState.update { it.copy(savedServers = updated, showEditServerDialog = false, editingServer = null) }
         persistServers(context, updated)
     }
 
@@ -261,44 +298,30 @@ class ServerConnectModule : ViewModel() {
 
     fun handleEvent(event: ServerConnectEvent) {
         when (event) {
-            is ServerConnectEvent.ShowConnectionDialog ->
-                _uiState.update { it.copy(showConnectionDialog = true) }
-            is ServerConnectEvent.HideConnectionDialog ->
-                _uiState.update { it.copy(showConnectionDialog = false) }
-            is ServerConnectEvent.ShowCreateFolderDialog ->
-                _uiState.update { it.copy(showCreateFolderDialog = true, newFolderName = "") }
-            is ServerConnectEvent.HideCreateFolderDialog ->
-                _uiState.update { it.copy(showCreateFolderDialog = false, newFolderName = "") }
-            is ServerConnectEvent.ShowSavedServersDialog ->
-                _uiState.update { it.copy(showSavedServersDialog = true) }
-            is ServerConnectEvent.HideSavedServersDialog ->
-                _uiState.update { it.copy(showSavedServersDialog = false) }
+            is ServerConnectEvent.ShowConnectionDialog -> _uiState.update { it.copy(showConnectionDialog = true) }
+            is ServerConnectEvent.HideConnectionDialog -> _uiState.update { it.copy(showConnectionDialog = false) }
+            is ServerConnectEvent.ShowCreateFolderDialog -> _uiState.update { it.copy(showCreateFolderDialog = true, newFolderName = "") }
+            is ServerConnectEvent.HideCreateFolderDialog -> _uiState.update { it.copy(showCreateFolderDialog = false, newFolderName = "") }
+            is ServerConnectEvent.ShowSavedServersDialog -> _uiState.update { it.copy(showSavedServersDialog = true) }
+            is ServerConnectEvent.HideSavedServersDialog -> _uiState.update { it.copy(showSavedServersDialog = false) }
             is ServerConnectEvent.ToggleMultiSelectMode ->
                 _uiState.update { it.copy(isMultiSelectMode = !it.isMultiSelectMode, selectedFiles = emptySet()) }
-            is ServerConnectEvent.ClearSelection ->
-                _uiState.update { it.copy(selectedFiles = emptySet()) }
+            is ServerConnectEvent.ClearSelection -> _uiState.update { it.copy(selectedFiles = emptySet()) }
             is ServerConnectEvent.ToggleSortOrder ->
                 _uiState.update {
                     it.copy(sortAscending = !it.sortAscending,
                         fileList = sortFiles(it.fileList, it.sortByName, !it.sortAscending))
                 }
             is ServerConnectEvent.CancelTransfer -> {
-                activeTransferJob?.cancel()
-                activeTransferJob = null
+                activeTransferJob?.cancel(); activeTransferJob = null
                 _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
             }
-            is ServerConnectEvent.UpdateServerAddress ->
-                _uiState.update { it.copy(serverAddress = event.address) }
-            is ServerConnectEvent.UpdateUsername ->
-                _uiState.update { it.copy(username = event.username) }
-            is ServerConnectEvent.UpdatePassword ->
-                _uiState.update { it.copy(password = event.password) }
-            is ServerConnectEvent.UpdateShareName ->
-                _uiState.update { it.copy(shareName = event.share) }
-            is ServerConnectEvent.UpdateNewFolderName ->
-                _uiState.update { it.copy(newFolderName = event.name) }
-            is ServerConnectEvent.UpdateConnectionLabel ->
-                _uiState.update { it.copy(connectionLabel = event.label) }
+            is ServerConnectEvent.UpdateServerAddress -> _uiState.update { it.copy(serverAddress = event.address) }
+            is ServerConnectEvent.UpdateUsername -> _uiState.update { it.copy(username = event.username) }
+            is ServerConnectEvent.UpdatePassword -> _uiState.update { it.copy(password = event.password) }
+            is ServerConnectEvent.UpdateShareName -> _uiState.update { it.copy(shareName = event.share) }
+            is ServerConnectEvent.UpdateNewFolderName -> _uiState.update { it.copy(newFolderName = event.name) }
+            is ServerConnectEvent.UpdateConnectionLabel -> _uiState.update { it.copy(connectionLabel = event.label) }
             is ServerConnectEvent.ToggleFileSelection ->
                 _uiState.update { state ->
                     val sel = if (state.selectedFiles.contains(event.fileName))
@@ -307,24 +330,74 @@ class ServerConnectModule : ViewModel() {
                 }
             is ServerConnectEvent.LoadSavedServer ->
                 _uiState.update {
-                    it.copy(
-                        serverAddress = event.server.serverAddress,
-                        username = event.server.username,
-                        password = event.server.password,
-                        shareName = event.server.shareName,
-                        connectionLabel = event.server.label,
-                        showSavedServersDialog = false,
-                        showConnectionDialog = true
-                    )
+                    it.copy(serverAddress = event.server.serverAddress, username = event.server.username,
+                        password = event.server.password, shareName = event.server.shareName,
+                        connectionLabel = event.server.label, showSavedServersDialog = false, showConnectionDialog = true)
                 }
             is ServerConnectEvent.DeleteSavedServer ->
                 _uiState.update { s -> s.copy(savedServers = s.savedServers.filter { it.id != event.id }) }
+            is ServerConnectEvent.UpdateSearchQuery -> {
+                val q = event.query
+                _uiState.update { state ->
+                    val filtered = if (q.isBlank()) unfilteredFileList
+                    else unfilteredFileList.filter { it.name.contains(q, ignoreCase = true) }
+                    state.copy(searchQuery = q, fileList = sortFiles(filtered, state.sortByName, state.sortAscending))
+                }
+            }
+            is ServerConnectEvent.ToggleSearch -> {
+                _uiState.update {
+                    if (it.isSearchActive) {
+                        it.copy(isSearchActive = false, searchQuery = "",
+                            fileList = sortFiles(unfilteredFileList, it.sortByName, it.sortAscending))
+                    } else it.copy(isSearchActive = true)
+                }
+            }
+            is ServerConnectEvent.ShowFileContextMenu ->
+                _uiState.update { it.copy(showFileContextMenu = true, contextMenuFile = event.file) }
+            is ServerConnectEvent.HideFileContextMenu ->
+                _uiState.update { it.copy(showFileContextMenu = false, contextMenuFile = null) }
+            is ServerConnectEvent.ShowRenameDialog ->
+                _uiState.update { it.copy(showRenameDialog = true, renameTarget = event.file,
+                    renameNewName = event.file.name, showFileContextMenu = false) }
+            is ServerConnectEvent.HideRenameDialog ->
+                _uiState.update { it.copy(showRenameDialog = false, renameTarget = null, renameNewName = "") }
+            is ServerConnectEvent.UpdateRenameName -> _uiState.update { it.copy(renameNewName = event.name) }
+            is ServerConnectEvent.ShowMoveDialog ->
+                _uiState.update { it.copy(showMoveDialog = true, moveTarget = event.file,
+                    moveDestination = "", showFileContextMenu = false) }
+            is ServerConnectEvent.HideMoveDialog ->
+                _uiState.update { it.copy(showMoveDialog = false, moveTarget = null, moveDestination = "") }
+            is ServerConnectEvent.UpdateMoveDestination -> _uiState.update { it.copy(moveDestination = event.dest) }
+            is ServerConnectEvent.ShowPropertiesDialog ->
+                _uiState.update { it.copy(showPropertiesDialog = true, propertiesTarget = event.file, showFileContextMenu = false) }
+            is ServerConnectEvent.HidePropertiesDialog ->
+                _uiState.update { it.copy(showPropertiesDialog = false, propertiesTarget = null) }
+            is ServerConnectEvent.ShowEditServerDialog ->
+                _uiState.update { it.copy(showEditServerDialog = true, editingServer = event.server) }
+            is ServerConnectEvent.HideEditServerDialog ->
+                _uiState.update { it.copy(showEditServerDialog = false, editingServer = null) }
+            is ServerConnectEvent.AutoConnectServer ->
+                _uiState.update { it.copy(autoConnectServerId = event.serverId) }
+            // Long-press: enter multi-select + select this file
+            is ServerConnectEvent.LongPressFile -> {
+                _uiState.update { state ->
+                    if (state.isMultiSelectMode) {
+                        // Already in multi-select, toggle this file
+                        val sel = if (state.selectedFiles.contains(event.fileName))
+                            state.selectedFiles - event.fileName else state.selectedFiles + event.fileName
+                        state.copy(selectedFiles = sel)
+                    } else {
+                        // Enter multi-select and select this file
+                        state.copy(isMultiSelectMode = true, selectedFiles = setOf(event.fileName))
+                    }
+                }
+            }
         }
     }
 
     // ─── Connection ─────────────────────────────────────────────────────────
 
-    suspend fun connectToServer(context: Context? = null) {
+    suspend fun connectToServer(context: Context? = null, savedServer: SavedServer? = null) {
         viewModelScope.launch {
             val server   = _uiState.value.serverAddress
             val username = _uiState.value.username
@@ -338,32 +411,17 @@ class ServerConnectModule : ViewModel() {
                         setProperty("jcifs.smb.client.soTimeout", "35000")
                         setProperty("jcifs.smb.client.connTimeout", "60000")
                         setProperty("jcifs.smb.client.dfs.disabled", "true")
-
-                        // 🚀 SPEED FIX #2: Socket buffer sizes increased from 128KB → 4MB.
-                        // These control how much data jCIFS can pipeline in-flight at once.
-                        // Small buffers cause the sender to stall waiting for ACKs on fast networks.
-                        setProperty("jcifs.smb.client.rcv_buf_size", "4194304")   // 4 MB receive
-                        setProperty("jcifs.smb.client.snd_buf_size", "4194304")   // 4 MB send
-                        setProperty("jcifs.smb.client.transaction_buf_size", "4194304") // 4 MB transaction
-
-                        // 🚀 SPEED FIX #3: Prefer SMB2/3 over SMB1.
-                        // SMB2+ has compound requests, larger max I/O sizes, and much better
-                        // pipeline depth. SMB1 has a hard 64KB max transfer unit.
-                        setProperty("jcifs.smb.client.maxVersion", "SMB300")
+                        setProperty("jcifs.smb.client.rcv_buf_size", "8388608")
+                        setProperty("jcifs.smb.client.snd_buf_size", "8388608")
+                        setProperty("jcifs.smb.client.transaction_buf_size", "8388608")
+                        setProperty("jcifs.smb.client.maxVersion", "SMB311")
                         setProperty("jcifs.smb.client.minVersion", "SMB202")
-
-                        // 🚀 SPEED FIX #4: Disable signing when not required.
-                        // Packet signing adds HMAC computation overhead on every packet.
-                        // Disable it on trusted LAN connections for a 10–20% CPU saving.
                         setProperty("jcifs.smb.client.signingPreferred", "false")
                         setProperty("jcifs.smb.client.signingEnforced", "false")
-
-                        // 🚀 SPEED FIX #5: Larger directory listing buffer.
                         setProperty("jcifs.smb.client.listSize", "65535")
-
-                        // Misc reliability / performance settings
                         setProperty("jcifs.smb.client.useExtendedSecurity", "true")
                         setProperty("jcifs.smb.client.tcpNoDelay", "true")
+                        setProperty("jcifs.smb.client.useLargeReadWrite", "true")
                     }
                     val baseCtx = BaseContext(PropertyConfiguration(props))
                     cifsContext = baseCtx.withCredentials(NtlmPasswordAuthenticator(null, username, password))
@@ -376,22 +434,41 @@ class ServerConnectModule : ViewModel() {
                             SMBFileItem(f.name.removeSuffix("/"), f.path, f.isDirectory, 0, f.lastModified())
                         } ?: emptyList()
                     } else listFiles(server, share, "")
+                    unfilteredFileList = fileList
                     val breadcrumbs = if (share.isEmpty()) emptyList() else listOf(share)
                     _uiState.update {
                         it.copy(isConnected = true, isLoading = false, currentServer = server,
                             currentShare = share, currentPath = "",
                             fileList = sortFiles(fileList, it.sortByName, it.sortAscending),
-                            breadcrumbs = breadcrumbs)
+                            breadcrumbs = breadcrumbs, autoConnectServerId = null)
                     }
                     _successMessages.emit(if (share.isEmpty()) "Connected to $server" else "Connected to \\\\$server\\$share")
                 }
                 context?.let { saveCurrentServer(it) }
+            } catch (e: SmbAuthException) {
+                Log.e("ServerConnectModule", "Auth error", e)
+                _uiState.update { it.copy(isLoading = false, autoConnectServerId = null) }
+                _errorMessages.emit("Authentication failed — check credentials")
+                if (savedServer != null) {
+                    _uiState.update { it.copy(showEditServerDialog = true, editingServer = savedServer) }
+                } else {
+                    _uiState.update { it.copy(showConnectionDialog = true) }
+                }
             } catch (e: Exception) {
                 Log.e("ServerConnectModule", "Connection error", e)
-                _uiState.update { it.copy(isLoading = false) }
+                _uiState.update { it.copy(isLoading = false, autoConnectServerId = null) }
                 _errorMessages.emit("Connection failed: ${e.message}")
             }
         }
+    }
+
+    fun autoConnectSavedServer(server: SavedServer, context: Context) {
+        _uiState.update {
+            it.copy(serverAddress = server.serverAddress, username = server.username,
+                password = server.password, shareName = server.shareName,
+                connectionLabel = server.label, showSavedServersDialog = false)
+        }
+        viewModelScope.launch { connectToServer(context, savedServer = server) }
     }
 
     // ─── Navigation ─────────────────────────────────────────────────────────
@@ -399,11 +476,11 @@ class ServerConnectModule : ViewModel() {
     fun navigateToDirectory(directoryName: String) {
         viewModelScope.launch {
             try {
-                _uiState.update { it.copy(isLoading = true, selectedFiles = emptySet()) }
-                val path = if (_uiState.value.currentPath.isEmpty()) directoryName
-                else "${_uiState.value.currentPath}/$directoryName"
+                _uiState.update { it.copy(isLoading = true, selectedFiles = emptySet(), isMultiSelectMode = false, searchQuery = "", isSearchActive = false) }
+                val path = if (_uiState.value.currentPath.isEmpty()) directoryName else "${_uiState.value.currentPath}/$directoryName"
                 pathStack.add(path)
                 val files = listFiles(_uiState.value.currentServer, _uiState.value.currentShare, path)
+                unfilteredFileList = files
                 val crumbs = listOf(_uiState.value.currentShare) + path.split("/").filter { it.isNotEmpty() }
                 _uiState.update {
                     it.copy(isLoading = false, currentPath = path,
@@ -423,10 +500,11 @@ class ServerConnectModule : ViewModel() {
             else {
                 viewModelScope.launch {
                     try {
-                        _uiState.update { it.copy(isLoading = true, selectedFiles = emptySet()) }
+                        _uiState.update { it.copy(isLoading = true, selectedFiles = emptySet(), isMultiSelectMode = false, searchQuery = "", isSearchActive = false) }
                         pathStack.removeAt(pathStack.size - 1)
                         val parent = pathStack.last()
                         val files = listFiles(_uiState.value.currentServer, _uiState.value.currentShare, parent)
+                        unfilteredFileList = files
                         val crumbs = if (parent.isEmpty()) listOf(_uiState.value.currentShare)
                         else listOf(_uiState.value.currentShare) + parent.split("/").filter { it.isNotEmpty() }
                         _uiState.update {
@@ -447,9 +525,8 @@ class ServerConnectModule : ViewModel() {
     fun navigateToBreadcrumb(index: Int) {
         viewModelScope.launch {
             try {
-                _uiState.update { it.copy(isLoading = true, selectedFiles = emptySet()) }
-                val target = if (index == 0) ""
-                else _uiState.value.breadcrumbs.drop(1).take(index).joinToString("/")
+                _uiState.update { it.copy(isLoading = true, selectedFiles = emptySet(), isMultiSelectMode = false, searchQuery = "", isSearchActive = false) }
+                val target = if (index == 0) "" else _uiState.value.breadcrumbs.drop(1).take(index).joinToString("/")
                 pathStack.clear(); pathStack.add("")
                 if (target.isNotEmpty()) {
                     target.split("/").forEachIndexed { i, _ ->
@@ -457,6 +534,7 @@ class ServerConnectModule : ViewModel() {
                     }
                 }
                 val files = listFiles(_uiState.value.currentServer, _uiState.value.currentShare, target)
+                unfilteredFileList = files
                 _uiState.update {
                     it.copy(isLoading = false, currentPath = target,
                         fileList = sortFiles(files, it.sortByName, it.sortAscending),
@@ -475,7 +553,10 @@ class ServerConnectModule : ViewModel() {
             try {
                 _uiState.update { it.copy(isLoading = true) }
                 val files = listFiles(_uiState.value.currentServer, _uiState.value.currentShare, _uiState.value.currentPath)
-                _uiState.update { it.copy(isLoading = false, fileList = sortFiles(files, it.sortByName, it.sortAscending)) }
+                unfilteredFileList = files
+                val q = _uiState.value.searchQuery
+                val filtered = if (q.isBlank()) files else files.filter { it.name.contains(q, ignoreCase = true) }
+                _uiState.update { it.copy(isLoading = false, fileList = sortFiles(filtered, it.sortByName, it.sortAscending)) }
             } catch (e: Exception) {
                 Log.e("ServerConnectModule", "Refresh error", e)
                 _uiState.update { it.copy(isLoading = false) }
@@ -506,6 +587,59 @@ class ServerConnectModule : ViewModel() {
         }
     }
 
+    fun renameFile() {
+        viewModelScope.launch {
+            try {
+                val target = _uiState.value.renameTarget ?: return@launch
+                val newName = _uiState.value.renameNewName.trim()
+                if (newName.isEmpty() || newName == target.name) {
+                    _uiState.update { it.copy(showRenameDialog = false, renameTarget = null) }; return@launch
+                }
+                _uiState.update { it.copy(isLoading = true, showRenameDialog = false) }
+                withContext(Dispatchers.IO) {
+                    val basePath = "smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/" +
+                            (if (_uiState.value.currentPath.isEmpty()) "" else "${_uiState.value.currentPath}/")
+                    val suffix = if (target.isDirectory) "/" else ""
+                    SmbFile("$basePath${target.name}$suffix", cifsContext)
+                        .renameTo(SmbFile("$basePath$newName$suffix", cifsContext))
+                }
+                _uiState.update { it.copy(renameTarget = null, renameNewName = "") }
+                refreshFiles()
+                _successMessages.emit("Renamed to '$newName'")
+            } catch (e: Exception) {
+                Log.e("ServerConnectModule", "Rename error", e)
+                _uiState.update { it.copy(isLoading = false) }
+                _errorMessages.emit("Rename failed: ${e.message}")
+            }
+        }
+    }
+
+    fun moveFile() {
+        viewModelScope.launch {
+            try {
+                val target = _uiState.value.moveTarget ?: return@launch
+                val dest = _uiState.value.moveDestination.trim()
+                if (dest.isEmpty()) { _uiState.update { it.copy(showMoveDialog = false, moveTarget = null) }; return@launch }
+                _uiState.update { it.copy(isLoading = true, showMoveDialog = false) }
+                withContext(Dispatchers.IO) {
+                    val basePath = "smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/"
+                    val srcFolder = if (_uiState.value.currentPath.isEmpty()) "" else "${_uiState.value.currentPath}/"
+                    val suffix = if (target.isDirectory) "/" else ""
+                    val dstFolder = if (dest.endsWith("/")) dest else "$dest/"
+                    SmbFile("$basePath$srcFolder${target.name}$suffix", cifsContext)
+                        .renameTo(SmbFile("$basePath$dstFolder${target.name}$suffix", cifsContext))
+                }
+                _uiState.update { it.copy(moveTarget = null, moveDestination = "") }
+                refreshFiles()
+                _successMessages.emit("'${target.name}' moved to '$dest'")
+            } catch (e: Exception) {
+                Log.e("ServerConnectModule", "Move error", e)
+                _uiState.update { it.copy(isLoading = false) }
+                _errorMessages.emit("Move failed: ${e.message}")
+            }
+        }
+    }
+
     suspend fun uploadFile(uri: Uri, context: Context): Boolean {
         activeTransferJob?.cancel()
         var success = false
@@ -515,73 +649,34 @@ class ServerConnectModule : ViewModel() {
                     val cr = context.contentResolver
                     val cursor = cr.query(uri, null, null, null, null)
                     val fileName = cursor?.use {
-                        if (it.moveToFirst()) {
-                            val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                            if (idx != -1) it.getString(idx) else "uploaded_file"
-                        } else "uploaded_file"
+                        if (it.moveToFirst()) { val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (idx != -1) it.getString(idx) else "uploaded_file" } else "uploaded_file"
                     } ?: "uploaded_file"
-
                     val fileSize = try { cr.openFileDescriptor(uri, "r")?.statSize ?: 0L } catch (_: Exception) { 0L }
                     val targetPath = if (_uiState.value.currentPath.isEmpty()) fileName else "${_uiState.value.currentPath}/$fileName"
                     val smbFile = SmbFile("smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/$targetPath", cifsContext)
-
-                    _uiState.update {
-                        it.copy(isTransferring = true,
-                            transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, isUpload = true))
-                    }
-
+                    _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, isUpload = true)) }
                     val startTime = System.currentTimeMillis()
                     var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
                     val speedWindow = ArrayDeque<Pair<Long, Long>>()
-
-                    // UPLOAD STRATEGY:
-                    // ┌─────────────────────────────────────────────────────────────────┐
-                    // │  READ  large chunks (4MB) from ContentResolver for speed        │
-                    // │  WRITE small chunks (60KB) to SMB to stay within MaxWriteSize   │
-                    // │                                                                  │
-                    // │  The SMB server caps each SMB2_WRITE command at its negotiated  │
-                    // │  MaxWriteSize (often 65536 for older servers). Writing more than │
-                    // │  that in one call causes:                                        │
-                    // │    SmbException: Request size XXXXX exceeds allowable size 65536 │
-                    // │  So we read a big chunk into a local buffer, then loop-write it  │
-                    // │  to SMB in SMB_WRITE_CHUNK sized pieces. This gives us both      │
-                    // │  fast local reads AND protocol-compliant SMB writes.             │
-                    // └─────────────────────────────────────────────────────────────────┘
                     cr.openInputStream(uri)?.let { rawInput ->
                         BufferedInputStream(rawInput, READ_BUFFER).use { input ->
                             smbFile.outputStream.use { smbOut ->
                                 val readBuf = ByteArray(READ_BUFFER)
                                 var readBytes = input.read(readBuf)
                                 while (readBytes != -1 && isActive) {
-                                    // Write the chunk we just read to SMB in SMB_WRITE_CHUNK pieces
                                     var writeOffset = 0
                                     while (writeOffset < readBytes && isActive) {
                                         val writeLen = minOf(SMB_WRITE_CHUNK, readBytes - writeOffset)
-                                        smbOut.write(readBuf, writeOffset, writeLen)
-                                        writeOffset += writeLen
-                                        transferred += writeLen
-
-                                        val now = System.currentTimeMillis()
-                                        val elapsed = now - lastTime
+                                        smbOut.write(readBuf, writeOffset, writeLen); writeOffset += writeLen; transferred += writeLen
+                                        val now = System.currentTimeMillis(); val elapsed = now - lastTime
                                         speedWindow.addLast(now to transferred)
                                         while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
                                         if (elapsed >= 300) {
-                                            val winSpeed = if (speedWindow.size >= 2) {
-                                                val d = speedWindow.last().first - speedWindow.first().first
-                                                if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L
-                                            } else 0L
+                                            val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
                                             val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                            val tot = now - startTime
-                                            val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                            if (cur > peakSpeed) peakSpeed = cur
-                                            lastTime = now; lastBytes = transferred
-                                            _uiState.update {
-                                                it.copy(transferStats = TransferStats(
-                                                    fileName = fileName, totalBytes = fileSize, transferredBytes = transferred,
-                                                    currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur),
-                                                    peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg,
-                                                    elapsedMs = tot, isUpload = true))
-                                            }
+                                            val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                            if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
+                                            _uiState.update { it.copy(transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = true)) }
                                         }
                                     }
                                     readBytes = input.read(readBuf)
@@ -591,26 +686,16 @@ class ServerConnectModule : ViewModel() {
                         }
                     }
                     if (isActive) {
-                        success = true
-                        val totalMs = System.currentTimeMillis() - startTime
-                        val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
+                        success = true; val totalMs = System.currentTimeMillis() - startTime; val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
                         _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
-                        viewModelScope.launch {
-                            refreshFiles()
-                            _successMessages.emit("'$fileName' uploaded @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}")
-                        }
+                        viewModelScope.launch { refreshFiles(); _successMessages.emit("'$fileName' uploaded @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}") }
                     }
                 } catch (e: Exception) {
-                    if (isActive) {
-                        Log.e("ServerConnectModule", "Upload error", e)
-                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
-                        viewModelScope.launch { _errorMessages.emit("Upload failed: ${e.message}") }
-                    }
+                    if (isActive) { Log.e("ServerConnectModule", "Upload error", e); _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }; viewModelScope.launch { _errorMessages.emit("Upload failed: ${e.message}") } }
                 }
             }
         }
-        activeTransferJob = job; job.join()
-        return success
+        activeTransferJob = job; job.join(); return success
     }
 
     suspend fun downloadFile(fileItem: SMBFileItem, context: Context): Uri? {
@@ -622,47 +707,37 @@ class ServerConnectModule : ViewModel() {
                     val url = "smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/${_uiState.value.currentPath}/${fileItem.name}"
                     val smbFile = SmbFile(url, cifsContext)
                     val fileSize = try { smbFile.length() } catch (_: Exception) { 0L }
-                    _uiState.update {
-                        it.copy(isTransferring = true,
-                            transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, isUpload = false))
+                    _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, isUpload = false)) }
+                    val outputStream = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, fileItem.name)
+                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/WinShare")
+                            put(MediaStore.Downloads.IS_PENDING, 1)
+                        }
+                        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values); resultUri = uri
+                        uri?.let { context.contentResolver.openOutputStream(it) }
+                    } else {
+                        @Suppress("DEPRECATION") val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "WinShare")
+                        if (!dir.exists()) dir.mkdirs(); val localFile = File(dir, fileItem.name); resultUri = Uri.fromFile(localFile); FileOutputStream(localFile)
                     }
-                    val downloadsDir = File(context.cacheDir, "smb_downloads").also { if (!it.exists()) it.mkdirs() }
-                    val localFile = File(downloadsDir, fileItem.name)
+                    if (outputStream == null) { _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }; _errorMessages.emit("Could not create output file"); return@withContext }
                     val startTime = System.currentTimeMillis()
                     var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
                     val speedWindow = ArrayDeque<Pair<Long, Long>>()
-
-                    // 🚀 SPEED FIX #6 (download): Same buffered stream wrapping as upload.
-                    // BufferedInputStream on the SMB side pre-fetches data, and
-                    // BufferedOutputStream on the local file side batches disk writes.
-                    BufferedInputStream(smbFile.inputStream, TRANSFER_BUFFER).use { input ->
-                        BufferedOutputStream(FileOutputStream(localFile), TRANSFER_BUFFER).use { output ->
-                            val buf = ByteArray(TRANSFER_BUFFER)
-                            var bytes = input.read(buf)
+                    BufferedInputStream(smbFile.inputStream, SMB_READ_BUFFER).use { input ->
+                        BufferedOutputStream(outputStream, LOCAL_WRITE_BUFFER).use { output ->
+                            val buf = ByteArray(SMB_READ_BUFFER); var bytes = input.read(buf)
                             while (bytes != -1 && isActive) {
-                                output.write(buf, 0, bytes)
-                                transferred += bytes
-                                val now = System.currentTimeMillis()
-                                val elapsed = now - lastTime
+                                output.write(buf, 0, bytes); transferred += bytes
+                                val now = System.currentTimeMillis(); val elapsed = now - lastTime
                                 speedWindow.addLast(now to transferred)
                                 while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
                                 if (elapsed >= 300) {
-                                    val winSpeed = if (speedWindow.size >= 2) {
-                                        val d = speedWindow.last().first - speedWindow.first().first
-                                        if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L
-                                    } else 0L
+                                    val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
                                     val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                    val tot = now - startTime
-                                    val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                    if (cur > peakSpeed) peakSpeed = cur
-                                    lastTime = now; lastBytes = transferred
-                                    _uiState.update {
-                                        it.copy(transferStats = TransferStats(
-                                            fileName = fileItem.name, totalBytes = fileSize, transferredBytes = transferred,
-                                            currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur),
-                                            peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg,
-                                            elapsedMs = tot, isUpload = false))
-                                    }
+                                    val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                    if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
+                                    _uiState.update { it.copy(transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = false)) }
                                 }
                                 bytes = input.read(buf)
                             }
@@ -670,34 +745,25 @@ class ServerConnectModule : ViewModel() {
                         }
                     }
                     if (isActive) {
-                        val totalMs = System.currentTimeMillis() - startTime
-                        val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
-                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
-                        resultUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", localFile)
-                        viewModelScope.launch {
-                            _successMessages.emit("'${fileItem.name}' downloaded @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && resultUri != null) {
+                            context.contentResolver.update(resultUri!!, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
                         }
-                    } else {
-                        localFile.delete()
+                        val totalMs = System.currentTimeMillis() - startTime; val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
+                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                        viewModelScope.launch { _successMessages.emit("'${fileItem.name}' → Downloads/WinShare @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}") }
                     }
                 } catch (e: Exception) {
-                    if (isActive) {
-                        Log.e("ServerConnectModule", "Download error", e)
-                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
-                        viewModelScope.launch { _errorMessages.emit("Download failed: ${e.message}") }
-                    }
+                    if (isActive) { Log.e("ServerConnectModule", "Download error", e); _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }; viewModelScope.launch { _errorMessages.emit("Download failed: ${e.message}") } }
                 }
             }
         }
-        activeTransferJob = job; job.join()
-        return resultUri
+        activeTransferJob = job; job.join(); return resultUri
     }
 
     fun deleteSelectedFiles() {
         viewModelScope.launch {
             try {
-                val selected = _uiState.value.selectedFiles
-                if (selected.isEmpty()) return@launch
+                val selected = _uiState.value.selectedFiles; if (selected.isEmpty()) return@launch
                 _uiState.update { it.copy(isLoading = true) }
                 withContext(Dispatchers.IO) {
                     selected.forEach { fileName ->
@@ -707,65 +773,60 @@ class ServerConnectModule : ViewModel() {
                     }
                 }
                 _uiState.update { it.copy(selectedFiles = emptySet(), isMultiSelectMode = false) }
-                refreshFiles()
-                _successMessages.emit("${selected.size} item(s) deleted")
+                refreshFiles(); _successMessages.emit("${selected.size} item(s) deleted")
             } catch (e: Exception) {
-                Log.e("ServerConnectModule", "Delete error", e)
-                _uiState.update { it.copy(isLoading = false) }
-                _errorMessages.emit("Delete failed: ${e.message}")
+                Log.e("ServerConnectModule", "Delete error", e); _uiState.update { it.copy(isLoading = false) }; _errorMessages.emit("Delete failed: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteSingleFile(file: SMBFileItem) {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isLoading = true, showFileContextMenu = false, contextMenuFile = null) }
+                withContext(Dispatchers.IO) {
+                    val path = if (_uiState.value.currentPath.isEmpty()) file.name else "${_uiState.value.currentPath}/${file.name}"
+                    val suffix = if (file.isDirectory) "/" else ""
+                    val smb = SmbFile("smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/$path$suffix", cifsContext)
+                    if (smb.isDirectory) deleteDirectoryRecursively(smb) else smb.delete()
+                }
+                refreshFiles(); _successMessages.emit("'${file.name}' deleted")
+            } catch (e: Exception) {
+                Log.e("ServerConnectModule", "Delete error", e); _uiState.update { it.copy(isLoading = false) }; _errorMessages.emit("Delete failed: ${e.message}")
             }
         }
     }
 
     private suspend fun deleteDirectoryRecursively(smbFile: SmbFile) {
-        smbFile.listFiles()?.forEach { f -> if (f.isDirectory) deleteDirectoryRecursively(f) else f.delete() }
-        smbFile.delete()
+        smbFile.listFiles()?.forEach { f -> if (f.isDirectory) deleteDirectoryRecursively(f) else f.delete() }; smbFile.delete()
     }
 
     fun disconnect() {
         viewModelScope.launch {
             try {
-                activeTransferJob?.cancel()
-                cifsContext = null; pathStack.clear()
-                _uiState.update {
-                    ServerConnectionState(
-                        serverAddress = it.serverAddress, username = it.username,
-                        password = it.password, shareName = it.shareName,
-                        savedServers = it.savedServers
-                    )
-                }
+                activeTransferJob?.cancel(); cifsContext = null; pathStack.clear(); unfilteredFileList = emptyList()
+                _uiState.update { ServerConnectionState(serverAddress = it.serverAddress, username = it.username, password = it.password, shareName = it.shareName, savedServers = it.savedServers) }
                 _successMessages.emit("Disconnected")
-            } catch (e: Exception) {
-                _errorMessages.emit("Disconnect error: ${e.message}")
-            }
+            } catch (e: Exception) { _errorMessages.emit("Disconnect error: ${e.message}") }
         }
     }
-
-    // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private suspend fun listFiles(server: String, share: String, path: String): List<SMBFileItem> {
         return withContext(Dispatchers.IO) {
             try {
                 val url = "smb://$server/$share/${if (path.isNotEmpty()) "$path/" else ""}"
                 SmbFile(url, cifsContext).listFiles()?.map { f ->
-                    SMBFileItem(
-                        name = f.name.removeSuffix("/"), path = f.path, isDirectory = f.isDirectory,
+                    SMBFileItem(name = f.name.removeSuffix("/"), path = f.path, isDirectory = f.isDirectory,
                         size = if (f.isDirectory) 0 else f.length(), lastModified = f.lastModified(),
-                        canRead = f.canRead(), canWrite = f.canWrite()
-                    )
+                        canRead = f.canRead(), canWrite = f.canWrite())
                 } ?: emptyList()
-            } catch (e: SmbException) {
-                Log.e("ServerConnectModule", "List files error", e)
-                throw e
-            }
+            } catch (e: SmbException) { Log.e("ServerConnectModule", "List files error", e); throw e }
         }
     }
 
     private fun sortFiles(files: List<SMBFileItem>, byName: Boolean, ascending: Boolean): List<SMBFileItem> {
-        val comp: Comparator<SMBFileItem> = if (byName)
-            compareBy({ !it.isDirectory }, { it.name.lowercase() })
-        else
-            compareBy({ !it.isDirectory }, { it.lastModified })
+        val comp: Comparator<SMBFileItem> = if (byName) compareBy({ !it.isDirectory }, { it.name.lowercase() })
+        else compareBy({ !it.isDirectory }, { it.lastModified })
         return if (ascending) files.sortedWith(comp) else files.sortedWith(comp).reversed()
     }
 
