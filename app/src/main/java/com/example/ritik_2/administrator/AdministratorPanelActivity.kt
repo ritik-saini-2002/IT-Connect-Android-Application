@@ -18,6 +18,7 @@ import com.example.ritik_2.administrator.rolemanagement.RoleManagementActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.localdatabase.AppDatabase
 import com.example.ritik_2.theme.ITConnectTheme
@@ -27,7 +28,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-private val ALLOWED_ROLES = setOf("Administrator", "Manager", "HR")
+private val ALLOWED_ROLES = setOf(
+    Permissions.ROLE_SYSTEM_ADMIN,
+    Permissions.ROLE_ADMIN,
+    Permissions.ROLE_MANAGER,
+    Permissions.ROLE_HR
+)
 
 @AndroidEntryPoint
 class AdministratorPanelActivity : ComponentActivity() {
@@ -56,9 +62,18 @@ class AdministratorPanelActivity : ComponentActivity() {
         val imageUrl             : String = ""
     )
 
-    data class DepartmentData(val name: String, val sanitized: String,
-                              val userCount: Int, val roles: List<String>)
-    data class OrganizationStats(val totalUsers: Int, val totalDepartments: Int, val totalRoles: Int)
+    data class DepartmentData(
+        val name     : String,
+        val sanitized: String,
+        val userCount: Int,
+        val roles    : List<String>
+    )
+
+    data class OrganizationStats(
+        val totalUsers      : Int,
+        val totalDepartments: Int,
+        val totalRoles      : Int
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,9 +101,7 @@ class AdministratorPanelActivity : ComponentActivity() {
 
             val cachedUser = withContext(Dispatchers.IO) { db.userDao().getById(userId) }
 
-            // DB admin bypasses role check
             val hasRoleAccess = isDbAdmin ||
-                    (cachedUser?.role in ALLOWED_ROLES) ||
                     PermissionGuard.canAccessAdminPanel(cachedUser?.role ?: "", isDbAdmin)
 
             if (cachedUser != null) {
@@ -151,10 +164,8 @@ class AdministratorPanelActivity : ComponentActivity() {
         isDbAdmin       : Boolean = false
     ) {
         try {
-            // DB admin sees all companies' users
             val users = if (isDbAdmin) withContext(Dispatchers.IO) { db.userDao().getAll() }
             else withContext(Dispatchers.IO) { db.userDao().getByCompany(sanitizedCompany) }
-
             val depts = withContext(Dispatchers.IO) { db.deptDao().getByCompany(sanitizedCompany) }
             val roles = withContext(Dispatchers.IO) { db.roleDao().getByCompany(sanitizedCompany) }
 
@@ -179,34 +190,41 @@ class AdministratorPanelActivity : ComponentActivity() {
     private fun handleFunctionClick(id: String) {
         val ad        = adminData.value ?: return
         val isDbAdmin = authRepository.isDbAdmin()
+        val isSysAdmin = PermissionGuard.isSystemAdmin(ad.role)
+        val perms     = ad.permissions
 
         when (id) {
             "create_user" -> {
-                if (ad.role in setOf("Administrator", "HR", "Manager") || isDbAdmin)
+                if ("create_user" in perms || isDbAdmin)
                     startActivity(Intent(this, CreateUserActivity::class.java))
                 else toast("You don't have permission to create users.")
             }
-            "manage_users"    -> startActivity(Intent(this, ManageUserActivity::class.java))
-            "department_mgr"  -> startActivity(Intent(this, DepartmentActivity::class.java))
+            "manage_users" -> {
+                // Always available to panel roles (checked at entry)
+                startActivity(Intent(this, ManageUserActivity::class.java))
+            }
+            "department_mgr" -> {
+                startActivity(Intent(this, DepartmentActivity::class.java))
+            }
             "role_management" -> {
-                if (ad.role == "Administrator" || isDbAdmin)
+                if ("manage_roles" in perms || isDbAdmin)
                     startActivity(Intent(this, RoleManagementActivity::class.java))
-                else toast("Only Administrator can manage roles.")
+                else toast("You need the 'manage_roles' permission.")
             }
             "database_manager" -> {
-                val hasDbPerm = PermissionGuard.canAccessDatabaseManager(
-                    ad.permissions, isDbAdmin)
-                if (hasDbPerm)
+                // Only System_Administrator or DB admin or explicit permission
+                val canDb = PermissionGuard.canAccessDatabaseManager(ad.role, perms, isDbAdmin)
+                if (canDb)
                     startActivity(Intent(this, DatabaseManagerActivity::class.java))
-                else toast("You need the 'database_manager' permission.")
+                else toast("Database Manager requires System_Administrator role or 'database_manager' permission.")
             }
             "company_settings" -> {
-                if (ad.role == "Administrator" || isDbAdmin)
+                if ("manage_companies" in perms || isDbAdmin)
                     startActivity(Intent(this, CompanySettingsActivity::class.java))
-                else toast("Only Administrator can manage company.")
+                else toast("You need the 'manage_companies' permission.")
             }
-            "reports"          -> startActivity(Intent(this, ReportsActivity::class.java))
-            else -> toast("Feature coming soon!")
+            "reports" -> startActivity(Intent(this, ReportsActivity::class.java))
+            else      -> toast("Feature coming soon!")
         }
     }
 
@@ -217,5 +235,6 @@ class AdministratorPanelActivity : ComponentActivity() {
         }
     }
 
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    private fun toast(msg: String) =
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 }

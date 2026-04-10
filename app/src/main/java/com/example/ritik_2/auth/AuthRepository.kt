@@ -1,11 +1,15 @@
 package com.example.ritik_2.auth
 
 import android.util.Log
-import com.example.ritik_2.core.AppConfig
+import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.pocketbase.PocketBaseDataSource
 import com.example.ritik_2.pocketbase.SessionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,31 +22,36 @@ class AuthRepository @Inject constructor(
 ) {
     companion object { private const val TAG = "AuthRepository" }
 
+    private val bgScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     val isLoggedIn: Boolean get() = sessionManager.isLoggedIn()
 
     /**
-     * True when the currently logged-in user's email matches the PocketBase
-     * admin credentials configured in local.properties.
+     * Returns true when the session role is System_Administrator.
      *
-     * DB admin can:
-     *  - See ALL companies (not just their own)
-     *  - Access Database Manager regardless of role permissions
-     *  - Edit any user profile in any company
+     * The role is assigned automatically by PocketBaseDataSource.login():
+     *  1. Queries PocketBase _superusers collection (+ legacy /api/admins fallback)
+     *     to check if this email is a PocketBase superuser.
+     *  2. If yes → role is set to System_Administrator, persisted to Room cache
+     *     AND back-filled in user_access_control + users records in PocketBase.
+     *
+     * No hardcoded email comparison anywhere.
+     * Source of truth is always the database.
      */
-    fun isDbAdmin(): Boolean {
-        val email = sessionManager.get()?.email ?: return false
-        return email.equals(AppConfig.ADMIN_EMAIL, ignoreCase = true)
-    }
+    fun isDbAdmin(): Boolean =
+        PermissionGuard.isSystemAdmin(sessionManager.get()?.role ?: "")
+
+    /** Alias used in some screens. */
+    fun isSystemAdmin(): Boolean = isDbAdmin()
 
     /**
-     * Returns the sanitized company name the current user belongs to.
-     * DB admin returns null (can access all companies).
+     * Sanitized company name for the current user.
+     * System_Administrator returns null (unrestricted — sees all companies).
      */
     fun userCompany(): String? {
-        if (isDbAdmin()) return null          // null = unrestricted
+        if (isDbAdmin()) return null
         return sessionManager.get()?.let { s ->
             com.example.ritik_2.core.StringUtils.sanitize(
-                // documentPath: "users/{sc}/{sd}/{role}/{uid}"
                 s.documentPath.split("/").getOrNull(1) ?: ""
             ).ifBlank { null }
         }
@@ -54,7 +63,7 @@ class AuthRepository @Inject constructor(
         try {
             dataSource.restoreSession(session.token)
             syncManager.setUserToken(session.token)
-            Log.d(TAG, "Session restored for ${session.email}")
+            Log.d(TAG, "Session restored  email=${session.email}  role=${session.role}")
         } catch (e: Exception) {
             Log.w(TAG, "Session restore failed (possibly offline): ${e.message}")
         }
@@ -71,19 +80,16 @@ class AuthRepository @Inject constructor(
             }
             if (!tokenValid) {
                 Log.w(TAG, "Token rejected — forcing logout")
-                logout()
-                return SessionStatus.TokenInvalid
+                logout(); return SessionStatus.TokenInvalid
             }
             val isActive = try {
                 pbDataSource.checkIsActive(session.userId)
             } catch (e: Exception) {
-                Log.w(TAG, "isActive check failed (network?): ${e.message}")
-                true
+                Log.w(TAG, "isActive check failed (network?): ${e.message}"); true
             }
             if (!isActive) {
                 Log.w(TAG, "Account deactivated — forcing logout")
-                logout()
-                return SessionStatus.Deactivated
+                logout(); return SessionStatus.Deactivated
             }
             syncManager.setUserToken(session.token)
             SessionStatus.Valid(session)
@@ -93,12 +99,27 @@ class AuthRepository @Inject constructor(
         }
     }
 
+    /**
+     * Fast login — role detection (including System_Administrator auto-assign)
+     * is handled inside PocketBaseDataSource.login().
+     * isActive re-check runs in background so the UI transition is never blocked.
+     */
     suspend fun login(email: String, password: String): Result<Unit> =
         try {
             val session = dataSource.login(email, password)
             sessionManager.save(session)
             syncManager.setUserToken(session.token)
-            Log.d(TAG, "Login success: $email role=${session.role} dbAdmin=${isDbAdmin()} ✅")
+            Log.d(TAG, "Login ✅  email=$email  role=${session.role}  sysAdmin=${isDbAdmin()}")
+
+            bgScope.launch {
+                try {
+                    if (!pbDataSource.checkIsActive(session.userId))
+                        Log.w(TAG, "Account deactivated — will be caught on next validateSession()")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Background isActive: ${e.message}")
+                }
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}")

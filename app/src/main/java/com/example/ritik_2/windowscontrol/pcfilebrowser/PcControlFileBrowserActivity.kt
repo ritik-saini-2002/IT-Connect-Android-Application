@@ -1,6 +1,5 @@
 package com.example.ritik_2.windowscontrol.pcfilebrowser
 
-import android.content.ContentResolver
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
@@ -15,28 +14,27 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ritik_2.theme.Ritik_2Theme
+import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.data.*
+import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel.BrowserLevelState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
-import androidx.core.view.WindowCompat
-import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
-
 class PcControlFileBrowserActivity : ComponentActivity() {
     private lateinit var viewModel: PcControlViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        // Allow both portrait and landscape — UI adapts automatically
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         viewModel = ViewModelProvider(this)[PcControlViewModel::class.java]
-        setContent { Ritik_2Theme { FileBrowserScreen(viewModel) } }
+        setContent { ITConnectTheme { FileBrowserScreen(viewModel) } }
     }
 }
 
@@ -63,7 +61,6 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     val vmFilter      by vm.selectedFilter.collectAsStateWithLifecycle()
     val vmSearchQuery by vm.searchQuery.collectAsStateWithLifecycle()
 
-    // Convert ViewModel level → UI BrowserLevel
     val level: BrowserLevel = when (val l = vmLevel) {
         is BrowserLevelState.Root      -> BrowserLevel.Root
         is BrowserLevelState.Drive     ->
@@ -111,17 +108,16 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     val mappedSpecialFolders: List<PcRecentPath> = remember(specialFolders) {
         specialFolders.mapNotNull { folder ->
             runCatching {
-                PcRecentPath(
-                    label = folder.name,
-                    path  = folder.path,
-                    icon  = folder.icon,
-                    isApp = false
-                )
+                PcRecentPath(label = folder.name, path = folder.path,
+                    icon = folder.icon, isApp = false)
             }.getOrNull()
         }
     }
 
     // ── Upload file launcher ──────────────────────────────────────────────────
+    // FIX: Never call readBytes() on the URI — that loads the entire file into RAM.
+    // Instead, pass the Uri + ContentResolver directly to the ViewModel, which
+    // opens an InputStream and streams it chunk-by-chunk to the PC agent.
     var uploadDestPath by remember { mutableStateOf("") }
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -129,13 +125,30 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             try {
-                val cr    = context.contentResolver
-                val bytes = cr.openInputStream(uri)?.readBytes() ?: return@launch
-                val name  = cr.query(uri, null, null, null, null)?.use { cur ->
+                val cr   = context.contentResolver
+
+                // Query display name — small metadata call, no file bytes loaded
+                val name = cr.query(uri, null, null, null, null)?.use { cur ->
                     val idx = cur.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    cur.moveToFirst(); if (idx >= 0) cur.getString(idx) else null
+                    if (cur.moveToFirst() && idx >= 0) cur.getString(idx) else null
                 } ?: "upload_${System.currentTimeMillis()}"
-                vm.uploadFile(bytes, name, uploadDestPath.ifBlank { currentPath })
+
+                // Query file size for chunking threshold decision
+                val fileSize = cr.query(
+                    uri, arrayOf(OpenableColumns.SIZE), null, null, null
+                )?.use { cur ->
+                    val idx = cur.getColumnIndex(OpenableColumns.SIZE)
+                    if (cur.moveToFirst() && idx >= 0) cur.getLong(idx) else -1L
+                } ?: -1L
+
+                // Pass InputStream to ViewModel — no ByteArray ever created
+                vm.uploadFileStream(
+                    contentResolver = cr,
+                    uri             = uri,
+                    fileSize        = fileSize,
+                    fileName        = name,
+                    remotePath      = uploadDestPath.ifBlank { currentPath }
+                )
                 delay(600)
                 vm.browseDir(currentPath, vmFilter, isRefresh = true)
             } catch (e: Exception) {
@@ -152,6 +165,8 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     }
 
     // ── Download launcher ─────────────────────────────────────────────────────
+    // FIX: The ViewModel now receives the Uri + ContentResolver and streams the
+    // download response body directly to the output stream — no ByteArray returned.
     var downloadItem by remember { mutableStateOf<PcFileItem?>(null) }
     val downloadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
@@ -178,13 +193,10 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         }
     }
 
-    // ── Execute file on PC (direct open — no dialog) ──────────────────────────
+    // ── Execute file on PC ────────────────────────────────────────────────────
     fun executeFileOnPc(file: PcFileItem) {
         openingFile = file.name
-        // SYSTEM_CMD → OPEN_FILE now calls os.startfile() directly on the agent
-        vm.executeQuickStep(
-            PcStep("SYSTEM_CMD", "OPEN_FILE", args = listOf(file.path))
-        )
+        vm.executeQuickStep(PcStep("SYSTEM_CMD", "OPEN_FILE", args = listOf(file.path)))
         scope.launch { delay(3000); openingFile = null }
     }
 
@@ -204,29 +216,25 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
                 ItemAction.RENAME -> {
                     val newPath = item.path.substringBeforeLast('/') + "/" + item.name
                     vm.executeQuickStep(
-                        PcStep(
-                            "FILE_OP", action = "RENAME",
+                        PcStep("FILE_OP", action = "RENAME",
                             from = item.path.substringBeforeLast('/') +
                                     "/" + item.path.substringAfterLast('/'),
-                            to   = newPath
-                        )
+                            to   = newPath)
                     )
                     delay(400)
                     vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
                 ItemAction.MOVE -> {
                     val srcPath = item.path.substringBeforeLast('/')
-                    vm.executeQuickStep(
-                        PcStep("FILE_OP", action = "MOVE", from = srcPath, to = item.path)
-                    )
+                    vm.executeQuickStep(PcStep("FILE_OP", action = "MOVE",
+                        from = srcPath, to = item.path))
                     delay(400)
                     vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
                 ItemAction.COPY -> {
                     val destPath = "$currentPath/${item.name}_copy"
-                    vm.executeQuickStep(
-                        PcStep("FILE_OP", action = "COPY", from = item.path, to = destPath)
-                    )
+                    vm.executeQuickStep(PcStep("FILE_OP", action = "COPY",
+                        from = item.path, to = destPath))
                     delay(400)
                     vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
@@ -235,7 +243,7 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         }
     }
 
-    // ── Navigate to a level ───────────────────────────────────────────────────
+    // ── Navigate ──────────────────────────────────────────────────────────────
     fun navigateTo(target: BrowserLevel) {
         persistLevel(target)
         when (target) {
@@ -245,7 +253,6 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         }
     }
 
-    // ── Refresh ───────────────────────────────────────────────────────────────
     fun doRefresh() {
         scope.launch {
             isRefreshing = true
@@ -255,34 +262,24 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         }
     }
 
-    // ── Create folder ─────────────────────────────────────────────────────────
     fun createFolder(folderName: String) {
         if (folderName.isBlank() || currentPath.isEmpty()) return
-        val folderPath = "$currentPath/$folderName"
         scope.launch {
-            vm.executeQuickStep(
-                PcStep("FILE_OP", action = "MKDIR", from = folderPath)
-            )
+            vm.executeQuickStep(PcStep("FILE_OP", action = "MKDIR",
+                from = "$currentPath/$folderName"))
             delay(500)
             vm.browseDir(currentPath, vmFilter, isRefresh = true)
         }
     }
 
-    // ── Search handler ────────────────────────────────────────────────────────
     fun handleSearchChange(query: String) {
         vm.setSearchQuery(query)
         val trimmed = query.trim().trimStart('\u200B')
         when {
-            // Trigger server search when query has 2+ real chars and we have a path
-            trimmed.length >= 2 && currentPath.isNotEmpty() -> {
-                scope.launch {
-                    vm.searchFiles(currentPath, trimmed)
-                }
-            }
-            // Clear search — restore directory listing
-            trimmed.isEmpty() && currentPath.isNotEmpty() -> {
+            trimmed.length >= 2 && currentPath.isNotEmpty() ->
+                scope.launch { vm.searchFiles(currentPath, trimmed) }
+            trimmed.isEmpty() && currentPath.isNotEmpty() ->
                 vm.browseDir(currentPath, vmFilter, isRefresh = false)
-            }
         }
     }
 
@@ -305,7 +302,6 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         isRefreshing     = isRefreshing,
     )
 
-    // ── Build callbacks ───────────────────────────────────────────────────────
     val callbacks = FileBrowserCallbacks(
         onDriveClick = { drive ->
             persistLevel(BrowserLevel.Drive(drive))
@@ -339,10 +335,7 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         onCreateFolder    = { folderName -> createFolder(folderName) },
         onRefresh         = { doRefresh() },
         onBreadcrumbNav   = { target -> navigateTo(target) },
-        onNavigateBack    = {
-            val parent = resolveParentLevel(level, drives)
-            navigateTo(parent)
-        },
+        onNavigateBack    = { navigateTo(resolveParentLevel(level, drives)) },
         onDismissTransfer = { vm.clearTransferProgress() },
         onOpenWithSelect  = { vm.resolveOpenWith(it.exePath) },
         onDismissOpenWith = { vm.dismissOpenWithDialog() },
@@ -380,5 +373,4 @@ fun getMimeType(extension: String): String? =
     MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase())
 
 fun encodePath(path: String): String =
-    URLEncoder.encode(path, StandardCharsets.UTF_8.name())
-        .replace("+", "%20")
+    URLEncoder.encode(path, StandardCharsets.UTF_8.name()).replace("+", "%20")

@@ -27,18 +27,14 @@ internal const val COL_COMPANIES      = "companies_metadata"
 internal const val COL_ACCESS_CONTROL = "user_access_control"
 internal const val COL_SEARCH_INDEX   = "user_search_index"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Permission guard constants
-// ─────────────────────────────────────────────────────────────────────────────
-private val ADMIN_ROLES   = setOf("Administrator")
-private val MANAGER_ROLES = setOf("Manager", "HR")
-// Roles that managers/HR are allowed to edit
+private val ADMIN_ROLES                   = setOf("Administrator")
+private val MANAGER_ROLES                 = setOf("Manager", "HR")
 private val MANAGER_EDITABLE_TARGET_ROLES = setOf("Employee", "Intern", "Team Lead")
 
 @Singleton
 class PocketBaseDataSource @Inject constructor(
     private val http: OkHttpClient,
-    private val db  : AppDatabase          // ← injected for offline fallback
+    private val db  : AppDatabase
 ) : AppDataSource {
 
     private val tag = "PBDataSource"
@@ -68,11 +64,34 @@ class PocketBaseDataSource @Inject constructor(
             val isActive = record.optBoolean("isActive", true)
             if (!isActive) { authTokenRef.set(""); error("Account disabled.") }
 
+            // ── Step 1: Fetch user_access_control for role + permissions ──────
             val access = fetchAccessControl(uid).getOrNull()
-            val role   = when {
+
+            // ── Step 2: Determine role ────────────────────────────────────────
+            // Priority order:
+            //  a) user_access_control.role   (most authoritative — set by admins)
+            //  b) users record role field
+            var role = when {
                 !access?.role.isNullOrBlank()         -> access!!.role
                 record.optString("role").isNotBlank() -> record.optString("role")
                 else                                  -> ""
+            }
+
+            // ── Step 3: Auto-detect System_Administrator from PocketBase ──────
+            //
+            // If the user is listed in the PocketBase _superusers collection
+            // (i.e. they are a PocketBase admin), we automatically assign the
+            // System_Administrator role — no hardcoded email comparison needed.
+            // This means ANY PocketBase superuser automatically gets the top role.
+            if (role != Permissions.ROLE_SYSTEM_ADMIN) {
+                val isSuperuser = checkIsPocketBaseSuperuser(email)
+                if (isSuperuser) {
+                    role = Permissions.ROLE_SYSTEM_ADMIN
+                    Log.d(tag, "Auto-assigned System_Administrator role to $email (PB superuser)")
+                    // Back-fill the role in user_access_control and users record
+                    // so subsequent offline sessions also have the right role.
+                    backfillSystemAdminRole(uid, isSuperuser = true)
+                }
             }
 
             val session = AuthSession(
@@ -84,9 +103,8 @@ class PocketBaseDataSource @Inject constructor(
                 documentPath = access?.documentPath ?: record.optString("documentPath")
             )
 
-            // ── Cache user locally for offline use ────────────────────────────
-            cacheUserLocally(uid, record, access)
-
+            Log.d(tag, "Login ✅  uid=$uid  role=$role")
+            cacheUserLocally(uid, record, access, overrideRole = role)
             session
         }
 
@@ -113,7 +131,7 @@ class PocketBaseDataSource @Inject constructor(
             put("passwordConfirm", password); put("name", name)
             put("emailVisibility", true)
         }.toString().toRequestBody("application/json".toMediaType())
-        val res     = http.newCall(Request.Builder()
+        val res   = http.newCall(Request.Builder()
             .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records")
             .addHeader("Authorization", "Bearer $token").post(body).build()).execute()
         val body2 = res.body?.string() ?: ""
@@ -181,11 +199,109 @@ class PocketBaseDataSource @Inject constructor(
 
     suspend fun ensureAdminToken() = withContext(Dispatchers.IO) { getAdminToken(); Unit }
 
+    // ── Superuser detection ───────────────────────────────────────────────────
+
+    /**
+     * Queries the PocketBase _superusers collection to check whether [email]
+     * is a PocketBase admin.  Returns true → assign System_Administrator role.
+     *
+     * This uses the admin token (which itself proves we know the admin credentials),
+     * and only requires a single lightweight GET.
+     *
+     * Fails silently — if the query fails (old PB version, network blip), we
+     * fall back to whatever role is stored in user_access_control.
+     */
+    private fun checkIsPocketBaseSuperuser(email: String): Boolean {
+        return try {
+            val token = getAdminToken()
+            // PocketBase ≥ 0.23 stores superusers in _superusers collection
+            val url   = "${AppConfig.BASE_URL}/api/collections/_superusers/records" +
+                    "?filter=(email='${email.replace("'", "\\'")}')&perPage=1"
+            val res   = http.newCall(Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .get().build()).execute()
+            val body  = res.body?.string() ?: ""; res.close()
+            if (!res.isSuccessful) {
+                // Older PocketBase versions used /api/admins — try that fallback
+                return checkLegacyAdmin(email, token)
+            }
+            JSONObject(body).optInt("totalItems", 0) > 0
+        } catch (e: Exception) {
+            Log.w(tag, "checkIsPocketBaseSuperuser: ${e.message}")
+            false
+        }
+    }
+
+    /** Fallback for PocketBase < 0.23 which used /api/admins. */
+    private fun checkLegacyAdmin(email: String, token: String): Boolean {
+        return try {
+            val url = "${AppConfig.BASE_URL}/api/admins" +
+                    "?filter=(email='${email.replace("'", "\\'")}')&perPage=1"
+            val res  = http.newCall(Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .get().build()).execute()
+            val body = res.body?.string() ?: ""; res.close()
+            if (!res.isSuccessful) return false
+            JSONObject(body).optInt("totalItems", 0) > 0
+        } catch (e: Exception) {
+            Log.w(tag, "checkLegacyAdmin: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Called after auto-detecting a System_Administrator at login.
+     * Updates the users record and user_access_control so the role is
+     * persisted for offline use and visible to other queries.
+     *
+     * Runs best-effort — failures are logged and swallowed.
+     */
+    private fun backfillSystemAdminRole(userId: String, isSuperuser: Boolean) {
+        if (!isSuperuser) return
+        try {
+            val token      = getAdminToken()
+            val roleJson   = JSONObject().apply {
+                put("role", Permissions.ROLE_SYSTEM_ADMIN)
+                put("permissions", Json.encodeToString(
+                    Permissions.forRole(Permissions.ROLE_SYSTEM_ADMIN)))
+            }.toString()
+
+            // Update users record
+            http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
+                .addHeader("Authorization", "Bearer $token")
+                .patch(roleJson.toRequestBody("application/json".toMediaType()))
+                .build()).execute().close()
+
+            // Update user_access_control record
+            val acRes = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
+                        "?filter=(userId='$userId')&perPage=1")
+                .addHeader("Authorization", "Bearer $token")
+                .get().build()).execute()
+            val acBody = acRes.body?.string() ?: "{}"; acRes.close()
+            val acId   = JSONObject(acBody).optJSONArray("items")
+                ?.optJSONObject(0)?.optString("id") ?: ""
+
+            if (acId.isNotBlank()) {
+                http.newCall(Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records/$acId")
+                    .addHeader("Authorization", "Bearer $token")
+                    .patch(roleJson.toRequestBody("application/json".toMediaType()))
+                    .build()).execute().close()
+            }
+            Log.d(tag, "backfillSystemAdminRole ✅ userId=$userId")
+        } catch (e: Exception) {
+            Log.w(tag, "backfillSystemAdminRole: ${e.message}")
+        }
+    }
+
     // ── User Profile — OFFLINE FIRST ──────────────────────────────────────────
 
     override suspend fun getUserProfile(userId: String): Result<UserProfile> =
         withContext(Dispatchers.IO) {
-            // 1. Try network first
             try {
                 val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
                 val res   = http.newCall(Request.Builder()
@@ -195,10 +311,9 @@ class PocketBaseDataSource @Inject constructor(
                 val code    = res.code; res.close()
 
                 if (code in 200..299) {
-                    val user   = JSONObject(resBody)
-                    val access = fetchAccessControl(userId).getOrNull()
+                    val user    = JSONObject(resBody)
+                    val access  = fetchAccessControl(userId).getOrNull()
                     val profile = buildUserProfile(userId, user, access)
-                    // Cache locally
                     cacheUserLocally(userId, user, access)
                     Log.d(tag, "getUserProfile ✅ from network")
                     return@withContext Result.success(profile)
@@ -208,7 +323,6 @@ class PocketBaseDataSource @Inject constructor(
                 Log.w(tag, "getUserProfile network failed: ${e.message} — trying cache")
             }
 
-            // 2. Fallback to Room cache (offline)
             val cached = try { db.userDao().getById(userId) } catch (_: Exception) { null }
             if (cached != null) {
                 Log.d(tag, "getUserProfile ✅ from Room cache (offline)")
@@ -218,49 +332,34 @@ class PocketBaseDataSource @Inject constructor(
             Result.failure(Exception("Profile unavailable — server unreachable and no cached data"))
         }
 
-    // ── Permission-guarded profile update ─────────────────────────────────────
-
     override suspend fun updateUserProfile(
         userId: String, fields: Map<String, Any>
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
-
-            // Fetch current record for merge
-            val currentRes  = http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                .addHeader("Authorization", "Bearer $token").get().build()).execute()
-            val currentBody = currentRes.body?.string() ?: "{}"
-            currentRes.close()
-            val current = try { JSONObject(currentBody) } catch (_: Exception) { JSONObject() }
-
-            val patch = buildMergedPatch(current, fields)
-
-            val res = http.newCall(Request.Builder()
+            val token  = getAdminToken()
+            val body   = JSONObject(fields as Map<*, *>).toString()
+            val res    = http.newCall(Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
                 .addHeader("Authorization", "Bearer $token")
-                .patch(patch.toString().toRequestBody("application/json".toMediaType()))
-                .build()).execute()
-            val resBody = res.body?.string() ?: ""
-            val code    = res.code; res.close()
-
-            if (!res.isSuccessful) {
-                Log.e(tag, "updateUserProfile HTTP $code: $resBody")
-                return@withContext Result.failure(Exception("Update failed HTTP $code"))
+                .patch(body.toRequestBody("application/json".toMediaType())).build()).execute()
+            val code   = res.code; res.close()
+            if (code in 200..299) {
+                // Update local cache
+                val cached = try { db.userDao().getById(userId) } catch (_: Exception) { null }
+                if (cached != null) {
+                    val updated = applyFieldsToEntity(cached, fields)
+                    kotlinx.coroutines.runBlocking { db.userDao().upsert(updated) }
+                }
+                // Sync access control if role or permissions changed
+                if ("role" in fields || "permissions" in fields) {
+                    syncAccessControlRecord(userId, fields, token)
+                }
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("updateUserProfile HTTP $code"))
             }
-
-            syncAccessControl(userId, fields, token)
-
-            // Update local cache
-            val updated = db.userDao().getById(userId)
-            if (updated != null) {
-                db.userDao().upsert(applyFieldsToEntity(updated, fields))
-            }
-
-            Log.d(tag, "updateUserProfile ✅ userId=$userId")
-            Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(tag, "updateUserProfile failed: ${e.message}", e)
+            Log.e(tag, "updateUserProfile: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -269,64 +368,58 @@ class PocketBaseDataSource @Inject constructor(
         userId: String, bytes: ByteArray, filename: String, token: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val resolvedToken = getAdminToken()
-            // Determine media type from filename extension
-            val mediaType = when {
-                filename.endsWith(".png",  ignoreCase = true) -> "image/png"
-                filename.endsWith(".webp", ignoreCase = true) -> "image/webp"
-                else                                          -> "image/jpeg"
-            }
-            val requestBody = okhttp3.MultipartBody.Builder()
+            val useToken = token.ifBlank { getAdminToken() }
+            val body     = okhttp3.MultipartBody.Builder()
                 .setType(okhttp3.MultipartBody.FORM)
                 .addFormDataPart("avatar", filename,
-                    bytes.toRequestBody(mediaType.toMediaType())).build()
-            val res     = http.newCall(Request.Builder()
+                    bytes.toRequestBody("image/png".toMediaType()))
+                .build()
+            val res      = http.newCall(Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                .addHeader("Authorization", "Bearer $resolvedToken")
-                .patch(requestBody).build()).execute()
-            val resBody = res.body?.string() ?: ""
-            val resCode = res.code; res.close()
-            if (!res.isSuccessful)
-                return@withContext Result.failure(Exception("Upload failed: $resCode"))
-            val storedFilename = try {
-                JSONObject(resBody).optString("avatar", filename)
-            } catch (_: Exception) { filename }
-            val url = "${AppConfig.BASE_URL}/api/files/$COL_USERS/$userId/$storedFilename"
-            // Update cache with new imageUrl
-            val cached = db.userDao().getById(userId)
-            if (cached != null) db.userDao().upsert(cached.copy(imageUrl = url))
-            Result.success(url)
-        } catch (e: Exception) {
-            Log.e(tag, "uploadProfileImage failed: ${e.message}")
-            Result.failure(e)
-        }
+                .addHeader("Authorization", "Bearer $useToken")
+                .patch(body).build()).execute()
+            val resBody  = res.body?.string() ?: ""; res.close()
+            if (res.isSuccessful) {
+                val storedFile = JSONObject(resBody).optString("avatar", "")
+                val url        = AppConfig.avatarUrl(userId, storedFile) ?: ""
+                // Update imageUrl in profile JSON
+                if (url.isNotBlank()) {
+                    val profileJson = JSONObject().apply { put("imageUrl", url) }.toString()
+                    try {
+                        http.newCall(Request.Builder()
+                            .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
+                            .addHeader("Authorization", "Bearer $useToken")
+                            .patch(JSONObject().apply { put("profile", profileJson) }
+                                .toString().toRequestBody("application/json".toMediaType()))
+                            .build()).execute().close()
+                    } catch (_: Exception) {}
+                }
+                Result.success(url)
+            } else {
+                Result.failure(Exception("uploadProfileImage HTTP ${res.code}"))
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     // ── Registration ──────────────────────────────────────────────────────────
 
     override suspend fun registerUser(request: RegistrationRequest): Result<String> =
         withContext(Dispatchers.IO) {
-            var createdUserId: String? = null
             try {
-                val sc = com.example.ritik_2.core.StringUtils.sanitize(request.companyName)
-                val sd = com.example.ritik_2.core.StringUtils.sanitize(request.department)
-
-                // ── Company duplicate check ───────────────────────────────────
-                if (companyExists(sc))
-                    return@withContext Result.failure(
-                        Exception("COMPANY_EXISTS:${request.companyName}"))
-
                 val adminToken = getAdminToken()
                 val userId     = createUser(request.email, request.password, request.name, adminToken)
-                createdUserId  = userId
 
                 val (loginCode, loginJson) = authWithPassword(request.email, request.password)
                 if (loginCode in 200..299) authTokenRef.set(JSONObject(loginJson).optString("token"))
 
-                val imageUrl = if (request.imageBytes != null)
+                var imageUrl = ""
+                if (request.imageBytes != null) {
                     uploadProfileImage(userId, request.imageBytes, "profile_$userId.jpg", adminToken)
-                        .getOrDefault("") else ""
+                        .onSuccess { imageUrl = it }
+                }
 
+                val sc           = com.example.ritik_2.core.StringUtils.sanitize(request.companyName)
+                val sd           = com.example.ritik_2.core.StringUtils.sanitize(request.department)
                 val documentPath = "users/$sc/$sd/${request.role}/$userId"
                 val permissions  = Json.encodeToString(Permissions.forRole(request.role))
 
@@ -350,25 +443,24 @@ class PocketBaseDataSource @Inject constructor(
                 httpPatch("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId",
                     adminToken, JSONObject().apply {
                         put("userId", userId); put("role", request.role)
-                        put("companyName", request.companyName); put("sanitizedCompanyName", sc)
-                        put("department", request.department); put("sanitizedDepartment", sd)
+                        put("companyName", request.companyName)
+                        put("sanitizedCompanyName", sc)
+                        put("department", request.department)
+                        put("sanitizedDepartment", sd)
                         put("designation", request.designation); put("isActive", true)
                         put("documentPath", documentPath); put("permissions", permissions)
                         put("profile", profileJson); put("workStats", workJson)
                         put("issues", issuesJson); put("needsProfileCompletion", true)
                     }.toString())
 
-                upsertCompany(sc, request.companyName, request.role, request.department, adminToken)
-
                 httpPost("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records",
                     adminToken, JSONObject().apply {
-                        put("userId", userId); put("name", request.name)
-                        put("email", request.email); put("companyName", request.companyName)
-                        put("sanitizedCompanyName", sc); put("department", request.department)
-                        put("sanitizedDepartment", sd); put("role", request.role)
-                        put("designation", request.designation); put("permissions", permissions)
-                        put("isActive", true); put("documentPath", documentPath)
-                        put("needsProfileCompletion", true)
+                        put("userId", userId); put("name", request.name); put("email", request.email)
+                        put("companyName", request.companyName); put("sanitizedCompanyName", sc)
+                        put("department", request.department); put("sanitizedDepartment", sd)
+                        put("role", request.role); put("designation", request.designation)
+                        put("permissions", permissions); put("isActive", true)
+                        put("documentPath", documentPath); put("needsProfileCompletion", true)
                     }.toString())
 
                 val searchTerms = Json.encodeToString(
@@ -386,151 +478,159 @@ class PocketBaseDataSource @Inject constructor(
                         put("documentPath", documentPath)
                     }.toString())
 
-                // Cache locally after registration
-                db.userDao().upsert(UserEntity(
-                    id                   = userId,
+                upsertCompany(sc, request.companyName, request.role, request.department, adminToken)
+
+                val record = JSONObject().apply {
+                    put("id", userId); put("email", request.email); put("name", request.name)
+                    put("role", request.role); put("companyName", request.companyName)
+                    put("sanitizedCompanyName", sc); put("department", request.department)
+                    put("sanitizedDepartment", sd); put("designation", request.designation)
+                    put("isActive", true); put("documentPath", documentPath)
+                    put("needsProfileCompletion", true)
+                }
+                val accessRec = AccessControlRecord(
+                    userId               = userId,
                     name                 = request.name,
                     email                = request.email,
-                    role                 = request.role,
                     companyName          = request.companyName,
                     sanitizedCompanyName = sc,
                     department           = request.department,
                     sanitizedDepartment  = sd,
-                    designation          = request.designation,
-                    imageUrl             = imageUrl,
+                    role                 = request.role,
+                    permissions          = permissions,
                     isActive             = true,
-                    documentPath         = documentPath,
-                    needsProfileCompletion = true
-                ))
-
-                Log.d(tag, "registerUser ✅ userId=$userId")
+                    documentPath         = documentPath
+                )
+                cacheUserLocally(userId, record, accessRec)
                 Result.success(userId)
             } catch (e: Exception) {
-                createdUserId?.let { deleteUserSilently(it) }
-                Log.e(tag, "registerUser failed: ${e.message}", e)
-                Result.failure(e)
+                Log.e(tag, "registerUser: ${e.message}", e)
+                if (e.message?.contains("COMPANY_EXISTS:") == true) Result.failure(e)
+                else Result.failure(e)
             }
         }
-
-    // ── Company ───────────────────────────────────────────────────────────────
 
     override suspend fun companyExists(sanitizedName: String): Boolean =
         withContext(Dispatchers.IO) {
             try {
-                val res  = http.newCall(Request.Builder()
+                val token = getAdminToken()
+                val res   = http.newCall(Request.Builder()
                     .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records" +
-                            "?filter=sanitizedName%3D%27$sanitizedName%27&perPage=1")
-                    .get().build()).execute()
-                val body = res.body?.string() ?: ""; res.close()
+                            "?filter=(sanitizedName='$sanitizedName')&perPage=1")
+                    .addHeader("Authorization", "Bearer $token").get().build()).execute()
+                val body  = res.body?.string() ?: ""; res.close()
                 JSONObject(body).optInt("totalItems", 0) > 0
             } catch (_: Exception) { false }
         }
-
-    /**
-     * Returns a list of existing companies whose sanitized names are similar
-     * to [sanitizedName]. Used for duplicate/merge warnings.
-     */
-    suspend fun findSimilarCompanies(sanitizedName: String): List<String> =
-        withContext(Dispatchers.IO) {
-            try {
-                val res  = http.newCall(Request.Builder()
-                    .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records?perPage=200")
-                    .get().build()).execute()
-                val body = res.body?.string() ?: ""; res.close()
-                val items = JSONObject(body).optJSONArray("items") ?: return@withContext emptyList()
-                (0 until items.length())
-                    .map { items.getJSONObject(it) }
-                    .filter { obj ->
-                        val sc = obj.optString("sanitizedName")
-                        sc == sanitizedName ||
-                                sc.replace("_","").equals(
-                                    sanitizedName.replace("_",""), ignoreCase = true)
-                    }
-                    .map { it.optString("originalName") }
-            } catch (_: Exception) { emptyList() }
-        }
-
-    private fun upsertCompany(sc: String, companyName: String, role: String,
-                              department: String, adminToken: String) {
-        val url    = "${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records"
-        val getRes = http.newCall(Request.Builder().url("$url?filter=(sanitizedName='$sc')")
-            .addHeader("Authorization", "Bearer $adminToken").get().build()).execute()
-        val getBody   = getRes.body?.string() ?: ""; getRes.close()
-        val companyId = JSONObject(getBody).optJSONArray("items")
-            ?.optJSONObject(0)?.optString("id")
-        val payload = JSONObject().apply {
-            put("sanitizedName", sc); put("originalName", companyName)
-            put("departments", JSONArray().put(department))
-            put("availableRoles", JSONArray().put(role))
-            put("totalUsers", 1); put("activeUsers", 1)
-            put("lastUpdated", System.currentTimeMillis())
-        }.toString()
-        if (companyId.isNullOrEmpty()) httpPost(url, adminToken, payload)
-        else httpPatch("$url/$companyId", adminToken, payload)
-    }
 
     override suspend fun getOrCreateCompany(
         sanitizedName: String, originalName: String,
         role: String, department: String, adminToken: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val token = adminToken.ifEmpty { getAdminToken() }
-            val res   = http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records" +
-                        "?filter=sanitizedName%3D%27$sanitizedName%27&perPage=1")
-                .addHeader("Authorization", "Bearer $token").get().build()).execute()
-            val body = res.body?.string() ?: ""; res.close()
-            val json = JSONObject(body)
-            if (json.optInt("totalItems", 0) > 0) {
-                val item      = json.getJSONArray("items").getJSONObject(0)
-                val id        = item.optString("id")
-                val rolesList = ArrayList<String>().also { list ->
-                    val arr = JSONArray(item.optString("availableRoles", "[]"))
-                    for (i in 0 until arr.length()) list.add(arr.getString(i))
-                    if (role !in list) list.add(role)
-                }
-                val deptsList = ArrayList<String>().also { list ->
-                    val arr = JSONArray(item.optString("departments", "[]"))
-                    for (i in 0 until arr.length()) list.add(arr.getString(i))
-                    if (department !in list) list.add(department)
-                }
-                httpPatch("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records/$id",
-                    token, JSONObject().apply {
-                        put("totalUsers",     item.optInt("totalUsers",  0) + 1)
-                        put("activeUsers",    item.optInt("activeUsers", 0) + 1)
-                        put("availableRoles", Json.encodeToString(rolesList))
-                        put("departments",    Json.encodeToString(deptsList))
-                    }.toString())
-            } else {
-                httpPost("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records",
-                    token, JSONObject().apply {
-                        put("originalName", originalName); put("sanitizedName", sanitizedName)
-                        put("totalUsers", 1); put("activeUsers", 1)
-                        put("availableRoles", Json.encodeToString(listOf(role)))
-                        put("departments", Json.encodeToString(listOf(department)))
-                    }.toString())
-            }
+            val token = adminToken.ifBlank { getAdminToken() }
+            upsertCompany(sanitizedName, originalName, role, department, token)
             Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(tag, "getOrCreateCompany failed: ${e.message}"); Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     override suspend fun ensureCollectionsExist(): Result<Unit> = withContext(Dispatchers.IO) {
+        try { PocketBaseInitializer.initialize(); Result.success(Unit) }
+        catch (e: Exception) { Result.failure(e) }
+    }
+
+    // ── Company upsert ────────────────────────────────────────────────────────
+
+    private fun upsertCompany(
+        sc: String, companyName: String,
+        role: String, department: String, adminToken: String
+    ) {
         try {
-            val token = getAdminToken()
-            listOf(
-                COL_COMPANIES      to buildCompaniesSchema(),
-                COL_ACCESS_CONTROL to buildAccessControlSchema(),
-                COL_SEARCH_INDEX   to buildSearchIndexSchema()
-            ).forEach { (name, schema) -> ensureCollection(token, name, schema) }
-            Result.success(Unit)
+            val token  = adminToken.ifBlank { getAdminToken() }
+            val getRes = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records" +
+                        "?filter=(sanitizedName='$sc')&perPage=1")
+                .addHeader("Authorization", "Bearer $token").get().build()).execute()
+            val getBody = getRes.body?.string() ?: "{}"; getRes.close()
+            val item    = JSONObject(getBody).optJSONArray("items")?.optJSONObject(0)
+            val cId     = item?.optString("id") ?: ""
+
+            val payload = JSONObject().apply {
+                put("sanitizedName", sc); put("originalName", companyName)
+                put("totalUsers",    (item?.optInt("totalUsers",  0) ?: 0) + 1)
+                put("activeUsers",   (item?.optInt("activeUsers", 0) ?: 0) + 1)
+                put("availableRoles", JSONArray().apply {
+                    val existing = item?.optJSONArray("availableRoles") ?: JSONArray()
+                    for (i in 0 until existing.length()) put(existing.optString(i))
+                    if (!toString().contains(role)) put(role)
+                })
+                put("departments", JSONArray().apply {
+                    val existing = item?.optJSONArray("departments") ?: JSONArray()
+                    for (i in 0 until existing.length()) put(existing.optString(i))
+                    if (!toString().contains(department)) put(department)
+                })
+            }.toString()
+
+            if (cId.isBlank())
+                httpPost("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records",
+                    token, payload)
+            else
+                httpPatch("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records/$cId",
+                    token, payload)
         } catch (e: Exception) {
-            Log.e(tag, "ensureCollectionsExist failed: ${e.message}"); Result.failure(e)
+            Log.w(tag, "upsertCompany: ${e.message}")
         }
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // ── Access control ────────────────────────────────────────────────────────
+
+    suspend fun findSimilarCompanies(sanitizedName: String): List<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val token = getAdminToken()
+                val res   = http.newCall(Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records?perPage=200")
+                    .addHeader("Authorization", "Bearer $token").get().build()).execute()
+                val body  = res.body?.string() ?: ""; res.close()
+                val items = JSONObject(body).optJSONArray("items") ?: return@withContext emptyList()
+                (0 until items.length()).mapNotNull { i ->
+                    val it = items.getJSONObject(i)
+                    val sn = it.optString("sanitizedName")
+                    if (sn == sanitizedName ||
+                        sn.replace("_","").equals(sanitizedName.replace("_",""), ignoreCase = true))
+                        it.optString("originalName").ifBlank { null }
+                    else null
+                }
+            } catch (_: Exception) { emptyList() }
+        }
+
+    private fun syncAccessControlRecord(userId: String, fields: Map<String, Any>, token: String) {
+        try {
+            val getRes = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
+                        "?filter=(userId='$userId')&perPage=1")
+                .addHeader("Authorization", "Bearer $token").get().build()).execute()
+            val getBody = getRes.body?.string() ?: "{}"; getRes.close()
+            val acId    = JSONObject(getBody).optJSONArray("items")?.optJSONObject(0)
+                ?.optString("id") ?: return
+
+            val patch = JSONObject()
+            if ("role"        in fields) patch.put("role",        fields["role"])
+            if ("permissions" in fields) patch.put("permissions", fields["permissions"])
+            if ("department"  in fields) patch.put("department",  fields["department"])
+            if ("designation" in fields) patch.put("designation", fields["designation"])
+
+            http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records/$acId")
+                .addHeader("Authorization", "Bearer $token")
+                .patch(patch.toString().toRequestBody("application/json".toMediaType()))
+                .build()).execute().close()
+        } catch (e: Exception) {
+            Log.w(tag, "syncAccessControlRecord: ${e.message}")
+        }
+    }
+
+    // ── Profile building ──────────────────────────────────────────────────────
 
     private fun buildUserProfile(
         userId: String,
@@ -610,16 +710,24 @@ class PocketBaseDataSource @Inject constructor(
         needsProfileCompletion   = u.needsProfileCompletion
     )
 
-    private fun cacheUserLocally(userId: String, record: JSONObject, access: AccessControlRecord?) {
+    private fun cacheUserLocally(
+        userId      : String,
+        record      : JSONObject,
+        access      : AccessControlRecord?,
+        overrideRole: String? = null           // ← pass resolved role from login()
+    ) {
         try {
             val profile   = parseJsonFieldSafe(record, "profile")
             val workStats = parseJsonFieldSafe(record, "workStats")
             val issues    = parseJsonFieldSafe(record, "issues")
+            val finalRole = overrideRole
+                ?: access?.role?.ifBlank { record.optString("role") }
+                ?: record.optString("role")
             val entity = UserEntity(
                 id                       = userId,
                 name                     = record.optString("name").ifBlank { access?.name ?: "" },
                 email                    = record.optString("email").ifBlank { access?.email ?: "" },
-                role                     = access?.role?.ifBlank { record.optString("role") } ?: record.optString("role"),
+                role                     = finalRole,
                 companyName              = record.optString("companyName"),
                 sanitizedCompanyName     = record.optString("sanitizedCompanyName"),
                 department               = record.optString("department"),
@@ -649,115 +757,13 @@ class PocketBaseDataSource @Inject constructor(
                 emergencyContactRelation = profile["emergencyContactRelation"] ?: "",
                 needsProfileCompletion   = record.optBoolean("needsProfileCompletion", true)
             )
-            // Must run in a coroutine context but we call this from withContext(IO) blocks
             kotlinx.coroutines.runBlocking { db.userDao().upsert(entity) }
         } catch (e: Exception) {
             Log.w(tag, "cacheUserLocally failed: ${e.message}")
         }
     }
 
-    private fun applyFieldsToEntity(entity: UserEntity, fields: Map<String, Any>): UserEntity {
-        var e = entity
-        fields.forEach { (k, v) ->
-            when (k) {
-                "role"        -> e = e.copy(role        = v.toString())
-                "designation" -> e = e.copy(designation = v.toString())
-                "department"  -> e = e.copy(department  = v.toString())
-                "companyName" -> e = e.copy(companyName = v.toString())
-                "isActive"    -> e = e.copy(isActive    = v.toString().toBooleanStrictOrNull() ?: e.isActive)
-                "profile" -> {
-                    val pj = try { JSONObject(v.toString()) } catch (_: Exception) { return@forEach }
-                    if (pj.has("imageUrl"))    e = e.copy(imageUrl    = pj.optString("imageUrl",    e.imageUrl))
-                    if (pj.has("phoneNumber")) e = e.copy(phoneNumber = pj.optString("phoneNumber", e.phoneNumber))
-                    if (pj.has("address"))     e = e.copy(address     = pj.optString("address",     e.address))
-                    if (pj.has("salary"))      e = e.copy(salary      = pj.optDouble("salary",      e.salary))
-                }
-                "workStats" -> {
-                    val wj = try { JSONObject(v.toString()) } catch (_: Exception) { return@forEach }
-                    if (wj.has("experience")) e = e.copy(experience = wj.optInt("experience", e.experience))
-                }
-            }
-        }
-        return e
-    }
-
-    private fun buildMergedPatch(current: JSONObject, fields: Map<String, Any>): JSONObject {
-        val patch = JSONObject()
-        fields.forEach { (key, value) ->
-            if (key in listOf("profile", "workStats", "issues")) {
-                val incoming = try {
-                    when (value) {
-                        is String -> JSONObject(value)
-                        else      -> JSONObject(value.toString())
-                    }
-                } catch (_: Exception) { JSONObject() }
-                val existing = parseJsonFieldSafe(current, key)
-                    .entries.fold(JSONObject()) { obj, (k, v) -> obj.put(k, v); obj }
-                val mergedField = JSONObject()
-                existing.keys().forEach { k -> mergedField.put(k, existing.get(k)) }
-                incoming.keys().forEach { k -> incoming.opt(k)?.let { mergedField.put(k, it) } }
-                patch.put(key, mergedField.toString())
-            } else {
-                when (value) {
-                    is Boolean -> patch.put(key, value)
-                    is Int     -> patch.put(key, value)
-                    is Double  -> patch.put(key, value)
-                    is Long    -> patch.put(key, value)
-                    else       -> patch.put(key, value.toString())
-                }
-            }
-        }
-        return patch
-    }
-
-    private fun syncAccessControl(userId: String, fields: Map<String, Any>, token: String) {
-        val syncFields = listOf("role", "designation", "isActive", "department",
-            "sanitizedDepartment", "companyName", "sanitizedCompanyName", "documentPath")
-        val relevantFields = fields.filterKeys { it in syncFields }
-        if (relevantFields.isEmpty()) return
-        try {
-            val res = http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
-                        "?filter=(userId='$userId')&perPage=1")
-                .addHeader("Authorization", "Bearer $token").get().build()).execute()
-            val body = res.body?.string() ?: "{}"; res.close()
-            val acId = JSONObject(body).optJSONArray("items")
-                ?.optJSONObject(0)?.optString("id")
-            if (acId.isNullOrEmpty()) return
-            val patch = JSONObject()
-            relevantFields.forEach { (k, v) ->
-                when (v) {
-                    is Boolean -> patch.put(k, v)
-                    is Int     -> patch.put(k, v)
-                    else       -> patch.put(k, v.toString())
-                }
-            }
-            http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records/$acId")
-                .addHeader("Authorization", "Bearer $token")
-                .patch(patch.toString().toRequestBody("application/json".toMediaType()))
-                .build()).execute().close()
-            Log.d(tag, "syncAccessControl ✅ acId=$acId")
-        } catch (e: Exception) {
-            Log.w(tag, "syncAccessControl non-fatal: ${e.message}")
-        }
-    }
-
-    private fun authWithPassword(email: String, password: String): Pair<Int, String> {
-        listOf(
-            "${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-password",
-            "${AppConfig.BASE_URL}/api/collections/_pb_users_auth_/auth-with-password"
-        ).forEach { url ->
-            val body = JSONObject().apply { put("identity", email); put("password", password) }
-                .toString().toRequestBody("application/json".toMediaType())
-            val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
-            val resBody = res.body?.string() ?: ""
-            val code    = res.code; res.close()
-            Log.d(tag, "authWithPassword $url → HTTP $code")
-            if (code != 404) return Pair(code, resBody)
-        }
-        return Pair(404, """{"message":"Missing or invalid auth collection context."}""")
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun getEffectiveToken(): String {
         val t = authTokenRef.get()
@@ -768,7 +774,7 @@ class PocketBaseDataSource @Inject constructor(
     }
 
     @Synchronized
-    private fun getAdminToken(): String {
+    fun getAdminToken(): String {
         val now = System.currentTimeMillis()
         if (cachedAdminToken.isNotBlank() && (now - adminTokenFetchedAt) < adminTokenTtlMs)
             return cachedAdminToken
@@ -778,7 +784,8 @@ class PocketBaseDataSource @Inject constructor(
         ).forEach { url ->
             try {
                 val body = JSONObject().apply {
-                    put("identity", AppConfig.ADMIN_EMAIL); put("password", AppConfig.ADMIN_PASS)
+                    put("identity", AppConfig.ADMIN_EMAIL)
+                    put("password", AppConfig.ADMIN_PASS)
                 }.toString().toRequestBody("application/json".toMediaType())
                 val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
                 val resBody = res.body?.string() ?: ""
@@ -796,6 +803,78 @@ class PocketBaseDataSource @Inject constructor(
         error("No admin token available")
     }
 
+    private fun applyFieldsToEntity(entity: UserEntity, fields: Map<String, Any>): UserEntity {
+        var e = entity
+        fields.forEach { (k, v) ->
+            when (k) {
+                "role"        -> e = e.copy(role        = v.toString())
+                "designation" -> e = e.copy(designation = v.toString())
+                "department"  -> e = e.copy(department  = v.toString())
+                "companyName" -> e = e.copy(companyName = v.toString())
+                "isActive"    -> e = e.copy(isActive    = v.toString().toBooleanStrictOrNull() ?: e.isActive)
+                "needsProfileCompletion" -> e = e.copy(needsProfileCompletion =
+                    v.toString().toBooleanStrictOrNull() ?: e.needsProfileCompletion)
+                "profile" -> {
+                    val pj = try { JSONObject(v.toString()) } catch (_: Exception) { return@forEach }
+                    if (pj.has("imageUrl"))    e = e.copy(imageUrl    = pj.optString("imageUrl",    e.imageUrl))
+                    if (pj.has("phoneNumber")) e = e.copy(phoneNumber = pj.optString("phoneNumber", e.phoneNumber))
+                    if (pj.has("address"))     e = e.copy(address     = pj.optString("address",     e.address))
+                    if (pj.has("salary"))      e = e.copy(salary      = pj.optDouble("salary",      e.salary))
+                }
+                "workStats" -> {
+                    val wj = try { JSONObject(v.toString()) } catch (_: Exception) { return@forEach }
+                    if (wj.has("experience")) e = e.copy(experience = wj.optInt("experience", e.experience))
+                }
+            }
+        }
+        return e
+    }
+
+    private fun authWithPassword(email: String, password: String): Pair<Int, String> {
+        val body = JSONObject().apply { put("identity", email); put("password", password) }
+            .toString().toRequestBody("application/json".toMediaType())
+        val res  = http.newCall(Request.Builder()
+            .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-password")
+            .post(body).build()).execute()
+        val resBody = res.body?.string() ?: ""
+        val code    = res.code; res.close()
+        return Pair(code, resBody)
+    }
+
+    private fun fetchAccessControl(userId: String): Result<AccessControlRecord> {
+        return try {
+            val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
+            val res   = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
+                        "?filter=userId%3D%27$userId%27&perPage=1")
+                .addHeader("Authorization", "Bearer $token").get().build()).execute()
+            val body  = res.body?.string() ?: ""
+            val code  = res.code; res.close()
+            if (code !in 200..299)
+                return Result.failure(Exception("fetchAccessControl HTTP $code"))
+            val json = JSONObject(body)
+            if (json.optInt("totalItems", 0) == 0)
+                return Result.failure(Exception("No access control for $userId"))
+            val item   = json.getJSONArray("items").getJSONObject(0)
+            val record = AccessControlRecord(
+                userId               = item.optString("userId"),
+                name                 = item.optString("name"),
+                email                = item.optString("email"),
+                companyName          = item.optString("companyName"),
+                sanitizedCompanyName = item.optString("sanitizedCompanyName"),
+                department           = item.optString("department"),
+                sanitizedDepartment  = item.optString("sanitizedDepartment"),
+                role                 = item.optString("role"),
+                permissions          = item.optString("permissions", "[]"),
+                isActive             = item.optBoolean("isActive", true),
+                documentPath         = item.optString("documentPath")
+            )
+            Result.success(record.apply { recordId = item.optString("id") })
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun parseJsonFieldSafe(parent: JSONObject, key: String): Map<String, String> {
         return try {
             val raw = parent.opt(key) ?: return emptyMap()
@@ -809,41 +888,6 @@ class PocketBaseDataSource @Inject constructor(
             map
         } catch (_: Exception) { emptyMap() }
     }
-
-    private suspend fun fetchAccessControl(userId: String): Result<AccessControlRecord> =
-        withContext(Dispatchers.IO) {
-            try {
-                val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
-                val res  = http.newCall(Request.Builder()
-                    .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records" +
-                            "?filter=userId%3D%27$userId%27&perPage=1")
-                    .addHeader("Authorization", "Bearer $token").get().build()).execute()
-                val body = res.body?.string() ?: ""
-                val code = res.code; res.close()
-                if (code !in 200..299)
-                    return@withContext Result.failure(Exception("fetchAccessControl HTTP $code"))
-                val json = JSONObject(body)
-                if (json.optInt("totalItems", 0) == 0)
-                    return@withContext Result.failure(Exception("No access control for $userId"))
-                val item   = json.getJSONArray("items").getJSONObject(0)
-                val record = AccessControlRecord(
-                    userId               = item.optString("userId"),
-                    name                 = item.optString("name"),
-                    email                = item.optString("email"),
-                    companyName          = item.optString("companyName"),
-                    sanitizedCompanyName = item.optString("sanitizedCompanyName"),
-                    department           = item.optString("department"),
-                    sanitizedDepartment  = item.optString("sanitizedDepartment"),
-                    role                 = item.optString("role"),
-                    permissions          = item.optString("permissions", "[]"),
-                    isActive             = item.optBoolean("isActive", true),
-                    documentPath         = item.optString("documentPath")
-                )
-                Result.success(record.apply { recordId = item.optString("id") })
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
-        }
 
     private fun httpPost(url: String, token: String = getEffectiveToken(), body: String) {
         val res     = http.newCall(Request.Builder().url(url)
@@ -862,44 +906,4 @@ class PocketBaseDataSource @Inject constructor(
         if (!res.isSuccessful) { res.close(); error("PATCH failed: HTTP ${res.code} — $resBody") }
         res.close()
     }
-
-    private fun deleteUserSilently(userId: String) {
-        try {
-            http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                .addHeader("Authorization", "Bearer ${getAdminToken()}").delete().build()
-            ).execute().close()
-        } catch (_: Exception) {}
-    }
-
-    private fun ensureCollection(token: String, name: String, schema: String) {
-        val checkRes = http.newCall(Request.Builder()
-            .url("${AppConfig.BASE_URL}/api/collections/$name")
-            .addHeader("Authorization", "Bearer $token").get().build()).execute()
-        if (checkRes.isSuccessful) { checkRes.close(); updateCollectionRules(token, name); return }
-        checkRes.close()
-        val createBody = JSONObject().apply {
-            put("name", name); put("type", "base"); put("schema", JSONArray(schema))
-            put("listRule", JSONObject.NULL); put("viewRule", JSONObject.NULL)
-            put("createRule", JSONObject.NULL); put("updateRule", JSONObject.NULL)
-            put("deleteRule", JSONObject.NULL)
-        }.toString().toRequestBody("application/json".toMediaType())
-        val createRes = http.newCall(Request.Builder()
-            .url("${AppConfig.BASE_URL}/api/collections")
-            .addHeader("Authorization", "Bearer $token").post(createBody).build()).execute()
-        Log.d(tag, "Create '$name' → HTTP ${createRes.code}"); createRes.close()
-    }
-
-    private fun updateCollectionRules(token: String, name: String) {
-        try {
-            http.newCall(Request.Builder().url("${AppConfig.BASE_URL}/api/collections/$name")
-                .addHeader("Authorization", "Bearer $token")
-                .patch("""{"listRule":null,"viewRule":null,"createRule":null,"updateRule":null,"deleteRule":null}"""
-                    .toRequestBody("application/json".toMediaType())).build()).execute().close()
-        } catch (e: Exception) { Log.w(tag, "updateCollectionRules '$name': ${e.message}") }
-    }
-
-    private fun buildCompaniesSchema()     = """[{"name":"originalName","type":"text","required":true},{"name":"sanitizedName","type":"text","required":true},{"name":"totalUsers","type":"number"},{"name":"activeUsers","type":"number"},{"name":"availableRoles","type":"json"},{"name":"departments","type":"json"}]"""
-    private fun buildAccessControlSchema() = """[{"name":"userId","type":"text","required":true},{"name":"name","type":"text"},{"name":"email","type":"email"},{"name":"companyName","type":"text"},{"name":"sanitizedCompanyName","type":"text"},{"name":"department","type":"text"},{"name":"sanitizedDepartment","type":"text"},{"name":"role","type":"text"},{"name":"designation","type":"text"},{"name":"permissions","type":"json"},{"name":"isActive","type":"bool"},{"name":"documentPath","type":"text"},{"name":"needsProfileCompletion","type":"bool"}]"""
-    private fun buildSearchIndexSchema()   = """[{"name":"userId","type":"text","required":true},{"name":"name","type":"text"},{"name":"email","type":"email"},{"name":"companyName","type":"text"},{"name":"sanitizedCompanyName","type":"text"},{"name":"department","type":"text"},{"name":"sanitizedDepartment","type":"text"},{"name":"role","type":"text"},{"name":"designation","type":"text"},{"name":"isActive","type":"bool"},{"name":"searchTerms","type":"json"},{"name":"documentPath","type":"text"}]"""
 }

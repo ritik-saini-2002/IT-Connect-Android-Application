@@ -10,31 +10,29 @@ import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.source
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-private val JSON_MT    = "application/json; charset=utf-8".toMediaType()
-private val BINARY_MT  = "application/octet-stream".toMediaType()
+private val JSON_MT   = "application/json; charset=utf-8".toMediaType()
+private val BINARY_MT = "application/octet-stream".toMediaType()
 
-// ─────────────────────────────────────────────────────────────
-//  Transfer constants — tuned for WiFi 6 (802.11ax)
-//  2.4 GHz: ~300 Mbps real  |  5 GHz: ~1200 Mbps real
-// ─────────────────────────────────────────────────────────────
-private const val CHUNK_SIZE        = 4 * 1024 * 1024   // 4 MB per chunk
-private const val SOCKET_BUF        = 8 * 1024 * 1024   // 8 MB socket buffer
-private const val CONNECT_TIMEOUT   = 6L                 // seconds
-private const val READ_TIMEOUT      = 0L                 // 0 = infinite (streaming)
-private const val WRITE_TIMEOUT     = 0L                 // 0 = infinite (large upload)
-private const val PING_TIMEOUT      = 3L
+// ── Transfer constants ────────────────────────────────────────────────────────
+private const val CHUNK_SIZE      = 4 * 1024 * 1024   // 4 MB per chunk
+private const val SOCKET_BUF      = 8 * 1024 * 1024   // 8 MB socket buffer
+private const val CONNECT_TIMEOUT = 6L
+private const val READ_TIMEOUT    = 0L                 // 0 = infinite (streaming)
+private const val WRITE_TIMEOUT   = 0L                 // 0 = infinite (large upload)
+private const val PING_TIMEOUT    = 3L
 
-// ─────────────────────────────────────────────────────────────
-//  BASE CLIENT
-// ─────────────────────────────────────────────────────────────
+// ── Base client ───────────────────────────────────────────────────────────────
 abstract class PcBaseClient(protected val settings: PcControlSettings) {
 
     protected val gson = Gson()
 
-    /** Standard API calls */
     protected val http = OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -43,7 +41,6 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .socketFactory(tunedSocketFactory())
         .build()
 
-    /** Fast ping */
     protected val httpFast = OkHttpClient.Builder()
         .connectTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
         .readTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
@@ -51,11 +48,6 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .retryOnConnectionFailure(false)
         .build()
 
-    /**
-     * Transfer client — infinite timeouts, large buffers.
-     * OkHttp will use a persistent connection pool; we get near-wire-speed
-     * on WiFi 6 because we saturate the TCP window with 4 MB chunks.
-     */
     protected val httpTransfer = OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
         .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
@@ -65,11 +57,6 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .connectionPool(ConnectionPool(5, 60, TimeUnit.SECONDS))
         .build()
 
-    /**
-     * Returns a SocketFactory that sets SO_SNDBUF / SO_RCVBUF to 8 MB
-     * and TCP_NODELAY on every new socket — critical for throughput on
-     * WiFi 6 where RTT can be <1 ms on 5 GHz.
-     */
     private fun tunedSocketFactory(): javax.net.SocketFactory {
         return object : javax.net.SocketFactory() {
             private val delegate = javax.net.SocketFactory.getDefault()
@@ -82,10 +69,10 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
                 }
                 return s
             }
-            override fun createSocket()                                                      = tune(delegate.createSocket())
-            override fun createSocket(host: String, port: Int)                              = tune(delegate.createSocket(host, port))
+            override fun createSocket() = tune(delegate.createSocket())
+            override fun createSocket(host: String, port: Int) = tune(delegate.createSocket(host, port))
             override fun createSocket(host: String, port: Int, localHost: java.net.InetAddress, localPort: Int) = tune(delegate.createSocket(host, port, localHost, localPort))
-            override fun createSocket(host: java.net.InetAddress, port: Int)                = tune(delegate.createSocket(host, port))
+            override fun createSocket(host: java.net.InetAddress, port: Int) = tune(delegate.createSocket(host, port))
             override fun createSocket(address: java.net.InetAddress, port: Int, localAddress: java.net.InetAddress, localPort: Int) = tune(delegate.createSocket(address, port, localAddress, localPort))
         }
     }
@@ -123,21 +110,16 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
     protected fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 }
 
-// ─────────────────────────────────────────────────────────────
-//  PLAN EXECUTION CLIENT
-// ─────────────────────────────────────────────────────────────
+// ── Plan execution client ─────────────────────────────────────────────────────
 class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
 
     suspend fun ping(): PcNetworkResult<PcPingResponse> = withContext(Dispatchers.IO) {
         try {
-            val req  = baseRequest("/ping").get().build()
-            val resp = httpFast.newCall(req).execute()
-            if (resp.isSuccessful) {
-                val ping = gson.fromJson(resp.body?.string(), PcPingResponse::class.java)
-                PcNetworkResult(true, ping)
-            } else {
+            val resp = httpFast.newCall(baseRequest("/ping").get().build()).execute()
+            if (resp.isSuccessful)
+                PcNetworkResult(true, gson.fromJson(resp.body?.string(), PcPingResponse::class.java))
+            else
                 PcNetworkResult(false, error = "HTTP ${resp.code}")
-            }
         } catch (e: Exception) {
             PcNetworkResult(false, error = e.message ?: "Unreachable")
         }
@@ -155,10 +137,8 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
         else PcNetworkResult(false, error = result.error)
     }
 
-    suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> {
-        val payload = gson.toJsonTree(step).asJsonObject
-        return post("/quick", payload)
-    }
+    suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> =
+        post("/quick", gson.toJsonTree(step).asJsonObject)
 
     suspend fun getProcesses(): PcNetworkResult<List<String>> {
         val r = get("/processes")
@@ -196,8 +176,8 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
         val r = get("/dialog/openwith/poll")
         if (!r.success) return PcNetworkResult(true, null)
         return try {
-            val json   = gson.fromJson(r.data, Map::class.java)
-            val hasDlg = json["has_dialog"] as? Boolean ?: false
+            val json    = gson.fromJson(r.data, Map::class.java)
+            val hasDlg  = json["has_dialog"] as? Boolean ?: false
             if (!hasDlg) return PcNetworkResult(true, null)
             val filePath = json["file_path"] as? String ?: ""
             @Suppress("UNCHECKED_CAST")
@@ -217,17 +197,14 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
         post("/dialog/openwith/resolve", mapOf("exe" to exePath))
 }
 
-// ─────────────────────────────────────────────────────────────
-//  BROWSE CLIENT
-// ─────────────────────────────────────────────────────────────
+// ── Browse client ─────────────────────────────────────────────────────────────
 class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings) {
 
     suspend fun getDrives(): PcNetworkResult<List<PcDrive>> {
         val r = get("/browse/drives")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
-            val type = object : TypeToken<List<PcDrive>>() {}.type
-            PcNetworkResult(true, gson.fromJson(r.data, type))
+            PcNetworkResult(true, gson.fromJson(r.data, object : TypeToken<List<PcDrive>>() {}.type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
@@ -240,8 +217,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         val r  = get("/browse/dir?path=${enc(path)}$fp")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
-            val type = object : TypeToken<List<PcFileItem>>() {}.type
-            PcNetworkResult(true, gson.fromJson(r.data, type))
+            PcNetworkResult(true, gson.fromJson(r.data, object : TypeToken<List<PcFileItem>>() {}.type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
@@ -252,12 +228,10 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
     ): PcNetworkResult<List<PcFileItem>> {
         if (query.isBlank() || rootPath.isBlank())
             return PcNetworkResult(true, emptyList())
-        val url = "/browse/search?path=${enc(rootPath)}&q=${enc(query)}&maxResults=$maxResults"
-        val r   = get(url)
+        val r = get("/browse/search?path=${enc(rootPath)}&q=${enc(query)}&maxResults=$maxResults")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
-            val type = object : TypeToken<List<PcFileItem>>() {}.type
-            PcNetworkResult(true, gson.fromJson(r.data, type))
+            PcNetworkResult(true, gson.fromJson(r.data, object : TypeToken<List<PcFileItem>>() {}.type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
@@ -265,8 +239,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         val r = get("/browse/apps")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
-            val type = object : TypeToken<List<PcInstalledApp>>() {}.type
-            PcNetworkResult(true, gson.fromJson(r.data, type))
+            PcNetworkResult(true, gson.fromJson(r.data, object : TypeToken<List<PcInstalledApp>>() {}.type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
@@ -274,8 +247,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         val r = get("/browse/special")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
-            val type = object : TypeToken<List<Map<String, Any>>>() {}.type
-            PcNetworkResult(true, gson.fromJson(r.data, type))
+            PcNetworkResult(true, gson.fromJson(r.data, object : TypeToken<List<Map<String, Any>>>() {}.type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
@@ -283,142 +255,147 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         val r = get("/browse/recent")
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
-            val type = object : TypeToken<List<PcRecentPath>>() {}.type
-            PcNetworkResult(true, gson.fromJson(r.data, type))
+            PcNetworkResult(true, gson.fromJson(r.data, object : TypeToken<List<PcRecentPath>>() {}.type))
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
-    // ─────────────────────────────────────────────────────────
-    //  HIGH-SPEED DOWNLOAD
-    //  • Range request support for resumable transfers
-    //  • 4 MB read chunks into pre-allocated buffer
-    //  • Progress reported every ~300 ms to avoid UI flooding
-    // ─────────────────────────────────────────────────────────
+    // ── DOWNLOAD — streams directly to OutputStream, never loads file into RAM ─
+    //
+    // The old code read all chunks into a List<ByteArray> then assembled them into
+    // a single ByteArray before returning — that held 2× the file size in memory.
+    // (171 MB file → 342 MB peak RAM → OOM with 256 MB heap limit.)
+    //
+    // Fix: the caller supplies an OutputStream (from ContentResolver.openOutputStream).
+    // We pipe the response body straight into it with a small 64 KB read buffer.
+    // Peak RAM is always ≤ buffer size regardless of file size.
+    //
     suspend fun downloadFile(
         remotePath : String,
+        outputStream: OutputStream,
         onProgress : (Long, Long, Long) -> Unit
-    ): PcNetworkResult<ByteArray> = withContext(Dispatchers.IO) {
+    ): PcNetworkResult<Unit> = withContext(Dispatchers.IO) {
         try {
-            val url  = "${settings.baseUrl}/file/download?path=${enc(remotePath)}"
-            val req  = Request.Builder()
+            val url = "${settings.baseUrl}/file/download?path=${enc(remotePath)}"
+            val req = Request.Builder()
                 .url(url)
                 .header("X-Secret-Key", settings.secretKey)
-                .header("Accept-Encoding", "identity")   // disable gzip — already JPEG/binary
+                .header("Accept-Encoding", "identity")  // disable gzip — binary data
                 .get().build()
 
             val resp = httpTransfer.newCall(req).execute()
             if (!resp.isSuccessful)
                 return@withContext PcNetworkResult(false, error = "HTTP ${resp.code}")
 
-            val total     = resp.header("Content-Length")?.toLongOrNull() ?: -1L
-            val body      = resp.body
+            val total  = resp.header("Content-Length")?.toLongOrNull() ?: -1L
+            val source = resp.body?.source()
                 ?: return@withContext PcNetworkResult(false, error = "No body")
-            val source    = body.source()
-            val buf       = okio.Buffer()
 
-            var done          = 0L
-            var lastReportMs  = System.currentTimeMillis()
-            var lastBytes     = 0L
-            var peakSpeed     = 0L
-            val chunks        = mutableListOf<ByteArray>()
+            var done         = 0L
+            var lastReportMs = System.currentTimeMillis()
+            var lastBytes    = 0L
 
-            while (!source.exhausted()) {
-                val read = source.read(buf, CHUNK_SIZE.toLong())
-                if (read == -1L) break
-                done += read
-                val chunk = ByteArray(buf.size.toInt())
-                buf.read(chunk)
-                chunks.add(chunk)
+            // 64 KB read buffer — negligible RAM, fast streaming
+            val readBuf = ByteArray(64 * 1024)
 
-                val now  = System.currentTimeMillis()
-                val dtMs = now - lastReportMs
-                if (dtMs >= 200) {
-                    val speed = if (dtMs > 0) ((done - lastBytes) * 1000L) / dtMs else 0L
-                    if (speed > peakSpeed) peakSpeed = speed
-                    onProgress(done, total, speed)
-                    lastReportMs = now
-                    lastBytes    = done
+            outputStream.buffered(256 * 1024).use { out ->
+                while (true) {
+                    val n = source.read(readBuf)
+                    if (n == -1) break
+                    out.write(readBuf, 0, n)
+                    done += n
+
+                    val now  = System.currentTimeMillis()
+                    val dtMs = now - lastReportMs
+                    if (dtMs >= 200) {
+                        val speed = if (dtMs > 0) ((done - lastBytes) * 1000L) / dtMs else 0L
+                        onProgress(done, total, speed)
+                        lastReportMs = now
+                        lastBytes    = done
+                    }
                 }
+                out.flush()
             }
-            // Final progress
-            onProgress(done, total, 0L)
+            source.close()
 
-            // Reassemble — single allocation
-            val result = ByteArray(done.toInt())
-            var offset = 0
-            for (c in chunks) { c.copyInto(result, offset); offset += c.size }
-            PcNetworkResult(true, result)
+            onProgress(done, total, 0L)
+            PcNetworkResult(true, Unit)
         } catch (e: Exception) {
             PcNetworkResult(false, error = e.message ?: "Download failed")
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    //  HIGH-SPEED UPLOAD
-    //  Strategy:
-    //    • Files ≤ 16 MB  → single multipart POST (simple, fast for small files)
-    //    • Files > 16 MB  → chunked upload via /file/upload/chunk
-    //      Each chunk is sent as a raw POST with byte range params.
-    //      Agent reassembles in order when all chunks arrive.
-    //  Both paths saturate the WiFi 6 link.
-    // ─────────────────────────────────────────────────────────
-    private val CHUNKED_THRESHOLD = 16 * 1024 * 1024   // 16 MB
+    // ── UPLOAD — streams from InputStream, never loads file into RAM ───────────
+    //
+    // Old path: Activity called cr.openInputStream(uri)?.readBytes() → full file
+    // in a ByteArray → passed to uploadFile(ByteArray) → another copy for chunking.
+    // (354 MB file → 700+ MB peak RAM → instant OOM.)
+    //
+    // Fix: accept InputStream + file size. For ≤ 16 MB we still buffer (fine).
+    // For > 16 MB we stream chunks directly from the InputStream using okio,
+    // so we only ever hold one CHUNK_SIZE slice in RAM at a time.
+    //
+    private val CHUNKED_THRESHOLD = 16 * 1024 * 1024  // 16 MB
 
     suspend fun uploadFile(
-        localBytes : ByteArray,
-        fileName   : String,
-        remotePath : String,
-        onProgress : (Long, Long, Long) -> Unit
+        inputStream  : InputStream,
+        fileSize     : Long,
+        fileName     : String,
+        remotePath   : String,
+        onProgress   : (Long, Long, Long) -> Unit
     ): PcNetworkResult<String> = withContext(Dispatchers.IO) {
-        return@withContext if (localBytes.size <= CHUNKED_THRESHOLD) {
-            uploadSingle(localBytes, fileName, remotePath, onProgress)
+        return@withContext if (fileSize <= CHUNKED_THRESHOLD) {
+            uploadSingleStream(inputStream, fileSize, fileName, remotePath, onProgress)
         } else {
-            uploadChunked(localBytes, fileName, remotePath, onProgress)
+            uploadChunkedStream(inputStream, fileSize, fileName, remotePath, onProgress)
         }
     }
 
-    private suspend fun uploadSingle(
-        localBytes : ByteArray,
-        fileName   : String,
-        remotePath : String,
-        onProgress : (Long, Long, Long) -> Unit
+    private suspend fun uploadSingleStream(
+        inputStream : InputStream,
+        fileSize    : Long,
+        fileName    : String,
+        remotePath  : String,
+        onProgress  : (Long, Long, Long) -> Unit
     ): PcNetworkResult<String> = withContext(Dispatchers.IO) {
         try {
-            val total         = localBytes.size.toLong()
-            var done          = 0L
-            var lastReportMs  = System.currentTimeMillis()
-            var lastBytes     = 0L
+            val total        = fileSize
+            var done         = 0L
+            var lastReportMs = System.currentTimeMillis()
+            var lastBytes    = 0L
 
+            // Stream the InputStream directly into the OkHttp sink — no ByteArray copy
             val filePart = object : RequestBody() {
-                override fun contentType() = BINARY_MT
+                override fun contentType()   = BINARY_MT
                 override fun contentLength() = total
-                override fun writeTo(sink: okio.BufferedSink) {
-                    var offset = 0
-                    while (offset < localBytes.size) {
-                        val end  = minOf(offset + CHUNK_SIZE, localBytes.size)
-                        sink.write(localBytes, offset, end - offset)
-                        done += (end - offset).toLong()
-                        val now  = System.currentTimeMillis()
-                        val dtMs = now - lastReportMs
-                        if (dtMs >= 200) {
-                            val speed = if (dtMs > 0) ((done - lastBytes) * 1000L) / dtMs else 0L
-                            onProgress(done, total, speed)
-                            lastReportMs = now; lastBytes = done
+                override fun writeTo(sink: BufferedSink) {
+                    val buf = ByteArray(64 * 1024)
+                    inputStream.use { input ->
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n == -1) break
+                            sink.write(buf, 0, n)
+                            done += n
+                            val now  = System.currentTimeMillis()
+                            val dtMs = now - lastReportMs
+                            if (dtMs >= 200) {
+                                val speed = if (dtMs > 0) ((done - lastBytes) * 1000L) / dtMs else 0L
+                                onProgress(done, total, speed)
+                                lastReportMs = now; lastBytes = done
+                            }
                         }
-                        offset = end
                     }
                     onProgress(total, total, 0L)
                 }
             }
 
-            val destEnc   = enc(remotePath)
             val multipart = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("dest", remotePath)
                 .addFormDataPart("file", fileName, filePart)
                 .build()
-            val req = Request.Builder()
-                .url("${settings.baseUrl}/file/upload?dest=$destEnc")
+
+            val req  = Request.Builder()
+                .url("${settings.baseUrl}/file/upload?dest=${enc(remotePath)}")
                 .header("X-Secret-Key", settings.secretKey)
                 .post(multipart)
                 .build()
@@ -431,46 +408,71 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         }
     }
 
-    private suspend fun uploadChunked(
-        localBytes : ByteArray,
-        fileName   : String,
-        remotePath : String,
-        onProgress : (Long, Long, Long) -> Unit
+    private suspend fun uploadChunkedStream(
+        inputStream : InputStream,
+        fileSize    : Long,
+        fileName    : String,
+        remotePath  : String,
+        onProgress  : (Long, Long, Long) -> Unit
     ): PcNetworkResult<String> = withContext(Dispatchers.IO) {
         try {
-            val total       = localBytes.size.toLong()
-            val totalChunks = (localBytes.size + CHUNK_SIZE - 1) / CHUNK_SIZE
+            val total       = fileSize
+            val totalChunks = ((fileSize + CHUNK_SIZE - 1) / CHUNK_SIZE).toInt()
             var done        = 0L
             var lastReportMs = System.currentTimeMillis()
             var lastBytes    = 0L
 
-            for (index in 0 until totalChunks) {
-                val start     = index * CHUNK_SIZE
-                val end       = minOf(start + CHUNK_SIZE, localBytes.size)
-                val chunkData = localBytes.copyOfRange(start, end)
+            // One chunk buffer — reused across all chunks
+            val chunkBuf = ByteArray(CHUNK_SIZE)
 
-                val body = chunkData.toRequestBody(BINARY_MT)
-                val url  = "${settings.baseUrl}/file/upload/chunk" +
-                        "?name=${enc(fileName)}&dest=${enc(remotePath)}" +
-                        "&index=$index&total=$totalChunks"
-                val req  = Request.Builder()
-                    .url(url)
-                    .header("X-Secret-Key", settings.secretKey)
-                    .post(body)
-                    .build()
+            inputStream.use { input ->
+                var index = 0
+                while (true) {
+                    // Read exactly one chunk (may be shorter on the last chunk)
+                    var bytesRead = 0
+                    while (bytesRead < CHUNK_SIZE) {
+                        val n = input.read(chunkBuf, bytesRead, CHUNK_SIZE - bytesRead)
+                        if (n == -1) break
+                        bytesRead += n
+                    }
+                    if (bytesRead == 0) break
 
-                val resp = httpTransfer.newCall(req).execute()
-                if (!resp.isSuccessful)
-                    return@withContext PcNetworkResult(
-                        false, error = "Chunk $index failed: HTTP ${resp.code}")
+                    val chunkSize = bytesRead  // actual bytes in this chunk
+                    val capturedIndex = index  // capture for lambda
 
-                done += chunkData.size.toLong()
-                val now  = System.currentTimeMillis()
-                val dtMs = now - lastReportMs
-                if (dtMs >= 200 || index == totalChunks - 1) {
-                    val speed = if (dtMs > 0) ((done - lastBytes) * 1000L) / dtMs else 0L
-                    onProgress(done, total, speed)
-                    lastReportMs = now; lastBytes = done
+                    // Build RequestBody that writes from the pre-filled buffer
+                    val body = object : RequestBody() {
+                        override fun contentType()   = BINARY_MT
+                        override fun contentLength() = chunkSize.toLong()
+                        override fun writeTo(sink: BufferedSink) {
+                            sink.write(chunkBuf, 0, chunkSize)
+                        }
+                    }
+
+                    val url  = "${settings.baseUrl}/file/upload/chunk" +
+                            "?name=${enc(fileName)}&dest=${enc(remotePath)}" +
+                            "&index=$capturedIndex&total=$totalChunks"
+                    val req  = Request.Builder()
+                        .url(url)
+                        .header("X-Secret-Key", settings.secretKey)
+                        .post(body)
+                        .build()
+
+                    val resp = httpTransfer.newCall(req).execute()
+                    resp.body?.string(); resp.close()  // drain body
+                    if (!resp.isSuccessful)
+                        return@withContext PcNetworkResult(
+                            false, error = "Chunk $capturedIndex failed: HTTP ${resp.code}")
+
+                    done += chunkSize
+                    val now  = System.currentTimeMillis()
+                    val dtMs = now - lastReportMs
+                    if (dtMs >= 200 || index == totalChunks - 1) {
+                        val speed = if (dtMs > 0) ((done - lastBytes) * 1000L) / dtMs else 0L
+                        onProgress(done, total, speed)
+                        lastReportMs = now; lastBytes = done
+                    }
+                    index++
                 }
             }
             PcNetworkResult(true, "Chunked upload complete: $fileName")
@@ -480,9 +482,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  INPUT CLIENT
-// ─────────────────────────────────────────────────────────────
+// ── Input client ──────────────────────────────────────────────────────────────
 class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings) {
 
     suspend fun moveMouse(dx: Float, dy: Float) =

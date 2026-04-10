@@ -28,9 +28,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.data.model.Permissions
 import kotlinx.coroutines.delay
 
-private val PANEL_ROLES   = setOf("Administrator", "Manager", "HR")
+private val PANEL_ROLES = setOf(
+    Permissions.ROLE_SYSTEM_ADMIN,
+    Permissions.ROLE_ADMIN,
+    Permissions.ROLE_MANAGER,
+    Permissions.ROLE_HR
+)
 
 data class AdminFunction(
     val id          : String,
@@ -38,7 +45,8 @@ data class AdminFunction(
     val description : String,
     val icon        : ImageVector,
     val color       : Color,
-    val adminOnly   : Boolean = false
+    val badgeLabel  : String  = "",   // e.g. "Super Admin", "Admin Only"
+    val badgeColor  : Color   = Color(0xFFF44336)
 )
 
 @OptIn(ExperimentalAnimationApi::class)
@@ -64,18 +72,55 @@ fun AdministratorPanelScreen(
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(200); visible = true }
 
-    val role    = adminData?.role ?: ""
-    val isAdmin = role == "Administrator"
+    val role         = adminData?.role ?: ""
+    val permissions  = adminData?.permissions ?: emptyList()
+    val isSysAdmin   = PermissionGuard.isSystemAdmin(role)
+    val isAdmin      = role == Permissions.ROLE_ADMIN || isSysAdmin
+    val canAccessDb  = PermissionGuard.canAccessDatabaseManager(role, permissions)
 
-    val allFunctions = remember(role) {
+    // Build function list entirely from permissions, not just role string
+    val allFunctions = remember(role, permissions) {
         buildList {
-            add(AdminFunction("create_user",     "Create User",          "Add new users to your organisation",         Icons.Default.PersonAdd,         Color(0xFF4CAF50)))
-            add(AdminFunction("manage_users",    "Manage Users",         "View, edit and manage existing users",        Icons.Default.People,            Color(0xFF2196F3)))
-            add(AdminFunction("department_mgr",  "Department Manager",   "Create, delete and move users across depts",  Icons.Default.AccountTree,       Color(0xFF00897B)))
-            if (isAdmin) add(AdminFunction("role_management",  "Role Management",      "Change user roles and update permissions",    Icons.Default.AdminPanelSettings,Color(0xFFF44336), adminOnly = true))
-            if (isAdmin) add(AdminFunction("database_manager", "Database Manager",     "Manage collections, rules, indexes and data", Icons.Default.Cloud,             Color(0xFF9C27B0), adminOnly = true))
-            if (isAdmin) add(AdminFunction("company_settings","Company Settings",     "Manage company information and branding",      Icons.Default.Business,          Color(0xFFFF9800), adminOnly = true))
-            add(AdminFunction("reports",         "Reports & Export",     "Generate reports and export data",            Icons.Default.Assessment,        Color(0xFF607D8B)))
+            // Always available to panel roles
+            add(AdminFunction("create_user",    "Create User",
+                "Add new users to your organisation",
+                Icons.Default.PersonAdd, Color(0xFF4CAF50)))
+            add(AdminFunction("manage_users",   "Manage Users",
+                "View, edit and manage existing users",
+                Icons.Default.People,   Color(0xFF2196F3)))
+            add(AdminFunction("department_mgr", "Department Manager",
+                "Create, delete and move users across depts",
+                Icons.Default.AccountTree, Color(0xFF00897B)))
+
+            // Role management — Administrator and above
+            if (isAdmin || "manage_roles" in permissions) {
+                add(AdminFunction("role_management", "Role Management",
+                    "Change user roles and update permissions",
+                    Icons.Default.AdminPanelSettings, Color(0xFFF44336),
+                    badgeLabel = if (isSysAdmin) "Super Admin" else "Admin Only"))
+            }
+
+            // Database Manager — System_Administrator OR explicit permission only
+            if (canAccessDb) {
+                add(AdminFunction("database_manager", "Database Manager",
+                    "Manage collections, rules, indexes and data",
+                    Icons.Default.Cloud, Color(0xFF9C27B0),
+                    badgeLabel  = if (isSysAdmin) "Super Admin" else "Permitted",
+                    badgeColor  = if (isSysAdmin) Color(0xFF6200EA) else Color(0xFF9C27B0)))
+            }
+
+            // Company settings — Administrator and above
+            if (isAdmin || "manage_companies" in permissions) {
+                add(AdminFunction("company_settings", "Company Settings",
+                    "Manage company information and branding",
+                    Icons.Default.Business, Color(0xFFFF9800),
+                    badgeLabel = if (isSysAdmin) "Super Admin" else "Admin Only"))
+            }
+
+            // Reports — anyone with access_admin_panel
+            add(AdminFunction("reports", "Reports & Export",
+                "Generate reports and export data",
+                Icons.Default.Assessment, Color(0xFF607D8B)))
         }
     }
 
@@ -86,15 +131,18 @@ fun AdministratorPanelScreen(
     ) {
         item {
             AnimatedVisibility(visible = visible, enter = fadeIn() + slideInVertically { -it }) {
-                GradientHeader(adminData, isLoading)
+                GradientHeader(adminData, isSysAdmin, isLoading)
             }
         }
         item {
             AnimatedVisibility(visible = visible, enter = fadeIn(tween(400, 100))) {
                 if (organizationStats != null) {
-                    StatsRow(organizationStats.totalUsers, organizationStats.totalDepartments,
+                    StatsRow(
+                        organizationStats.totalUsers,
+                        organizationStats.totalDepartments,
                         organizationStats.totalRoles,
-                        Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                        Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                    )
                 } else if (isLoading) {
                     Box(Modifier.fillMaxWidth().padding(24.dp), Alignment.Center) {
                         CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -111,21 +159,26 @@ fun AdministratorPanelScreen(
             }
         }
         item {
-            Text("Quick Actions",
+            Text(
+                "Quick Actions",
                 style      = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                modifier   = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier   = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
         }
         itemsIndexed(allFunctions) { idx, fn ->
             var pressed by remember { mutableStateOf(false) }
-            val scale by animateFloatAsState(
+            val sc by animateFloatAsState(
                 targetValue   = if (pressed) 0.96f else 1f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "s")
-            AnimatedVisibility(visible = visible,
-                enter = fadeIn(tween(300, idx * 80)) + slideInHorizontally(tween(350, idx * 80)) { it / 2 }) {
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "s"
+            )
+            AnimatedVisibility(
+                visible = visible,
+                enter   = fadeIn(tween(300, idx * 80)) + slideInHorizontally(tween(350, idx * 80)) { it / 2 }
+            ) {
                 FunctionCard(
                     fn       = fn,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp).scale(scale),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp).scale(sc),
                     onClick  = { onFunctionClick(fn.id) },
                     onPress  = { p -> pressed = p }
                 )
@@ -137,52 +190,97 @@ fun AdministratorPanelScreen(
 // ── Gradient header ───────────────────────────────────────────────────────────
 
 @Composable
-private fun GradientHeader(adminData: AdministratorPanelActivity.AdminData?, isLoading: Boolean) {
+private fun GradientHeader(
+    adminData  : AdministratorPanelActivity.AdminData?,
+    isSysAdmin : Boolean,
+    isLoading  : Boolean
+) {
+    val gradientColors = if (isSysAdmin)
+        listOf(Color(0xFF4A148C), Color(0xFF7B1FA2))  // deep purple for System_Administrator
+    else
+        listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(0.75f))
+
     Box(
         modifier = Modifier.fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(
-                MaterialTheme.colorScheme.primary,
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
-            )))
+            .background(Brush.verticalGradient(gradientColors))
             .padding(top = 56.dp, bottom = 24.dp, start = 20.dp, end = 20.dp)
     ) {
         if (isLoading && adminData == null) {
             CircularProgressIndicator(color = Color.White, modifier = Modifier.align(Alignment.Center))
         } else adminData?.let { data ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(72.dp).clip(CircleShape).background(Color.White.copy(0.25f)),
-                    Alignment.Center) {
-                    if (data.imageUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(data.imageUrl).crossfade(true).build(),
-                            contentDescription = "Avatar",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            contentScale = ContentScale.Crop)
-                    } else {
-                        Text(data.name.take(2).uppercase(),
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(72.dp).clip(CircleShape).background(Color.White.copy(0.25f)),
+                        Alignment.Center
+                    ) {
+                        if (data.imageUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(data.imageUrl).crossfade(true).build(),
+                                contentDescription = "Avatar",
+                                modifier     = Modifier.fillMaxSize().clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Text(
+                                data.name.take(2).uppercase(),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold, color = Color.White
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Welcome back,",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(0.8f))
+                        Text(data.name,
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold, color = Color.White)
+                            fontWeight = FontWeight.Bold, color = Color.White,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Role badge
+                            Surface(
+                                color = if (isSysAdmin) Color(0xFFFFD600).copy(0.25f)
+                                else Color.White.copy(0.2f),
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                Text(
+                                    data.role,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSysAdmin) Color(0xFFFFD600) else Color.White,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            if (isSysAdmin) {
+                                Surface(
+                                    color = Color(0xFFFFD600).copy(0.2f),
+                                    shape = RoundedCornerShape(20.dp)
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Icon(Icons.Default.Shield, null,
+                                            Modifier.size(10.dp), tint = Color(0xFFFFD600))
+                                        Text("Super Admin",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFFFD600),
+                                            fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text("${data.companyName} · ${data.department}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(0.75f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                }
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Welcome back,", style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(0.8f))
-                    Text(data.name, style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold, color = Color.White,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(4.dp))
-                    Surface(color = Color.White.copy(0.2f), shape = RoundedCornerShape(20.dp)) {
-                        Text(data.role,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White, fontWeight = FontWeight.SemiBold)
-                    }
-                    Spacer(Modifier.height(2.dp))
-                    Text("${data.companyName} · ${data.department}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -192,7 +290,10 @@ private fun GradientHeader(adminData: AdministratorPanelActivity.AdminData?, isL
 // ── Stats row ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun StatsRow(totalUsers: Int, totalDepts: Int, totalRoles: Int, modifier: Modifier = Modifier) {
+private fun StatsRow(
+    totalUsers: Int, totalDepts: Int, totalRoles: Int,
+    modifier: Modifier = Modifier
+) {
     Card(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(3.dp)) {
@@ -223,20 +324,27 @@ private fun StatPill(value: Int, label: String, icon: ImageVector, color: Color)
 
 @Composable
 private fun DepartmentStrip(
-    departments: List<AdministratorPanelActivity.DepartmentData>, modifier: Modifier = Modifier) {
+    departments: List<AdministratorPanelActivity.DepartmentData>,
+    modifier   : Modifier = Modifier
+) {
     Column(modifier.padding(horizontal = 16.dp)) {
-        Text("Departments (${departments.size})", style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 8.dp))
+        Text("Departments (${departments.size})",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(departments, key = { it.sanitized }) { dept ->
                 Card(Modifier.width(130.dp), shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     elevation = CardDefaults.cardElevation(1.dp)) {
                     Column(Modifier.padding(12.dp)) {
                         Text(dept.name, style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Spacer(Modifier.height(6.dp))
-                        Text(dept.userCount.toString(), style = MaterialTheme.typography.titleLarge,
+                        Text(dept.userCount.toString(),
+                            style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold, color = Color(0xFF2196F3))
                         Text("users", style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -250,19 +358,28 @@ private fun DepartmentStrip(
 // ── Function card ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun FunctionCard(fn: AdminFunction, modifier: Modifier = Modifier,
-                         onClick: () -> Unit, onPress: (Boolean) -> Unit) {
+private fun FunctionCard(
+    fn      : AdminFunction,
+    modifier: Modifier = Modifier,
+    onClick : () -> Unit,
+    onPress : (Boolean) -> Unit
+) {
     Card(
         modifier  = modifier.fillMaxWidth().clickable(
             interactionSource = remember { MutableInteractionSource() },
-            indication        = null, onClick = onClick),
+            indication        = null,
+            onClick           = onClick
+        ),
         shape     = RoundedCornerShape(14.dp),
         colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(50.dp).clip(RoundedCornerShape(12.dp))
-                .background(fn.color.copy(0.12f)), Alignment.Center) {
+            Box(
+                Modifier.size(50.dp).clip(RoundedCornerShape(12.dp))
+                    .background(fn.color.copy(0.12f)),
+                Alignment.Center
+            ) {
                 Icon(fn.icon, fn.title, tint = fn.color, modifier = Modifier.size(26.dp))
             }
             Spacer(Modifier.width(14.dp))
@@ -270,13 +387,16 @@ private fun FunctionCard(fn: AdminFunction, modifier: Modifier = Modifier,
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(fn.title, style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold)
-                    if (fn.adminOnly) {
+                    if (fn.badgeLabel.isNotBlank()) {
                         Spacer(Modifier.width(6.dp))
-                        Surface(color = Color(0xFFF44336).copy(0.12f), shape = RoundedCornerShape(6.dp)) {
-                            Text("Admin only",
+                        Surface(
+                            color = fn.badgeColor.copy(0.12f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(fn.badgeLabel,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFFF44336), fontWeight = FontWeight.Bold)
+                                color = fn.badgeColor, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -286,7 +406,7 @@ private fun FunctionCard(fn: AdminFunction, modifier: Modifier = Modifier,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Icon(Icons.Default.ChevronRight, null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f),
+                tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f),
                 modifier = Modifier.size(20.dp))
         }
     }
@@ -297,19 +417,27 @@ private fun FunctionCard(fn: AdminFunction, modifier: Modifier = Modifier,
 @Composable
 private fun AccessDeniedScreen(message: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
             Icon(Icons.Default.Lock, null, Modifier.size(72.dp),
                 tint = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(16.dp))
-            Text("Access Denied", style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+            Text("Access Denied",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(8.dp))
-            Text(message, style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            Text(message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center)
             Spacer(Modifier.height(16.dp))
             LinearProgressIndicator(Modifier.fillMaxWidth(0.5f))
             Spacer(Modifier.height(8.dp))
-            Text("Redirecting…", style = MaterialTheme.typography.bodySmall,
+            Text("Redirecting…",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

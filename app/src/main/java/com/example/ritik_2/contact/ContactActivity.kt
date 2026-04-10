@@ -13,29 +13,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import com.example.ritik_2.theme.Ritik_2Theme
-import androidx.core.net.toUri
+import com.example.ritik_2.theme.ITConnectTheme
 
 class ContactActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            Ritik_2Theme {
+            ITConnectTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     ContactScreen(
-                        onEmailClick = { email ->
-                            openEmail(email)
-                        },
-                        onPhoneClick = { phone ->
-                            dialPhone(phone)
-                        },
-                        onLocationClick = { address ->
-                            openMaps(address)
-                        }
+                        onEmailClick    = { email   -> openEmail(email) },
+                        onPhoneClick    = { phone   -> dialPhone(phone) },
+                        onLocationClick = { address -> openMaps(address) }
                     )
                 }
             }
@@ -44,9 +37,10 @@ class ContactActivity : ComponentActivity() {
 
     private fun openEmail(email: String) {
         try {
-            val intent = Intent(Intent.ACTION_SENDTO)
-            intent.data = Uri.parse("mailto:$email")  // Use data property, not setData()
-            intent.putExtra(Intent.EXTRA_SUBJECT, "Hello from your app!")
+            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                data = Uri.parse("mailto:$email")
+                putExtra(Intent.EXTRA_SUBJECT, "Hello from IT Connect!")
+            }
             startActivity(Intent.createChooser(intent, "Send Email"))
         } catch (e: Exception) {
             Toast.makeText(this, "No email app found", Toast.LENGTH_SHORT).show()
@@ -55,9 +49,9 @@ class ContactActivity : ComponentActivity() {
 
     private fun dialPhone(phone: String) {
         try {
-            val intent = Intent(Intent.ACTION_DIAL)
-            intent.data = Uri.parse("tel:$phone")  // Use data property
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_DIAL).apply {
+                data = Uri.parse("tel:$phone")
+            })
         } catch (e: Exception) {
             Toast.makeText(this, "No dialer app found", Toast.LENGTH_SHORT).show()
         }
@@ -65,9 +59,9 @@ class ContactActivity : ComponentActivity() {
 
     private fun openMaps(address: String) {
         try {
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.data = Uri.parse("geo:0,0?q=${Uri.encode(address)}")  // Use data property
-            startActivity(intent)
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("geo:0,0?q=${Uri.encode(address)}")
+            })
         } catch (e: Exception) {
             Toast.makeText(this, "No map app available", Toast.LENGTH_SHORT).show()
         }
@@ -77,10 +71,10 @@ class ContactActivity : ComponentActivity() {
 @Preview(showBackground = true)
 @Composable
 fun ContactActivityPreview() {
-    Ritik_2Theme {
+    ITConnectTheme {
         ContactScreen(
-            onEmailClick = {},
-            onPhoneClick = {},
+            onEmailClick    = {},
+            onPhoneClick    = {},
             onLocationClick = {}
         )
     }

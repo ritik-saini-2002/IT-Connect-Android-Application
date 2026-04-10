@@ -523,6 +523,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     // ── File Transfer ──────────────────────────────────────
 
+    // ── downloadFile — streams directly to URI, no ByteArray in memory ─────────
     fun downloadFile(
         remotePath      : String,
         saveToUri       : android.net.Uri,
@@ -532,13 +533,19 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
             val fileName = remotePath.substringAfterLast('/').substringAfterLast('\\')
             _transferProgress.value = PcTransferProgress(fileName, 0L, 0L, 0L, isUpload = false)
             try {
-                val result = browse.downloadFile(remotePath) { done, total, speed ->
+                val outputStream = contentResolver.openOutputStream(saveToUri)
+                    ?: run {
+                        _uiState.value = PcUiState.Error("Cannot open output stream")
+                        return@launch
+                    }
+                val result = browse.downloadFile(
+                    remotePath   = remotePath,
+                    outputStream = outputStream
+                ) { done, total, speed ->
                     _transferProgress.value = PcTransferProgress(fileName, total, done, speed, isUpload = false)
                 }
-                if (result.success && result.data != null) {
-                    contentResolver.openOutputStream(saveToUri)?.use { it.write(result.data) }
-                    val sz = result.data.size.toLong()
-                    _transferProgress.value = PcTransferProgress(fileName, sz, sz, 0L, isUpload = false, isDone = true)
+                if (result.success) {
+                    _transferProgress.value = _transferProgress.value?.copy(isDone = true)
                     _uiState.value = PcUiState.Success("Downloaded: $fileName")
                 } else {
                     _transferProgress.value = _transferProgress.value?.copy(error = result.error, isDone = true)
@@ -551,16 +558,32 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun uploadFile(localBytes: ByteArray, fileName: String, remotePath: String) {
+    // ── uploadFileStream — streams from URI, no ByteArray in memory ───────────
+    fun uploadFileStream(
+        contentResolver : android.content.ContentResolver,
+        uri             : android.net.Uri,
+        fileSize        : Long,
+        fileName        : String,
+        remotePath      : String
+    ) {
         viewModelScope.launch {
-            _transferProgress.value = PcTransferProgress(fileName, localBytes.size.toLong(), 0L, 0L, isUpload = true)
+            _transferProgress.value = PcTransferProgress(fileName, fileSize.coerceAtLeast(0L), 0L, 0L, isUpload = true)
             try {
-                val result = browse.uploadFile(localBytes, fileName, remotePath) { done, total, speed ->
+                val inputStream = contentResolver.openInputStream(uri)
+                    ?: run {
+                        _uiState.value = PcUiState.Error("Cannot open input stream")
+                        return@launch
+                    }
+                val result = browse.uploadFile(
+                    inputStream  = inputStream,
+                    fileSize     = fileSize,
+                    fileName     = fileName,
+                    remotePath   = remotePath
+                ) { done, total, speed ->
                     _transferProgress.value = PcTransferProgress(fileName, total, done, speed, isUpload = true)
                 }
                 if (result.success) {
-                    val sz = localBytes.size.toLong()
-                    _transferProgress.value = PcTransferProgress(fileName, sz, sz, 0L, isUpload = true, isDone = true)
+                    _transferProgress.value = _transferProgress.value?.copy(isDone = true)
                     _uiState.value = PcUiState.Success("Uploaded: $fileName")
                 } else {
                     _transferProgress.value = _transferProgress.value?.copy(error = result.error, isDone = true)

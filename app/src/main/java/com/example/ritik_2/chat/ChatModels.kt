@@ -12,7 +12,7 @@ data class ChatRoom(
     val avatarUrl    : String       = "",
     val members      : List<String> = emptyList(),
     val memberNames  : List<String> = emptyList(),
-    val memberAvatars: List<String> = emptyList(), // ← NEW: parallel avatar URLs
+    val memberAvatars: List<String> = emptyList(),
     val adminIds     : List<String> = emptyList(),
     val companyName  : String       = "",
     val lastMessage  : String       = "",
@@ -26,20 +26,20 @@ data class ChatMessage(
     val roomId       : String,
     val senderId     : String,
     val senderName   : String,
-    val senderAvatar : String       = "",
-    val type         : MessageType  = MessageType.TEXT,
-    val text         : String       = "",
-    val fileUrl      : String       = "",
-    val fileName     : String       = "",
-    val fileSize     : Long         = 0L,
-    val fileMime     : String       = "",
-    val thumbnailUrl : String       = "",
-    val sentAt       : Long         = System.currentTimeMillis(),
-    val editedAt     : Long         = 0L,           // ← NEW
-    val isOwn        : Boolean      = false,
+    val senderAvatar : String        = "",
+    val type         : MessageType   = MessageType.TEXT,
+    val text         : String        = "",
+    val fileUrl      : String        = "",
+    val fileName     : String        = "",
+    val fileSize     : Long          = 0L,
+    val fileMime     : String        = "",
+    val thumbnailUrl : String        = "",
+    val sentAt       : Long          = System.currentTimeMillis(),
+    val editedAt     : Long          = 0L,
+    val isOwn        : Boolean       = false,
     val status       : MessageStatus = MessageStatus.SENT,
-    val replyToId    : String       = "",
-    val replyToText  : String       = ""
+    val replyToId    : String        = "",
+    val replyToText  : String        = ""
 )
 
 enum class MessageStatus { SENDING, SENT, DELIVERED, READ, FAILED }
@@ -55,6 +55,31 @@ data class ChatMember(
     val sanitizedCompany: String  = ""
 )
 
+// ── File conflict resolution ──────────────────────────────────────────────────
+
+/**
+ * Shown when a file with the same name already exists in the room's message history.
+ * The user can choose to rename (auto-suffix) or replace (overwrite with same name).
+ */
+data class FileConflict(
+    val originalName: String,
+    val suggestedName: String,   // auto-suffixed name
+    val fileUri     : Uri,
+    val fileMime    : String,
+    val fileBytes   : ByteArray? = null
+)
+
+// ── Upload progress ───────────────────────────────────────────────────────────
+
+data class UploadProgress(
+    val fileName     : String,
+    val bytesUploaded: Long,
+    val totalBytes   : Long
+) {
+    val percent: Int get() = if (totalBytes > 0) ((bytesUploaded * 100) / totalBytes).toInt() else 0
+    val isDone : Boolean get() = bytesUploaded >= totalBytes
+}
+
 // ── UI state ──────────────────────────────────────────────────────────────────
 
 data class ChatListUiState(
@@ -66,16 +91,20 @@ data class ChatListUiState(
 )
 
 data class ChatRoomUiState(
-    val isLoading       : Boolean           = true,
-    val room            : ChatRoom?         = null,
-    val messages        : List<ChatMessage> = emptyList(),
-    val isSending       : Boolean           = false,
-    val error           : String?           = null,
-    val replyingTo      : ChatMessage?      = null,
-    val editingMessage  : ChatMessage?      = null, // ← NEW
-    val selectedFile    : Uri?              = null,
-    val selectedFileName: String            = "",
-    val selectedFileMime: String            = ""
+    val isLoading        : Boolean           = true,
+    val room             : ChatRoom?         = null,
+    val messages         : List<ChatMessage> = emptyList(),
+    val isSending        : Boolean           = false,
+    val error            : String?           = null,
+    val replyingTo       : ChatMessage?      = null,
+    val editingMessage   : ChatMessage?      = null,
+    val selectedFile     : Uri?              = null,
+    val selectedFileName : String            = "",
+    val selectedFileMime : String            = "",
+    // File conflict — non-null when same filename already exists
+    val fileConflict     : FileConflict?     = null,
+    // Upload progress — non-null while a large file is uploading
+    val uploadProgress   : UploadProgress?   = null
 )
 
 data class MemberPickerUiState(

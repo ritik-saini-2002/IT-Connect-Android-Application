@@ -85,6 +85,7 @@ class DatabaseManagerViewModel @Inject constructor(
 
                 // ── Access gate: DB admin OR has "database_manager" permission ─
                 val hasAccess = PermissionGuard.canAccessDatabaseManager(
+                    role        = profile.role,
                     permissions = profile.permissions,
                     isDbAdmin   = isDbAdmin
                 )

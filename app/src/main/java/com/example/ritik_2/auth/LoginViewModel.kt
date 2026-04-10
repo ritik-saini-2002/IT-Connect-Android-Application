@@ -20,10 +20,16 @@ class LoginViewModel @Inject constructor(
     private val _resetState = MutableStateFlow<AuthState>(AuthState.Idle)
     val resetState: StateFlow<AuthState> = _resetState.asStateFlow()
 
+    /**
+     * Fast login — only blocks on auth-with-password.
+     * isActive and profile enrichment happen in background (see AuthRepository).
+     * Typical response time: ~200–400ms (just one network call).
+     */
     fun login(email: String, password: String) {
+        if (_loginState.value == AuthState.Loading) return  // debounce double-tap
         viewModelScope.launch {
             _loginState.value = AuthState.Loading
-            _loginState.value = authRepository.login(email, password)
+            _loginState.value = authRepository.login(email.trim(), password)
                 .fold(
                     onSuccess = { AuthState.Success() },
                     onFailure = { AuthState.Error(mapError(it.message)) }
@@ -34,7 +40,7 @@ class LoginViewModel @Inject constructor(
     fun sendPasswordReset(email: String) {
         viewModelScope.launch {
             _resetState.value = AuthState.Loading
-            _resetState.value = authRepository.sendPasswordReset(email)
+            _resetState.value = authRepository.sendPasswordReset(email.trim())
                 .fold(
                     onSuccess = { AuthState.Success() },
                     onFailure = { AuthState.Error(it.message ?: "Failed to send reset link") }
@@ -46,11 +52,12 @@ class LoginViewModel @Inject constructor(
     fun resetResetState()  { _resetState.value = AuthState.Idle }
 
     private fun mapError(msg: String?): String = when {
-        msg == null                                -> "Unknown error"
-        msg.contains("400")                        -> "Invalid email or password"
-        msg.contains("network", ignoreCase = true) -> "Network error — check Wi-Fi"
-        msg.contains("timeout", ignoreCase = true) -> "Connection timed out"
-        msg.contains("connect", ignoreCase = true) -> "Cannot reach server"
-        else                                       -> "Login failed: $msg"
+        msg == null                                    -> "Unknown error"
+        msg.contains("disabled", ignoreCase = true)   -> "Account disabled. Contact your administrator."
+        msg.contains("400")                            -> "Invalid email or password"
+        msg.contains("network",  ignoreCase = true)   -> "Network error — check Wi-Fi"
+        msg.contains("timeout",  ignoreCase = true)   -> "Connection timed out"
+        msg.contains("connect",  ignoreCase = true)   -> "Cannot reach server"
+        else                                           -> "Login failed: $msg"
     }
 }

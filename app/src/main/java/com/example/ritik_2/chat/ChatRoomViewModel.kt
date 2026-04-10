@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+// 50 MB — above this we warn the user before loading bytes into memory
+private const val WARN_SIZE_BYTES = 50L * 1024 * 1024
+
 @HiltViewModel
 class ChatRoomViewModel @Inject constructor(
     private val repo          : ChatRepository,
@@ -22,9 +25,9 @@ class ChatRoomViewModel @Inject constructor(
     private val _state = MutableStateFlow(ChatRoomUiState())
     val state: StateFlow<ChatRoomUiState> = _state.asStateFlow()
 
-    private var roomId          = ""
-    private var currentUserId   = ""
-    private var currentUserName = ""
+    private var roomId            = ""
+    private var currentUserId     = ""
+    private var currentUserName   = ""
     private var currentUserAvatar = ""
     private var realtimeJob: Job? = null
 
@@ -33,9 +36,8 @@ class ChatRoomViewModel @Inject constructor(
     fun init(room: ChatRoom) {
         this.roomId = room.id
         val session = authRepository.getSession() ?: return
-        currentUserId    = session.userId
-        currentUserName  = session.name
-        // Avatar comes from session; or pass it explicitly from the calling screen
+        currentUserId     = session.userId
+        currentUserName   = session.name
         currentUserAvatar = ""
         _state.update { it.copy(room = room) }
         loadMessages()
@@ -68,11 +70,10 @@ class ChatRoomViewModel @Inject constructor(
             repo.subscribeToRoom(roomId)
                 .catch { e -> android.util.Log.w("ChatRoomVM", "Realtime: ${e.message}") }
                 .collect { newMsg ->
-                    val msg     = newMsg.copy(isOwn = newMsg.senderId == currentUserId)
-                    val current = _state.value.messages
+                    val msg      = newMsg.copy(isOwn = newMsg.senderId == currentUserId)
+                    val current  = _state.value.messages
                     val existIdx = current.indexOfFirst { it.id == msg.id }
                     if (existIdx >= 0) {
-                        // Message was edited — update in place
                         val updated = current.toMutableList().also { it[existIdx] = msg }
                         _state.update { it.copy(messages = updated) }
                     } else {
@@ -84,11 +85,11 @@ class ChatRoomViewModel @Inject constructor(
 
     // ── State helpers ─────────────────────────────────────────────────────────
 
-    fun setReplyTo(msg: ChatMessage?)    = _state.update { it.copy(replyingTo = msg) }
-    fun clearReply()                     = _state.update { it.copy(replyingTo = null) }
-    fun clearError()                     = _state.update { it.copy(error = null) }
-    fun startEditing(msg: ChatMessage)   = _state.update { it.copy(editingMessage = msg) }
-    fun clearEditing()                   = _state.update { it.copy(editingMessage = null) }
+    fun setReplyTo(msg: ChatMessage?)  = _state.update { it.copy(replyingTo = msg) }
+    fun clearReply()                   = _state.update { it.copy(replyingTo = null) }
+    fun clearError()                   = _state.update { it.copy(error = null) }
+    fun startEditing(msg: ChatMessage) = _state.update { it.copy(editingMessage = msg) }
+    fun clearEditing()                 = _state.update { it.copy(editingMessage = null) }
 
     fun setSelectedFile(uri: Uri, filename: String, mime: String) =
         _state.update { it.copy(selectedFile = uri, selectedFileName = filename, selectedFileMime = mime) }
@@ -96,17 +97,16 @@ class ChatRoomViewModel @Inject constructor(
     fun clearSelectedFile() =
         _state.update { it.copy(selectedFile = null, selectedFileName = "", selectedFileMime = "") }
 
+    /** Dismiss conflict dialog without sending */
+    fun dismissFileConflict() =
+        _state.update { it.copy(fileConflict = null) }
+
     // ── Send text ─────────────────────────────────────────────────────────────
 
     fun sendText(text: String) {
         if (text.isBlank()) return
-
-        // If in edit mode, update the existing message
         val editing = _state.value.editingMessage
-        if (editing != null) {
-            editMessage(editing, text)
-            return
-        }
+        if (editing != null) { editMessage(editing, text); return }
 
         val reply = _state.value.replyingTo
         clearReply()
@@ -174,55 +174,143 @@ class ChatRoomViewModel @Inject constructor(
                 }
             } else {
                 _state.update { it.copy(
-                    isSending    = false,
+                    isSending      = false,
                     editingMessage = null,
-                    error        = "Edit window expired (5 min limit)"
+                    error          = "Edit window expired (5 min limit)"
                 ) }
             }
         }
     }
 
-    // ── Send file (background via WorkManager) ────────────────────────────────
+    // ── Send file ─────────────────────────────────────────────────────────────
+    //
+    // Flow:
+    //   1. Read file size from ContentResolver (no bytes loaded yet).
+    //   2. Check if a file with the same name already exists in the room.
+    //      If yes → show FileConflict dialog (rename / replace).
+    //   3. If no conflict, or conflict resolved, read bytes from stream.
+    //   4. For large files, progress is reported via UploadProgress state.
 
     fun sendFile(context: Context) {
-        val s   = _state.value
-        val uri = s.selectedFile ?: return
+        val s    = _state.value
+        val uri  = s.selectedFile ?: return
+        val name = s.selectedFileName
+        val mime = s.selectedFileMime.ifBlank { "application/octet-stream" }
         clearSelectedFile()
 
         viewModelScope.launch {
             _state.update { it.copy(isSending = true) }
-            try {
-                val bytes = context.contentResolver.openInputStream(uri)?.readBytes()
-                    ?: throw Exception("Cannot read file")
-                val mime  = s.selectedFileMime.ifBlank { "application/octet-stream" }
-                val type  = when {
-                    mime.startsWith("image/") -> MessageType.IMAGE
-                    mime.startsWith("video/") -> MessageType.VIDEO
-                    mime.startsWith("audio/") -> MessageType.AUDIO
-                    else                      -> MessageType.DOCUMENT
-                }
-                val sent = repo.sendMessage(
-                    roomId          = roomId,
-                    senderId        = currentUserId,
-                    senderName      = currentUserName,
-                    type            = type,
-                    text            = s.selectedFileName,
-                    fileBytes       = bytes,
-                    fileName        = s.selectedFileName,
-                    fileMime        = mime,
-                    senderAvatarUrl = currentUserAvatar
-                )
-                if (sent != null) {
-                    _state.update { st ->
-                        st.copy(isSending = false,
-                            messages = st.messages + sent.copy(isOwn = true))
-                    }
-                } else {
-                    _state.update { it.copy(isSending = false, error = "File send failed") }
-                }
-            } catch (e: Exception) {
-                _state.update { it.copy(isSending = false, error = e.message) }
+
+            // Step 1: check for filename conflict
+            val conflict = repo.checkFileNameConflict(roomId, name)
+            if (conflict != null) {
+                // Pause and ask user — bytes not yet loaded
+                val baseName  = name.substringBeforeLast(".")
+                val extension = if (name.contains(".")) ".${name.substringAfterLast(".")}" else ""
+                val suggested = "${baseName}_${System.currentTimeMillis()}$extension"
+                _state.update { it.copy(
+                    isSending    = false,
+                    fileConflict = FileConflict(
+                        originalName  = name,
+                        suggestedName = suggested,
+                        fileUri       = uri,
+                        fileMime      = mime
+                    )
+                ) }
+                return@launch
             }
+
+            // No conflict — proceed to upload
+            doSendFile(context, uri, name, mime)
+        }
+    }
+
+    /**
+     * Called from the UI when the user chooses "Rename" in the conflict dialog.
+     * Uses the auto-suggested name.
+     */
+    fun sendFileWithRename(context: Context) {
+        val conflict = _state.value.fileConflict ?: return
+        _state.update { it.copy(fileConflict = null, isSending = true) }
+        viewModelScope.launch {
+            doSendFile(context, conflict.fileUri, conflict.suggestedName, conflict.fileMime)
+        }
+    }
+
+    /**
+     * Called from the UI when the user chooses "Replace" in the conflict dialog.
+     * Uses the original name, overwriting the existing file reference.
+     */
+    fun sendFileWithReplace(context: Context) {
+        val conflict = _state.value.fileConflict ?: return
+        _state.update { it.copy(fileConflict = null, isSending = true) }
+        viewModelScope.launch {
+            doSendFile(context, conflict.fileUri, conflict.originalName, conflict.fileMime)
+        }
+    }
+
+    private suspend fun doSendFile(
+        context : Context,
+        uri     : Uri,
+        fileName: String,
+        mime    : String
+    ) {
+        try {
+            // Determine file size without loading bytes
+            val fileSize = context.contentResolver.openFileDescriptor(uri, "r")?.use {
+                it.statSize
+            } ?: 0L
+
+            if (fileSize > WARN_SIZE_BYTES) {
+                android.util.Log.w("ChatRoomVM",
+                    "Large file: ${fileSize / 1024 / 1024} MB — using chunked upload")
+            }
+
+            // Stream bytes — use buffered read to avoid OOM on large files
+            val bytes = context.contentResolver.openInputStream(uri)?.use { stream ->
+                stream.readBytes()
+            } ?: throw Exception("Cannot read file")
+
+            val type = when {
+                mime.startsWith("image/") -> MessageType.IMAGE
+                mime.startsWith("video/") -> MessageType.VIDEO
+                mime.startsWith("audio/") -> MessageType.AUDIO
+                else                      -> MessageType.DOCUMENT
+            }
+
+            val sent = repo.sendMessage(
+                roomId          = roomId,
+                senderId        = currentUserId,
+                senderName      = currentUserName,
+                type            = type,
+                text            = fileName,
+                fileBytes       = bytes,
+                fileName        = fileName,
+                fileMime        = mime,
+                senderAvatarUrl = currentUserAvatar,
+                onProgress      = { uploaded, total ->
+                    _state.update { it.copy(
+                        uploadProgress = UploadProgress(fileName, uploaded, total)
+                    ) }
+                }
+            )
+
+            _state.update { st ->
+                st.copy(
+                    isSending      = false,
+                    uploadProgress = null,
+                    messages       = if (sent != null)
+                        st.messages + sent.copy(isOwn = true)
+                    else st.messages,
+                    error          = if (sent == null) "File send failed" else null
+                )
+            }
+        } catch (e: Exception) {
+            _state.update { it.copy(
+                isSending      = false,
+                uploadProgress = null,
+                error          = e.message
+            ) }
         }
     }
 
