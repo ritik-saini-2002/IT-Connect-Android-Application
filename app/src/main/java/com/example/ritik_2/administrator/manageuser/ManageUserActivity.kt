@@ -53,6 +53,7 @@ class ManageUserActivity : ComponentActivity() {
                     session     = session,
                     profile     = profile,
                     currentItem = "manage_users",
+                    permissions = profile?.permissions ?: emptyList(),
                     onNavigate  = { handleDrawerNav(it) }
                 ) {
                     ManageUserScreen(vm)

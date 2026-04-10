@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ritik_2.administrator.manageuser.models.*
+import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 
@@ -914,14 +915,15 @@ private fun SectionHeader(title: String, subtitle: String) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-private fun canEdit(editorRole: String, targetRole: String, isDbAdmin: Boolean): Boolean {
-    if (isDbAdmin) return true
-    return when (editorRole) {
-        "Administrator" -> true
-        "Manager", "HR" -> targetRole in setOf("Employee", "Intern", "Team Lead")
-        else            -> false
-    }
-}
+/** Delegates entirely to PermissionGuard — no hardcoded role strings here. */
+private fun canEdit(editorRole: String, targetRole: String, isDbAdmin: Boolean): Boolean =
+    PermissionGuard.canEditProfile(
+        editorRole = editorRole,
+        targetRole = targetRole,
+        editorId   = "",   // editing other user
+        targetId   = "other",
+        isDbAdmin  = isDbAdmin
+    )
 
 private fun roleColor(role: String): Color = when (role) {
     "Administrator" -> Color(0xFFD32F2F)

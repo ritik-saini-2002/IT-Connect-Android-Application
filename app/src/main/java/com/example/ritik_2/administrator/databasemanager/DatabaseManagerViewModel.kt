@@ -428,7 +428,8 @@ class DatabaseManagerViewModel @Inject constructor(
     }
 
     private suspend fun loadUsers(): List<DBRecord> {
-        val users = if (currentRole == "Administrator" || _state.value.isDbAdmin)
+        // Permission-based: System_Administrator / DB admin see all companies
+        val users = if (_state.value.isDbAdmin)
             db.userDao().getAll()
         else db.userDao().getByCompany(adminCompany)
         return users.map { u ->

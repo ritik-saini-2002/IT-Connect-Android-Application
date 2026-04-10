@@ -30,31 +30,36 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.data.model.AuthSession
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.model.UserProfile
 
 // ── Drawer destination ────────────────────────────────────────────────────────
 
 data class DrawerItem(
-    val id         : String,
-    val label      : String,
-    val icon       : ImageVector,
-    val badge      : String?  = null,
-    val isDestructive: Boolean = false,
-    val requiredRoles: List<String> = emptyList() // empty = visible to all
+    val id                 : String,
+    val label              : String,
+    val icon               : ImageVector,
+    val badge              : String?  = null,
+    val isDestructive      : Boolean  = false,
+    // Permission key that the user must have — empty string = visible to all.
+    // Checked against the user's actual permission list (from user_access_control),
+    // NOT hardcoded role strings.
+    val requiredPermission : String   = ""
 )
 
 val drawerItems = listOf(
     DrawerItem("home",         "Home",            Icons.Default.Home),
     DrawerItem("profile",      "My Profile",      Icons.Default.Person),
     DrawerItem("manage_users", "Manage Users",    Icons.Default.ManageAccounts,
-        requiredRoles = listOf("Administrator", "Manager", "HR")),
+        requiredPermission = "view_all_users"),
     DrawerItem("create_user",  "Create User",     Icons.Default.PersonAdd,
-        requiredRoles = listOf("Administrator", "Manager")),
+        requiredPermission = "create_user"),
     DrawerItem("roles",        "Role Management", Icons.Default.AdminPanelSettings,
-        requiredRoles = listOf("Administrator")),
+        requiredPermission = "manage_roles"),
     DrawerItem("database",     "Database",        Icons.Default.Storage,
-        requiredRoles = listOf("Administrator")),
+        requiredPermission = "database_manager"),
     DrawerItem("pc_control",   "PC Control",      Icons.Default.Computer),
     DrawerItem("settings",     "Settings",        Icons.Default.Settings),
     DrawerItem("logout",       "Logout",          Icons.Default.Logout,
@@ -80,11 +85,12 @@ val drawerItems = listOf(
  */
 @Composable
 fun AppDrawerWrapper(
-    session    : AuthSession?,
-    profile    : UserProfile?,
-    currentItem: String,
-    onNavigate : (String) -> Unit,
-    content    : @Composable () -> Unit
+    session     : AuthSession?,
+    profile     : UserProfile?,
+    currentItem : String,
+    permissions : List<String> = emptyList(),
+    onNavigate  : (String) -> Unit,
+    content     : @Composable () -> Unit
 ) {
     var isOpen by remember { mutableStateOf(false) }
     var dragX  by remember { mutableFloatStateOf(0f) }
@@ -165,6 +171,7 @@ fun AppDrawerWrapper(
                 session     = session,
                 profile     = profile,
                 currentItem = currentItem,
+                permissions = permissions,
                 onNavigate  = { id ->
                     isOpen = false
                     onNavigate(id)
@@ -179,11 +186,12 @@ fun AppDrawerWrapper(
 
 @Composable
 private fun DrawerContent(
-    session    : AuthSession?,
-    profile    : UserProfile?,
-    currentItem: String,
-    onNavigate : (String) -> Unit,
-    onClose    : () -> Unit
+    session     : AuthSession?,
+    profile     : UserProfile?,
+    currentItem : String,
+    permissions : List<String> = emptyList(),
+    onNavigate  : (String) -> Unit,
+    onClose     : () -> Unit
 ) {
     val role = session?.role ?: ""
 
@@ -281,7 +289,9 @@ private fun DrawerContent(
         ) {
             drawerItems
                 .filter { item ->
-                    item.requiredRoles.isEmpty() || role in item.requiredRoles
+                    item.requiredPermission.isEmpty() ||
+                            permissions.contains(item.requiredPermission) ||
+                            PermissionGuard.isSystemAdmin(role)
                 }
                 .forEachIndexed { index, item ->
                     if (index > 0 && item.isDestructive) {

@@ -10,12 +10,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.profile.profilecompletion.ProfileCompletionActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
-
-private val CAN_EDIT_ROLES = setOf("Administrator", "Manager", "HR")
 
 @AndroidEntryPoint
 class ProfileActivity : ComponentActivity() {
@@ -29,10 +28,23 @@ class ProfileActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val userId = intent.getStringExtra("userId") ?: run { finish(); return }
+        val targetUserId = intent.getStringExtra("targetUserId") ?: userId
         viewModel.loadProfile(userId)
 
-        val currentUserRole = authRepository.getSession()?.role ?: ""
-        val canEdit         = currentUserRole in CAN_EDIT_ROLES
+        val session     = authRepository.getSession()
+        val sessionRole = session?.role    ?: ""
+        val sessionId   = session?.userId  ?: ""
+        val permissions = session?.let { /* loaded below from profile */ } ?: Unit
+        val isDbAdmin   = authRepository.isDbAdmin()
+        // canEdit is permission-based: checks the user's actual permission list,
+        // not a hardcoded role string set
+        val canEdit = PermissionGuard.canEditProfile(
+            editorRole = sessionRole,
+            targetRole = intent.getStringExtra("targetRole") ?: "",
+            editorId   = sessionId,
+            targetId   = userId,
+            isDbAdmin  = isDbAdmin
+        )
 
         setContent {
             ITConnectTheme {
