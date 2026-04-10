@@ -469,10 +469,10 @@ fun LaptopTouchpad(
     var scrollAccY by remember { mutableFloatStateOf(0f) }; var scrollAccX by remember { mutableFloatStateOf(0f) }
     var didScroll by remember { mutableStateOf(false) }
 
-    // Scroll slider state
+    // Scroll slider state — spring-back to center on release
     var sliderHeightPx by remember { mutableIntStateOf(0) }
-    var sliderDotY by remember { mutableFloatStateOf(0f) }
-    var sliderInitialized by remember { mutableStateOf(false) }
+    val sliderDotY = remember { Animatable(0f) }
+    var sliderCenterY by remember { mutableFloatStateOf(0f) }
 
     val showScroll: (String) -> Unit = { dir -> scrollBuf = dir; scrollBufJob?.cancel(); scrollBufJob = scope.launch { delay(600); scrollBuf = "" } }
     fun resetAll() { state = TouchState.IDLE; isActive = false; totalMoveX = 0f; totalMoveY = 0f; scrollAccX = 0f; scrollAccY = 0f; didScroll = false; holdJob?.cancel(); holdJob = null }
@@ -610,7 +610,7 @@ fun LaptopTouchpad(
                 }
             }
 
-            // ── Scroll slider with draggable circle dot (right edge of touchpad) ──
+            // ── Scroll slider — spring-back circle dot ──
             if (showScrollSlider) {
                 val dotSizePx = with(density) { dotSizeDp.toPx() }
 
@@ -623,25 +623,51 @@ fun LaptopTouchpad(
                         .border(0.5.dp, c.glassBorder, RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp))
                         .onSizeChanged { size ->
                             sliderHeightPx = size.height
-                            if (!sliderInitialized) {
-                                sliderDotY = (size.height / 2f) - (dotSizePx / 2f)
-                                sliderInitialized = true
-                            }
+                            val center = (size.height / 2f) - (dotSizePx / 2f)
+                            sliderCenterY = center
+                            // Initialize dot to center
+                            scope.launch { sliderDotY.snapTo(center) }
                         }
                         .pointerInput(Unit) {
-                            detectDragGestures { change, dragAmount ->
-                                change.consume()
-                                val maxY = sliderHeightPx - dotSizePx
-                                sliderDotY = (sliderDotY + dragAmount.y).coerceIn(0f, maxY)
+                            detectDragGestures(
+                                onDragEnd = {
+                                    // Spring back to center
+                                    scope.launch {
+                                        sliderDotY.animateTo(
+                                            targetValue = sliderCenterY,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                    }
+                                },
+                                onDragCancel = {
+                                    scope.launch {
+                                        sliderDotY.animateTo(
+                                            sliderCenterY,
+                                            spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)
+                                        )
+                                    }
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    val maxY = sliderHeightPx - dotSizePx
+                                    val newY = (sliderDotY.value + dragAmount.y).coerceIn(0f, maxY)
+                                    scope.launch { sliderDotY.snapTo(newY) }
 
-                                // Send scroll based on drag direction
-                                val ticks = if (dragAmount.y > 2f) -2 else if (dragAmount.y < -2f) 2 else 0
-                                if (ticks != 0) {
-                                    vm.sendMouseScroll(ticks)
-                                    showScroll(if (ticks > 0) "↑" else "↓")
-                                    onFeedback(if (ticks > 0) "Scroll ↑" else "Scroll ↓")
+                                    // Scroll speed proportional to distance from center
+                                    val distFromCenter = newY - sliderCenterY
+                                    val threshold = dotSizePx * 0.5f
+                                    if (abs(distFromCenter) > threshold) {
+                                        val speed = (abs(distFromCenter) / (sliderCenterY.coerceAtLeast(1f)) * 4).toInt().coerceIn(1, 6)
+                                        val ticks = if (distFromCenter > 0) -speed else speed
+                                        vm.sendMouseScroll(ticks)
+                                        showScroll(if (ticks > 0) "↑" else "↓")
+                                        onFeedback(if (ticks > 0) "Scroll ↑" else "Scroll ↓")
+                                    }
                                 }
-                            }
+                            )
                         }
                 ) {
                     // Track line
@@ -654,14 +680,20 @@ fun LaptopTouchpad(
                             .clip(CircleShape)
                             .background(c.textTertiary.copy(0.3f))
                     )
-                    // Up arrow
+                    // Center mark
+                    Box(
+                        Modifier
+                            .width(10.dp)
+                            .height(1.5.dp)
+                            .align(Alignment.Center)
+                            .background(c.textTertiary.copy(0.25f))
+                    )
                     Text("▲", fontSize = 8.sp, color = c.textTertiary, modifier = Modifier.align(Alignment.TopCenter).padding(top = 4.dp))
-                    // Down arrow
                     Text("▼", fontSize = 8.sp, color = c.textTertiary, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
-                    // Draggable circle dot
+                    // Draggable circle dot — animated position
                     Box(
                         modifier = Modifier
-                            .offset { IntOffset(0, sliderDotY.roundToInt()) }
+                            .offset { IntOffset(0, sliderDotY.value.roundToInt()) }
                             .size(dotSizeDp)
                             .align(Alignment.TopCenter)
                             .clip(CircleShape)
