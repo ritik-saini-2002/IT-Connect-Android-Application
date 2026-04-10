@@ -12,20 +12,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+//import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -39,10 +39,16 @@ import java.io.ByteArrayOutputStream
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-// ── MIME types accepted by PocketBase avatar field ────────────────────────────
-val ELIGIBLE_IMAGE_MIME_TYPES = arrayOf("image/jpeg", "image/png", "image/webp")
+// ── Eligible MIME types ───────────────────────────────────────────────────────
 
-// ── Launcher restricted to JPEG / PNG / WebP ─────────────────────────────────
+val ELIGIBLE_IMAGE_MIME_TYPES = arrayOf(
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+)
+
+// ── Launcher helper ───────────────────────────────────────────────────────────
+
 @Composable
 fun rememberEligibleImageLauncher(
     onPicked: (Uri) -> Unit
@@ -52,16 +58,6 @@ fun rememberEligibleImageLauncher(
 
 // ── Crop dialog ───────────────────────────────────────────────────────────────
 
-/**
- * Full-screen circular-crop dialog.
- *
- * Fix applied vs. original:
- *  - Uses inSampleSize pre-scaling so large images never cause OOM.
- *  - The crop engine mirrors the Compose canvas geometry EXACTLY, so the
- *    circle the user sees matches the output pixel-for-pixel.
- *  - Intermediates (cropped / scaled bitmaps) are recycled to free memory.
- *  - Check button is disabled while bitmap is loading.
- */
 @Composable
 fun ImageCropDialog(
     sourceUri : Uri,
@@ -71,33 +67,27 @@ fun ImageCropDialog(
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
 
-    var bitmap  by remember { mutableStateOf<Bitmap?>(null) }
+    var bitmap   by remember { mutableStateOf<Bitmap?>(null) }
     var isSaving by remember { mutableStateOf(false) }
-    var scale   by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
-    var canvasW by remember { mutableIntStateOf(0) }
-    var canvasH by remember { mutableIntStateOf(0) }
+    var scale    by remember { mutableFloatStateOf(1f) }
+    var offsetX  by remember { mutableFloatStateOf(0f) }
+    var offsetY  by remember { mutableFloatStateOf(0f) }
+    var canvasW  by remember { mutableIntStateOf(0) }
+    var canvasH  by remember { mutableIntStateOf(0) }
 
-    // Load + downsample on IO thread to avoid OOM on large files
+    // Load + downsample on IO thread to avoid OOM on large images
     LaunchedEffect(sourceUri) {
         withContext(Dispatchers.IO) {
             try {
-                // Step 1: read bounds only
                 val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 context.contentResolver.openInputStream(sourceUri)?.use {
                     BitmapFactory.decodeStream(it, null, opts)
                 }
-                // Step 2: calculate inSampleSize so the largest dim ≤ 2048
                 val maxDim = 2048
-                var sample = 1
-                var w = opts.outWidth; var h = opts.outHeight
-                while (w > maxDim || h > maxDim) { w /= 2; h /= 2; sample *= 2 }
-
-                // Step 3: decode with inSampleSize
+                val sample = maxOf(1, maxOf(opts.outWidth, opts.outHeight) / maxDim)
                 val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-                bitmap = context.contentResolver.openInputStream(sourceUri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream, null, decodeOpts)
+                bitmap = context.contentResolver.openInputStream(sourceUri)?.use { s ->
+                    BitmapFactory.decodeStream(s, null, decodeOpts)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("ImageCrop", "Load failed: ${e.message}")
@@ -131,10 +121,12 @@ fun ImageCropDialog(
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Default.Close, "Cancel", tint = Color.White)
                 }
-                Text("Crop Photo",
+                Text(
+                    "Crop Photo",
                     color      = Color.White,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize   = 16.sp)
+                    fontSize   = 16.sp
+                )
                 if (isSaving) {
                     CircularProgressIndicator(
                         modifier    = Modifier.size(28.dp).padding(end = 4.dp),
@@ -143,34 +135,20 @@ fun ImageCropDialog(
                     )
                 } else {
                     IconButton(
-                        enabled = bitmap != null && !isSaving,
+                        enabled = bitmap != null,
                         onClick = {
                             val bmp = bitmap ?: return@IconButton
                             isSaving = true
-                            // Snapshot transform state at the moment the button is tapped
-                            val snapScale   = scale
-                            val snapOffsetX = offsetX
-                            val snapOffsetY = offsetY
-                            val snapW       = canvasW
-                            val snapH       = canvasH
                             scope.launch {
-                                val cropped = cropToCircle(
-                                    source  = bmp,
-                                    scale   = snapScale,
-                                    offsetX = snapOffsetX,
-                                    offsetY = snapOffsetY,
-                                    canvasW = snapW,
-                                    canvasH = snapH
-                                )
+                                val cropped = cropToCircle(bmp, scale, offsetX, offsetY, canvasW, canvasH)
                                 val bytes = withContext(Dispatchers.IO) {
                                     val baos = ByteArrayOutputStream()
                                     cropped.compress(Bitmap.CompressFormat.PNG, 100, baos)
                                     baos.toByteArray()
                                 }
-                                val filename = "avatar_${System.currentTimeMillis()}.png"
                                 withContext(Dispatchers.Main) {
                                     isSaving = false
-                                    onCropped(bytes, filename)
+                                    onCropped(bytes, "avatar_${System.currentTimeMillis()}.png")
                                 }
                             }
                         }
@@ -180,11 +158,11 @@ fun ImageCropDialog(
                 }
             }
 
-            // ── Crop viewport (square, centred) ───────────────────────────────
+            // ── Crop viewport ─────────────────────────────────────────────────
+            // Fixed 300 dp square — keeps the crop circle a sensible size on all screens
             Box(
                 Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
+                    .size(300.dp)
                     .align(Alignment.Center)
                     .onSizeChanged { canvasW = it.width; canvasH = it.height }
                     .pointerInput(Unit) {
@@ -198,29 +176,34 @@ fun ImageCropDialog(
                 val bmp = bitmap
                 if (bmp != null) {
                     val imageBitmap = bmp.asImageBitmap()
-                    // Snapshot so the Canvas lambda and the crop engine agree
-                    val sScale   = scale
-                    val sOffsetX = offsetX
-                    val sOffsetY = offsetY
 
+                    // Layer 1: image only
                     androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                         val cs    = size
                         val bW    = bmp.width.toFloat()
                         val bH    = bmp.height.toFloat()
-                        // Fit the bitmap inside the square canvas at scale == 1
                         val baseS = min(cs.width / bW, cs.height / bH)
-                        val dW    = bW * baseS * sScale
-                        val dH    = bH * baseS * sScale
-                        val left  = (cs.width  - dW) / 2f + sOffsetX
-                        val top   = (cs.height - dH) / 2f + sOffsetY
-
+                        val dW    = bW * baseS * scale
+                        val dH    = bH * baseS * scale
+                        val left  = (cs.width  - dW) / 2f + offsetX
+                        val top   = (cs.height - dH) / 2f + offsetY
                         drawImage(
                             image     = imageBitmap,
                             dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
-                            dstSize   = IntSize(dW.roundToInt().coerceAtLeast(1),
-                                dH.roundToInt().coerceAtLeast(1))
+                            dstSize   = IntSize(dW.roundToInt(), dH.roundToInt())
                         )
-                        drawCropOverlay(cs)
+                    }
+
+                    // Layer 2: scrim + circle cutout
+                    // graphicsLayer(Offscreen) is required for BlendMode.Clear to punch
+                    // through the scrim layer only — without it, Clear goes all the way to
+                    // the Activity background and you see nothing inside the circle.
+                    androidx.compose.foundation.Canvas(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                    ) {
+                        drawCropOverlay(size)
                     }
                 } else {
                     Box(Modifier.fillMaxSize(), Alignment.Center) {
@@ -237,8 +220,11 @@ fun ImageCropDialog(
                     .padding(bottom = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Pinch to zoom · Drag to reposition",
-                    color = Color.White.copy(0.6f), fontSize = 13.sp)
+                Text(
+                    "Pinch to zoom · Drag to reposition",
+                    color    = Color.White.copy(0.6f),
+                    fontSize = 13.sp
+                )
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = { scale = 1f; offsetX = 0f; offsetY = 0f }) {
                     Text("Reset", color = Color.White.copy(0.7f))
@@ -251,19 +237,31 @@ fun ImageCropDialog(
 // ── Overlay drawing ───────────────────────────────────────────────────────────
 
 private fun DrawScope.drawCropOverlay(cs: Size) {
-    val radius  = min(cs.width, cs.height) / 2f * 0.9f
-    val cx      = cs.width  / 2f
-    val cy      = cs.height / 2f
+    // Cap radius at 280 dp so the circle doesn't fill the whole screen
+    val maxRadiusPx = 280.dp.toPx()
+    val radius  = min(min(cs.width, cs.height) / 2f * 0.85f, maxRadiusPx)
+    val centerX = cs.width  / 2f
+    val centerY = cs.height / 2f
 
     drawRect(color = Color.Black.copy(alpha = 0.55f), size = cs)
-    drawCircle(color = Color.Transparent, radius = radius,
-        center = Offset(cx, cy), blendMode = BlendMode.Clear)
-    drawCircle(color = Color.White.copy(0.85f), radius = radius,
-        center = Offset(cx, cy), style = Stroke(width = 2.dp.toPx()))
 
-    // Rule-of-thirds grid lines inside the circle
-    val left  = cx - radius
-    val top   = cy - radius
+    drawCircle(
+        color     = Color.Transparent,
+        radius    = radius,
+        center    = Offset(centerX, centerY),
+        blendMode = BlendMode.Clear
+    )
+
+    drawCircle(
+        color  = Color.White.copy(0.85f),
+        radius = radius,
+        center = Offset(centerX, centerY),
+        style  = Stroke(width = 2.dp.toPx())
+    )
+
+    // Rule-of-thirds grid
+    val left  = centerX - radius
+    val top   = centerY - radius
     val third = radius * 2 / 3f
     for (i in 1..2) {
         drawLine(Color.White.copy(0.3f),
@@ -276,16 +274,6 @@ private fun DrawScope.drawCropOverlay(cs: Size) {
 }
 
 // ── Crop engine ───────────────────────────────────────────────────────────────
-//
-// Mirrors the Compose canvas geometry exactly:
-//   baseS  = min(canvasW / bW,  canvasH / bH)
-//   dW/dH  = bW/bH * baseS * scale
-//   left   = (canvasW - dW) / 2 + offsetX
-//   top    = (canvasH - dH) / 2 + offsetY
-//   radius = min(canvasW, canvasH) / 2 * 0.9
-//
-// We invert to find which region of the source bitmap sits inside the circle,
-// then apply a circular mask and output a 512×512 PNG.
 
 private suspend fun cropToCircle(
     source : Bitmap,
@@ -302,25 +290,26 @@ private suspend fun cropToCircle(
     val dH    = bH * baseS * scale
     val left  = (canvasW - dW) / 2f + offsetX
     val top   = (canvasH - dH) / 2f + offsetY
-    val radius = min(canvasW, canvasH) / 2f * 0.9f
-    val cx    = canvasW / 2f
-    val cy    = canvasH / 2f
 
-    // Map the circle bounding box: canvas-pixel → source-bitmap-pixel
+    // Must match drawCropOverlay exactly
+    val density     = android.content.res.Resources.getSystem().displayMetrics.density
+    val maxRadiusPx = 280f * density
+    val radius      = min(min(canvasW, canvasH) / 2f * 0.85f, maxRadiusPx)
+    val cx          = canvasW / 2f
+    val cy          = canvasH / 2f
+
     val cropL = ((cx - radius - left) / dW * bW).coerceIn(0f, bW - 1f)
     val cropT = ((cy - radius - top)  / dH * bH).coerceIn(0f, bH - 1f)
-    val cropR = ((cx + radius - left) / dW * bW).coerceIn(cropL + 1f, bW)
-    val cropB = ((cy + radius - top)  / dH * bH).coerceIn(cropT + 1f, bH)
+    val cropR = ((cx + radius - left) / dW * bW).coerceIn(0f, bW)
+    val cropB = ((cy + radius - top)  / dH * bH).coerceIn(0f, bH)
 
     val cropW = (cropR - cropL).roundToInt().coerceAtLeast(1)
     val cropH = (cropB - cropT).roundToInt().coerceAtLeast(1)
 
     val cropped = Bitmap.createBitmap(source, cropL.roundToInt(), cropT.roundToInt(), cropW, cropH)
+    val OUTPUT  = 512
+    val scaled  = Bitmap.createScaledBitmap(cropped, OUTPUT, OUTPUT, true)
 
-    val OUTPUT = 512
-    val scaled = Bitmap.createScaledBitmap(cropped, OUTPUT, OUTPUT, true)
-
-    // Apply circular mask
     val output = Bitmap.createBitmap(OUTPUT, OUTPUT, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(output)
     val paint  = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -328,7 +317,6 @@ private suspend fun cropToCircle(
     paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
     canvas.drawBitmap(scaled, 0f, 0f, paint)
 
-    // Free intermediates
     if (cropped != source) cropped.recycle()
     if (scaled  != output) scaled.recycle()
 
