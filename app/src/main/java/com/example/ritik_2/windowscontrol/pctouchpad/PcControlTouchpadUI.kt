@@ -9,6 +9,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -67,24 +70,58 @@ data class GlassColors(
 @Composable
 private fun glassColors(): GlassColors {
     val dark = isSystemInDarkTheme()
-    return if (dark) GlassColors(
-        bg = Color(0xFF0D0D1A), bgGradientEnd = Color(0xFF0F0F23),
-        glassBg = Color.White.copy(alpha = 0.07f), glassBorder = Color.White.copy(alpha = 0.12f),
-        surface = Color(0xFF1A1A2E), accent = Color(0xFF6C63FF), accentSecondary = Color(0xFF00D4AA),
-        danger = Color(0xFFFF6B9D), textPrimary = Color.White, textSecondary = Color.White.copy(0.65f),
-        textTertiary = Color.White.copy(0.35f), buttonBg = Color.White.copy(alpha = 0.06f),
-        buttonBorder = Color.White.copy(alpha = 0.10f),
-        touchpadBg = Color(0xFF151528).copy(alpha = 0.85f)
-    ) else GlassColors(
-        bg = Color(0xFFF0F2F5), bgGradientEnd = Color(0xFFE8EBF0),
-        glassBg = Color.White.copy(alpha = 0.60f), glassBorder = Color.Black.copy(alpha = 0.08f),
-        surface = Color.White, accent = Color(0xFF5B52E0), accentSecondary = Color(0xFF00B894),
-        danger = Color(0xFFE74C6F), textPrimary = Color(0xFF1A1A2E), textSecondary = Color(0xFF555770),
-        textTertiary = Color(0xFF9094A6), buttonBg = Color.White.copy(alpha = 0.55f),
-        buttonBorder = Color.Black.copy(alpha = 0.06f),
-        touchpadBg = Color(0xFFE8EBF0).copy(alpha = 0.9f)
+    val cs = MaterialTheme.colorScheme
+    return GlassColors(
+        bg = cs.background, bgGradientEnd = cs.background,
+        glassBg = cs.surfaceVariant.copy(alpha = if (dark) 0.5f else 0.8f),
+        glassBorder = cs.outline.copy(alpha = 0.3f),
+        surface = cs.surface, accent = cs.primary, accentSecondary = cs.secondary,
+        danger = cs.error, textPrimary = cs.onSurface, textSecondary = cs.onSurfaceVariant,
+        textTertiary = cs.onSurfaceVariant.copy(0.5f),
+        buttonBg = cs.surfaceVariant,
+        buttonBorder = cs.outline.copy(alpha = 0.25f),
+        touchpadBg = if (dark) cs.surfaceVariant.copy(alpha = 0.6f) else cs.surfaceVariant.copy(alpha = 0.8f)
     )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SHORTCUT MODIFIER DATA — for landscape left panel
+// ─────────────────────────────────────────────────────────────────────────────
+private data class ShortcutItem(val combo: String, val label: String)
+private data class ModifierGroup(val key: String, val display: String, val shortcuts: List<ShortcutItem>)
+
+private val SHORTCUT_GROUPS = listOf(
+    ModifierGroup("Win", "⊞ Win", listOf(
+        ShortcutItem("WIN+L","Lock"), ShortcutItem("WIN+D","Desktop"), ShortcutItem("WIN+E","Explorer"),
+        ShortcutItem("WIN+I","Settings"), ShortcutItem("WIN+R","Run"), ShortcutItem("WIN+S","Search"),
+        ShortcutItem("WIN+TAB","Tasks"), ShortcutItem("WIN+P","Project"), ShortcutItem("WIN+X","Quick"),
+        ShortcutItem("WIN+V","Clipboard"), ShortcutItem("WIN+M","Min All"), ShortcutItem("WIN+UP","Max"),
+        ShortcutItem("WIN+DOWN","Min"), ShortcutItem("WIN+LEFT","Left"), ShortcutItem("WIN+RIGHT","Right"),
+        ShortcutItem("WIN+.","Emoji"), ShortcutItem("WIN+SHIFT+S","Snip"), ShortcutItem("WIN+G","Game"),
+    )),
+    ModifierGroup("Ctrl", "Ctrl", listOf(
+        ShortcutItem("CTRL+C","Copy"), ShortcutItem("CTRL+V","Paste"), ShortcutItem("CTRL+X","Cut"),
+        ShortcutItem("CTRL+Z","Undo"), ShortcutItem("CTRL+Y","Redo"), ShortcutItem("CTRL+A","Sel All"),
+        ShortcutItem("CTRL+S","Save"), ShortcutItem("CTRL+F","Find"), ShortcutItem("CTRL+N","New"),
+        ShortcutItem("CTRL+O","Open"), ShortcutItem("CTRL+P","Print"), ShortcutItem("CTRL+W","Close Tab"),
+        ShortcutItem("CTRL+T","New Tab"), ShortcutItem("CTRL+R","Refresh"), ShortcutItem("CTRL+L","Address"),
+    )),
+    ModifierGroup("Alt", "Alt", listOf(
+        ShortcutItem("ALT+TAB","Switch"), ShortcutItem("ALT+F4","Close"), ShortcutItem("ALT+ENTER","Props"),
+        ShortcutItem("ALT+SPACE","Menu"), ShortcutItem("ALT+LEFT","Back"), ShortcutItem("ALT+RIGHT","Fwd"),
+        ShortcutItem("ALT+UP","Parent"), ShortcutItem("ALT+D","Address"),
+    )),
+    ModifierGroup("Shift", "⇧", listOf(
+        ShortcutItem("SHIFT+DELETE","Perm Del"), ShortcutItem("SHIFT+TAB","Prev"),
+        ShortcutItem("SHIFT+F10","Menu"), ShortcutItem("SHIFT+HOME","Sel←"),
+        ShortcutItem("SHIFT+END","Sel→"), ShortcutItem("SHIFT+INSERT","Paste"),
+    )),
+    ModifierGroup("Ctrl+Shift", "C+⇧", listOf(
+        ShortcutItem("CTRL+SHIFT+ESC","TaskMgr"), ShortcutItem("CTRL+SHIFT+N","New Dir"),
+        ShortcutItem("CTRL+SHIFT+T","Reopen"), ShortcutItem("CTRL+SHIFT+V","Plain"),
+        ShortcutItem("CTRL+SHIFT+DELETE","Clear"), ShortcutItem("CTRL+SHIFT+S","SaveAs"),
+    )),
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ROOT
@@ -102,6 +139,7 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
     var fbJob        by remember { mutableStateOf<Job?>(null) }
     var showUrlBar   by remember { mutableStateOf(false) }
     var urlText      by remember { mutableStateOf("") }
+    var shortcutGroup by remember { mutableStateOf<ModifierGroup?>(null) }
 
     val showFeedback: (String) -> Unit = remember(scope) { { msg ->
         feedback = msg; fbJob?.cancel(); fbJob = scope.launch { delay(1_000); feedback = "" }
@@ -123,7 +161,8 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
                 showUrlBar = showUrlBar, urlText = urlText,
                 onLiveToggle = { liveScreenOn = it }, onFeedback = showFeedback,
                 onSensChange = { sensitivity = it }, onToggleUrlBar = { showUrlBar = !showUrlBar },
-                onUrlChange = { urlText = it }, onOpenUrl = openUrl)
+                onUrlChange = { urlText = it }, onOpenUrl = openUrl,
+                shortcutGroup = shortcutGroup, onShortcutGroupChange = { shortcutGroup = it })
         } else {
             PortraitLayout(vm = viewModel, sensitivity = sensitivity, feedback = feedback,
                 connectionStatus = connectionStatus, showUrlBar = showUrlBar, urlText = urlText,
@@ -231,17 +270,19 @@ fun UrlBarRow(c: GlassColors, visible: Boolean, urlText: String, onUrlChange: (S
 // ─────────────────────────────────────────────────────────────────────────────
 @SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
-fun LandscapeLayout(
+private fun LandscapeLayout(
     vm: PcControlViewModel, sensitivity: Float, feedback: String,
     connectionStatus: PcConnectionStatus, liveScreenOn: Boolean,
     showUrlBar: Boolean, urlText: String,
     onLiveToggle: (Boolean) -> Unit, onFeedback: (String) -> Unit,
     onSensChange: (Float) -> Unit, onToggleUrlBar: () -> Unit,
     onUrlChange: (String) -> Unit, onOpenUrl: (String) -> Unit,
+    shortcutGroup: ModifierGroup? = null, onShortcutGroupChange: (ModifierGroup?) -> Unit = {},
 ) {
     val c = glassColors()
     val dotColor = connectionStatus.toGlassColor(c)
     val btnAlpha = if (liveScreenOn) 0.6f else 1f
+    val haptic = LocalHapticFeedback.current
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.bg, c.bgGradientEnd)))) {
         val sideWL = maxWidth * 0.195f
@@ -251,68 +292,78 @@ fun LandscapeLayout(
         LiveScreenBackground(isOn = liveScreenOn, modifier = Modifier.fillMaxSize())
 
         Row(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-            // ── LEFT PANEL ──
-            Column(modifier = Modifier.width(sideWL).fillMaxHeight().alpha(btnAlpha), verticalArrangement = Arrangement.spacedBy(gap)) {
-                Row(Modifier.fillMaxWidth().height(42.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    GlassButton(c, "L", Modifier.weight(1f).fillMaxHeight(), c.accent) { vm.sendMouseClick("left"); onFeedback("L Click") }
-                    GlassButton(c, "R", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseClick("right"); onFeedback("R Click") }
-                }
-                Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    GlassButton(c, "↑", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseScroll(3); onFeedback("Scroll ↑") }
-                    GlassButton(c, "↓", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseScroll(-3); onFeedback("Scroll ↓") }
-                }
-                UrlBarRow(c = c, visible = showUrlBar, urlText = urlText, onUrlChange = onUrlChange, onOpenUrl = onOpenUrl, onDismiss = onToggleUrlBar, modifier = Modifier.fillMaxWidth())
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(gap)) {
-                        val arrowMod = Modifier.width(sideWL * 0.44f).height(36.dp)
-                        GlassButton(c, "▲", arrowMod) { vm.sendKey("UP") }
-                        Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                            GlassButton(c, "◀", arrowMod) { vm.sendKey("LEFT") }
-                            Spacer(Modifier.width(sideWL * 0.06f))
-                            GlassButton(c, "▶", arrowMod) { vm.sendKey("RIGHT") }
+
+            // ── SHORTCUT PANEL (landscape only — replaces touchpad centre when active) ──
+            if (shortcutGroup != null) {
+                ShortcutModifierColumn(c = c, selected = shortcutGroup, onSelect = { onShortcutGroupChange(it) }, modifier = Modifier.width(52.dp).fillMaxHeight())
+                ShortcutsGrid(c = c, group = shortcutGroup, vm = vm, onFeedback = onFeedback, modifier = Modifier.weight(1f).fillMaxHeight())
+            } else {
+                // ── LEFT PANEL ──
+                Column(modifier = Modifier.width(sideWL).fillMaxHeight().alpha(btnAlpha), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    Row(Modifier.fillMaxWidth().height(42.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassButton(c, "L", Modifier.weight(1f).fillMaxHeight(), c.accent) { vm.sendMouseClick("left"); onFeedback("L Click") }
+                        GlassButton(c, "R", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseClick("right"); onFeedback("R Click") }
+                    }
+                    Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassButton(c, "↑", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseScroll(3); onFeedback("Scroll ↑") }
+                        GlassButton(c, "↓", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseScroll(-3); onFeedback("Scroll ↓") }
+                    }
+                    UrlBarRow(c = c, visible = showUrlBar, urlText = urlText, onUrlChange = onUrlChange, onOpenUrl = onOpenUrl, onDismiss = onToggleUrlBar, modifier = Modifier.fillMaxWidth())
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(gap)) {
+                            val arrowMod = Modifier.width(sideWL * 0.44f).height(36.dp)
+                            GlassButton(c, "▲", arrowMod) { vm.sendKey("UP") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                                GlassButton(c, "◀", arrowMod) { vm.sendKey("LEFT") }
+                                Spacer(Modifier.width(sideWL * 0.06f))
+                                GlassButton(c, "▶", arrowMod) { vm.sendKey("RIGHT") }
+                            }
+                            GlassButton(c, "▼", arrowMod) { vm.sendKey("DOWN") }
+                            Spacer(Modifier.height(2.dp))
+                            GlassButton(c, if (showUrlBar) "× URL" else "🌐 URL", Modifier.fillMaxWidth().height(28.dp), if (showUrlBar) c.accent else null, onClick = onToggleUrlBar)
+                            LiveToggleButton(c = c, isOn = liveScreenOn, onToggle = onLiveToggle, modifier = Modifier.fillMaxWidth().height(28.dp))
                         }
-                        GlassButton(c, "▼", arrowMod) { vm.sendKey("DOWN") }
-                        Spacer(Modifier.height(2.dp))
-                        GlassButton(c, if (showUrlBar) "× URL" else "🌐 URL", Modifier.fillMaxWidth().height(28.dp), if (showUrlBar) c.accent else null, onClick = onToggleUrlBar)
-                        LiveToggleButton(c = c, isOn = liveScreenOn, onToggle = onLiveToggle, modifier = Modifier.fillMaxWidth().height(28.dp))
+                    }
+                    Row(Modifier.fillMaxWidth().height(42.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassButton(c, "Esc", Modifier.weight(1f).fillMaxHeight(), c.danger) { vm.sendKey("ESC") }
+                        GlassButton(c, "Tab", Modifier.weight(1f).fillMaxHeight()) { vm.sendKey("TAB") }
                     }
                 }
-                Row(Modifier.fillMaxWidth().height(42.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    GlassButton(c, "Esc", Modifier.weight(1f).fillMaxHeight(), c.danger) { vm.sendKey("ESC") }
-                    GlassButton(c, "Tab", Modifier.weight(1f).fillMaxHeight()) { vm.sendKey("TAB") }
-                }
-            }
 
-            // ── CENTRE PANEL — touchpad has built-in scroll slider ──
-            Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                GlassStatusBar(c = c, connectionStatus = connectionStatus, dotColor = dotColor, liveScreenOn = liveScreenOn, feedback = feedback, sensitivity = sensitivity, onSensChange = onSensChange, modifier = Modifier.fillMaxWidth().height(26.dp).alpha(btnAlpha))
-                Row(Modifier.fillMaxWidth().height(32.dp).alpha(btnAlpha), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    GlassMediaButtons(c = c, vm = vm, onFeedback = onFeedback)
+                // ── CENTRE PANEL — touchpad has built-in scroll slider ──
+                Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    GlassStatusBar(c = c, connectionStatus = connectionStatus, dotColor = dotColor, liveScreenOn = liveScreenOn, feedback = feedback, sensitivity = sensitivity, onSensChange = onSensChange, modifier = Modifier.fillMaxWidth().height(26.dp).alpha(btnAlpha))
+                    Row(Modifier.fillMaxWidth().height(32.dp).alpha(btnAlpha), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassMediaButtons(c = c, vm = vm, onFeedback = onFeedback)
+                    }
+                    // Touchpad with integrated scroll slider on right
+                    LaptopTouchpad(c = c, modifier = Modifier.fillMaxWidth().weight(1f), sensitivity = sensitivity, feedback = feedback, onFeedback = onFeedback, vm = vm, semiTransparent = liveScreenOn, showScrollSlider = true)
+                    Row(Modifier.fillMaxWidth().height(42.dp).alpha(btnAlpha), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassButton(c, "Space", Modifier.weight(2f).fillMaxHeight(), c.accent) { vm.sendKey("SPACE"); onFeedback("Space") }
+                        GlassButton(c, "Enter", Modifier.weight(1.5f).fillMaxHeight(), c.accent) { vm.sendKey("ENTER"); onFeedback("Enter") }
+                        GlassButton(c, "Backspace", Modifier.weight(1.2f).fillMaxHeight()) { vm.sendKey("BACKSPACE"); onFeedback("Backspace") }
+                    }
                 }
-                // Touchpad with integrated scroll slider on right
-                LaptopTouchpad(c = c, modifier = Modifier.fillMaxWidth().weight(1f), sensitivity = sensitivity, feedback = feedback, onFeedback = onFeedback, vm = vm, semiTransparent = liveScreenOn, showScrollSlider = true)
-                Row(Modifier.fillMaxWidth().height(42.dp).alpha(btnAlpha), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    GlassButton(c, "Space", Modifier.weight(2f).fillMaxHeight(), c.accent) { vm.sendKey("SPACE"); onFeedback("Space") }
-                    GlassButton(c, "Enter", Modifier.weight(1.5f).fillMaxHeight(), c.accent) { vm.sendKey("ENTER"); onFeedback("Enter") }
-                    GlassButton(c, "Backspace", Modifier.weight(1.2f).fillMaxHeight()) { vm.sendKey("BACKSPACE"); onFeedback("Backspace") }
-                }
-            }
 
-            // ── RIGHT PANEL ──
-            Column(modifier = Modifier.width(sideWR).fillMaxHeight().alpha(btnAlpha), verticalArrangement = Arrangement.spacedBy(gap)) {
-                GlassButton(c, "Alt+Tab", Modifier.fillMaxWidth().height(26.dp), c.accentSecondary) { vm.sendKey("ALT+TAB"); onFeedback("Alt+Tab") }
-                Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    GlassButton(c, "Copy", Modifier.weight(1f).fillMaxHeight()) { vm.sendKey("CTRL+C"); onFeedback("Copy") }
-                    GlassButton(c, "Paste", Modifier.weight(1f).fillMaxHeight()) { vm.sendKey("CTRL+V"); onFeedback("Paste") }
+                // ── RIGHT PANEL ──
+                Column(modifier = Modifier.width(sideWR).fillMaxHeight().alpha(btnAlpha), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    GlassButton(c, "Alt+Tab", Modifier.fillMaxWidth().height(26.dp), c.accentSecondary) { vm.sendKey("ALT+TAB"); onFeedback("Alt+Tab") }
+                    Row(Modifier.fillMaxWidth().height(32.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassButton(c, "Copy", Modifier.weight(1f).fillMaxHeight()) { vm.sendKey("CTRL+C"); onFeedback("Copy") }
+                        GlassButton(c, "Paste", Modifier.weight(1f).fillMaxHeight()) { vm.sendKey("CTRL+V"); onFeedback("Paste") }
+                    }
+                    Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassButton(c, "Win+D", Modifier.fillMaxWidth().weight(1f), c.accent) { vm.sendKey("WIN+D"); onFeedback("Win+D") }
+                        GlassButton(c, "Undo", Modifier.fillMaxWidth().weight(1f)) { vm.sendKey("CTRL+Z"); onFeedback("Undo") }
+                        GlassButton(c, "⌨", Modifier.fillMaxWidth().weight(1f), if (shortcutGroup != null) c.accent else null) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onShortcutGroupChange(if (shortcutGroup == null) SHORTCUT_GROUPS.first() else null)
+                        }
+                        GlassButton(c, "SS", Modifier.fillMaxWidth().weight(1f)) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "SCREENSHOT")); onFeedback("Screenshot") }
+                    }
+                    GlassButton(c, "Lock", Modifier.fillMaxWidth().height(42.dp), c.danger) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "LOCK")) }
                 }
-                Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    GlassButton(c, "Win+D", Modifier.fillMaxWidth().weight(1f), c.accent) { vm.sendKey("WIN+D"); onFeedback("Win+D") }
-                    GlassButton(c, "Undo", Modifier.fillMaxWidth().weight(1f)) { vm.sendKey("CTRL+Z"); onFeedback("Undo") }
-                    GlassButton(c, "Keys", Modifier.fillMaxWidth().weight(1f)) { vm.navigateTo(PcScreen.KEYBOARD) }
-                    GlassButton(c, "SS", Modifier.fillMaxWidth().weight(1f)) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "SCREENSHOT")); onFeedback("Screenshot") }
-                }
-                GlassButton(c, "Lock", Modifier.fillMaxWidth().height(42.dp), c.danger) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "LOCK")) }
-            }
+            } // end else (no shortcut panel)
         }
     }
 }
@@ -704,6 +755,76 @@ fun LaptopTouchpad(
                             )
                             .border(1.dp, c.accent.copy(0.7f), CircleShape)
                     )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SHORTCUT MODIFIER COLUMN — thin left strip (landscape only)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun ShortcutModifierColumn(c: GlassColors, selected: ModifierGroup?, onSelect: (ModifierGroup?) -> Unit, modifier: Modifier) {
+    val haptic = LocalHapticFeedback.current
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        SHORTCUT_GROUPS.forEach { group ->
+            val isSel = selected?.key == group.key
+            Surface(
+                onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSelect(if (isSel) null else group) },
+                color = if (isSel) c.accent.copy(0.2f) else c.buttonBg,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(if (isSel) 1.5.dp else 1.dp, if (isSel) c.accent.copy(0.6f) else c.buttonBorder),
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(group.display, fontSize = if (group.key.length > 5) 7.sp else 9.sp,
+                            fontWeight = FontWeight.Bold, color = if (isSel) c.accent else c.textSecondary,
+                            textAlign = TextAlign.Center, lineHeight = 10.sp)
+                        if (isSel) { Spacer(Modifier.height(2.dp)); Box(Modifier.width(14.dp).height(2.dp).clip(RoundedCornerShape(1.dp)).background(c.accent)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SHORTCUTS GRID — all shortcuts for selected modifier (landscape only)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun ShortcutsGrid(c: GlassColors, group: ModifierGroup, vm: PcControlViewModel, onFeedback: (String) -> Unit, modifier: Modifier) {
+    val haptic = LocalHapticFeedback.current
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Surface(color = c.accent.copy(0.1f), shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, c.accent.copy(0.25f)),
+            modifier = Modifier.fillMaxWidth().height(32.dp)) {
+            Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(group.display, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.accent)
+                Spacer(Modifier.width(8.dp))
+                Text("Shortcuts • ${group.shortcuts.size}", fontSize = 10.sp, color = c.textSecondary)
+            }
+        }
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxSize()) {
+            items(group.shortcuts.chunked(4)) { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    row.forEach { sc ->
+                        Surface(
+                            onClick = { vm.sendKey(sc.combo); haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onFeedback(sc.combo) },
+                            color = c.buttonBg, shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, c.buttonBorder),
+                            tonalElevation = 2.dp,
+                            modifier = Modifier.weight(1f).height(56.dp)
+                        ) {
+                            Column(Modifier.fillMaxSize().padding(3.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Text(sc.combo, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = c.accent, textAlign = TextAlign.Center, lineHeight = 10.sp, maxLines = 2)
+                                Text(sc.label, fontSize = 7.sp, color = c.textTertiary, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }

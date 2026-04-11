@@ -38,7 +38,7 @@ class ChatListViewModel @Inject constructor(
 
                 val profile = dataSource.getUserProfile(session.userId).getOrThrow()
                 sanitizedCompany  = profile.sanitizedCompany
-                currentUserAvatar = profile.imageUrl  // ← store avatar for use in DM creation
+                currentUserAvatar = profile.imageUrl
 
                 val rooms = repo.getRooms(currentUserId)
                 _state.update {
@@ -99,4 +99,10 @@ class ChatListViewModel @Inject constructor(
             avatarBytes  = avatarBytes
         ).also { load() }
     }
+
+    /**
+     * Called after a user leaves a group — refreshes the room list
+     * so the left group disappears from the list.
+     */
+    fun refreshAfterLeave() { load() }
 }

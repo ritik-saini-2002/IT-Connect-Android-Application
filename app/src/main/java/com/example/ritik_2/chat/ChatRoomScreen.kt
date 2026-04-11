@@ -4,6 +4,7 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.example.ritik_2.chat.RoomType
 import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1252,7 +1253,9 @@ private fun GlassGroupInfoSheet(
                     }
 
                     // Remove button (non-admins only)
-                    if (!isAdmin)
+                    // Only show remove button if CURRENT USER is admin
+                    val currentUserId = viewModel.getCurrentUserId()
+                    if (!isAdmin && currentUserId in room.adminIds)
                         Box(
                             Modifier.size(36.dp).clip(CircleShape)
                                 .background(Color(0xFFFF6B6B).copy(0.12f))
@@ -1272,6 +1275,44 @@ private fun GlassGroupInfoSheet(
                         }
                 }
             }
+            // ── Leave Group button ──────────────────────────
+            // Visible to all non-admin members (admin cannot leave their own group)
+            val currentUserId = viewModel.getCurrentUserId()
+            val isCurrentAdmin = currentUserId in room.adminIds
+
+            if (!isCurrentAdmin && room.type == RoomType.GROUP) {
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 16.dp)
+                    .background(GlassWhite12))
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clickable {
+                            viewModel.leaveGroup {
+                                // Navigate back to chat list after leaving
+                                onDismiss()
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape)
+                            .background(Color(0xFFFF6B6B).copy(0.15f))
+                            .border(1.dp, Color(0xFFFF6B6B).copy(0.35f), CircleShape),
+                        Alignment.Center
+                    ) {
+                        Icon(Icons.Default.ExitToApp, null,
+                            tint = Color(0xFFFF6B6B), modifier = Modifier.size(22.dp))
+                    }
+                    Text("Leave Group",
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFFFF6B6B))
+                }
+            }
+
         }
     }
 }

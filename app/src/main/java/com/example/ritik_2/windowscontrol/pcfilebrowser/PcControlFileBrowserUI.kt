@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import com.example.ritik_2.windowscontrol.pcfilebrowser.SavedServerCredential
+import com.example.ritik_2.windowscontrol.pcfilebrowser.ServerSection
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1092,7 +1094,13 @@ fun RootView(
     listState           : LazyListState,
     onDriveClick        : (PcDrive) -> Unit,
     onRecentClick       : (PcRecentPath) -> Unit,
-    onSpecialFolderClick: (path: String, name: String) -> Unit
+    onSpecialFolderClick: (path: String, name: String) -> Unit,
+    // NEW: Server section
+    servers             : List<SavedServerCredential> = emptyList(),
+    onConnectServer     : (SavedServerCredential) -> Unit = {},
+    onAddServer         : () -> Unit = {},
+    onEditServer        : (SavedServerCredential) -> Unit = {},
+    onDeleteServer      : (SavedServerCredential) -> Unit = {}
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape   = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -1187,6 +1195,21 @@ fun RootView(
                 }
             }
         }
+
+        // Server section
+        if (servers.isNotEmpty() || true) {  // always show (empty state has "Add" button)
+            item {
+                Spacer(Modifier.height(8.dp))
+                ServerSection(
+                    servers         = servers,
+                    onConnectServer = onConnectServer,
+                    onAddServer     = onAddServer,
+                    onEditServer    = onEditServer,
+                    onDeleteServer  = onDeleteServer
+                )
+            }
+        }
+
         item { Spacer(Modifier.height(100.dp)) }
     }
 }

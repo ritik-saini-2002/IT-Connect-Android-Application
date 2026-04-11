@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,7 +33,6 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.data.model.AuthSession
-import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.model.UserProfile
 
 // ── Drawer destination ────────────────────────────────────────────────────────
@@ -43,46 +43,53 @@ data class DrawerItem(
     val icon               : ImageVector,
     val badge              : String?  = null,
     val isDestructive      : Boolean  = false,
-    // Permission key that the user must have — empty string = visible to all.
-    // Checked against the user's actual permission list (from user_access_control),
-    // NOT hardcoded role strings.
-    val requiredPermission : String   = ""
+    val requiredPermission : String   = "",
+    val section            : String   = "main"   // "main", "pc_control", "admin"
 )
 
+// ── UNIFIED drawer items — works for both main app and PC Control ─────────────
+// All activities are linked here. PC Control section shows for everyone.
+// Admin section filtered by permissions.
+
 val drawerItems = listOf(
-    DrawerItem("home",         "Home",            Icons.Default.Home),
-    DrawerItem("profile",      "My Profile",      Icons.Default.Person),
+    // ── Main section ──
+    DrawerItem("home",         "Home",            Icons.Default.Home,            section = "main"),
+    DrawerItem("profile",      "My Profile",      Icons.Default.Person,          section = "main"),
+    DrawerItem("chat",         "Chat",            Icons.Default.Chat,            section = "main"),
+    DrawerItem("contact",      "Contact",         Icons.Default.ContactPhone,    section = "main"),
+    DrawerItem("notifications","Notifications",   Icons.Default.Notifications,   section = "main"),
+
+    // ── PC Control section ── (visible to everyone)
+    DrawerItem("pc_control",   "PC Control",      Icons.Default.Computer,        section = "pc_control"),
+    DrawerItem("winshare",     "WinShare",        Icons.Default.Share,           section = "pc_control"),
+    DrawerItem("macnet",       "MAC Net",         Icons.Default.Wifi,            section = "pc_control"),
+
+    // ── Admin section ── (filtered by permissions)
+    DrawerItem("admin_panel",  "Admin Panel",     Icons.Default.AdminPanelSettings,
+        requiredPermission = "admin_panel", section = "admin"),
     DrawerItem("manage_users", "Manage Users",    Icons.Default.ManageAccounts,
-        requiredPermission = "view_all_users"),
+        requiredPermission = "view_all_users", section = "admin"),
     DrawerItem("create_user",  "Create User",     Icons.Default.PersonAdd,
-        requiredPermission = "create_user"),
-    DrawerItem("roles",        "Role Management", Icons.Default.AdminPanelSettings,
-        requiredPermission = "manage_roles"),
+        requiredPermission = "create_user", section = "admin"),
+    DrawerItem("roles",        "Role Management", Icons.Default.Security,
+        requiredPermission = "manage_roles", section = "admin"),
+    DrawerItem("departments",  "Departments",     Icons.Default.Groups,
+        requiredPermission = "manage_departments", section = "admin"),
     DrawerItem("database",     "Database",        Icons.Default.Storage,
-        requiredPermission = "database_manager"),
-    DrawerItem("pc_control",   "PC Control",      Icons.Default.Computer),
-    DrawerItem("settings",     "Settings",        Icons.Default.Settings),
+        requiredPermission = "database_manager", section = "admin"),
+    DrawerItem("company",      "Company Settings",Icons.Default.Business,
+        requiredPermission = "company_settings", section = "admin"),
+    DrawerItem("reports",      "Reports",         Icons.Default.Assessment,
+        requiredPermission = "view_reports", section = "admin"),
+
+    // ── Settings & Logout ──
+    DrawerItem("settings",     "Settings",        Icons.Default.Settings,        section = "main"),
     DrawerItem("logout",       "Logout",          Icons.Default.Logout,
-        isDestructive = true),
+        isDestructive = true, section = "main"),
 )
 
 // ── Swipeable drawer wrapper ──────────────────────────────────────────────────
 
-/**
- * Wrap any screen content with this to get the global swipeable sidebar.
- *
- * Usage:
- *   AppDrawerWrapper(
- *       session     = session,
- *       profile     = profile,
- *       currentItem = "home",
- *       onNavigate  = { id -> ... }
- *   ) {
- *       YourScreenContent()
- *   }
- *
- * Swipe right-to-left (from left edge) opens, left-to-right closes.
- */
 @Composable
 fun AppDrawerWrapper(
     session     : AuthSession?,
@@ -95,21 +102,20 @@ fun AppDrawerWrapper(
     var isOpen by remember { mutableStateOf(false) }
     var dragX  by remember { mutableFloatStateOf(0f) }
 
-    val drawerWidth  = 300.dp
+    val cfg = LocalConfiguration.current
+    val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
+    val drawerWidth  = if (isLandscape) 260.dp else 300.dp
     val translateX   by animateDpAsState(
         targetValue   = if (isOpen) 0.dp else -drawerWidth,
-        animationSpec = tween(280),
-        label         = "drawerX"
+        animationSpec = tween(280), label = "drawerX"
     )
     val scrimAlpha   by animateFloatAsState(
         targetValue   = if (isOpen) 0.45f else 0f,
-        animationSpec = tween(280),
-        label         = "scrim"
+        animationSpec = tween(280), label = "scrim"
     )
     val contentScale by animateFloatAsState(
         targetValue   = if (isOpen) 0.93f else 1f,
-        animationSpec = tween(280),
-        label         = "contentScale"
+        animationSpec = tween(280), label = "contentScale"
     )
 
     Box(
@@ -122,31 +128,23 @@ fun AppDrawerWrapper(
                     onDragCancel = {},
                     onHorizontalDrag = { _, delta ->
                         val newDragX = dragX + delta
-                        // Open: drag starting from left edge going right
                         if (!isOpen && dragX < 60f && delta > 0) {
                             if (newDragX > 80f) isOpen = true
                         }
-                        // Close: drag going left while open
-                        if (isOpen && delta < -20f) {
-                            isOpen = false
-                        }
+                        if (isOpen && delta < -20f) isOpen = false
                         dragX = newDragX
                     }
                 )
             }
     ) {
-        // Main content — scales down slightly when drawer is open
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .scale(contentScale)
                 .clip(RoundedCornerShape(if (isOpen) 20.dp else 0.dp))
                 .graphicsLayer { shadowElevation = if (isOpen) 24f else 0f }
-        ) {
-            content()
-        }
+        ) { content() }
 
-        // Scrim — tap to close
         if (scrimAlpha > 0f) {
             Box(
                 modifier = Modifier
@@ -157,7 +155,6 @@ fun AppDrawerWrapper(
             )
         }
 
-        // Drawer panel
         Box(
             modifier = Modifier
                 .width(drawerWidth)
@@ -172,10 +169,7 @@ fun AppDrawerWrapper(
                 profile     = profile,
                 currentItem = currentItem,
                 permissions = permissions,
-                onNavigate  = { id ->
-                    isOpen = false
-                    onNavigate(id)
-                },
+                onNavigate  = { id -> isOpen = false; onNavigate(id) },
                 onClose     = { isOpen = false }
             )
         }
@@ -211,11 +205,10 @@ private fun DrawerContent(
         ) {
             Column {
                 Row(
-                    modifier          = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.Top
                 ) {
-                    // Avatar
                     Box(
                         Modifier.size(64.dp).clip(CircleShape)
                             .background(Color.White.copy(0.2f)),
@@ -248,79 +241,103 @@ private fun DrawerContent(
                 }
 
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    session?.name ?: "User",
-                    fontWeight = FontWeight.Bold,
-                    fontSize   = 17.sp,
-                    color      = Color.White,
-                    maxLines   = 1,
-                    overflow   = TextOverflow.Ellipsis
-                )
-                Text(
-                    session?.email ?: "",
-                    fontSize = 12.sp,
-                    color    = Color.White.copy(0.75f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Text(session?.name ?: "User", fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp, color = Color.White, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+                Text(session?.email ?: "", fontSize = 12.sp,
+                    color = Color.White.copy(0.75f), maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(6.dp))
-                // Role badge
-                Surface(
-                    color = Color.White.copy(0.2f),
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Text(
-                        role.ifBlank { "User" },
+                Surface(color = Color.White.copy(0.2f), shape = RoundedCornerShape(20.dp)) {
+                    Text(role.ifBlank { "User" },
                         modifier   = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                        fontSize   = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color      = Color.White
-                    )
+                        fontSize   = 11.sp, fontWeight = FontWeight.SemiBold,
+                        color      = Color.White)
                 }
             }
         }
 
-        // Nav items
+        // Nav items — grouped by section
         Column(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 8.dp)
         ) {
-            drawerItems
-                .filter { item ->
-                    item.requiredPermission.isEmpty() ||
-                            permissions.contains(item.requiredPermission) ||
-                            PermissionGuard.isSystemAdmin(role)
+            val filteredItems = drawerItems.filter { item ->
+                item.requiredPermission.isEmpty() ||
+                        permissions.contains(item.requiredPermission) ||
+                        PermissionGuard.isSystemAdmin(role)
+            }
+
+            // Main section
+            val mainItems = filteredItems.filter { it.section == "main" && !it.isDestructive }
+            if (mainItems.isNotEmpty()) {
+                SectionLabel("NAVIGATE")
+                mainItems.forEach { item ->
+                    DrawerNavItem(item = item, isActive = item.id == currentItem,
+                        onClick = { onNavigate(item.id) })
                 }
-                .forEachIndexed { index, item ->
-                    if (index > 0 && item.isDestructive) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                            color    = MaterialTheme.colorScheme.outlineVariant.copy(0.5f)
-                        )
-                    }
-                    DrawerNavItem(
-                        item      = item,
-                        isActive  = item.id == currentItem,
-                        onClick   = { onNavigate(item.id) }
-                    )
+            }
+
+            // PC Control section
+            val pcItems = filteredItems.filter { it.section == "pc_control" }
+            if (pcItems.isNotEmpty()) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.5f))
+                SectionLabel("REMOTE CONTROL")
+                pcItems.forEach { item ->
+                    DrawerNavItem(item = item, isActive = item.id == currentItem,
+                        onClick = { onNavigate(item.id) })
                 }
+            }
+
+            // Admin section
+            val adminItems = filteredItems.filter { it.section == "admin" }
+            if (adminItems.isNotEmpty()) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.5f))
+                SectionLabel("ADMINISTRATION")
+                adminItems.forEach { item ->
+                    DrawerNavItem(item = item, isActive = item.id == currentItem,
+                        onClick = { onNavigate(item.id) })
+                }
+            }
+
+            // Destructive items (logout etc)
+            val destructive = filteredItems.filter { it.isDestructive }
+            if (destructive.isNotEmpty()) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(0.5f))
+                destructive.forEach { item ->
+                    DrawerNavItem(item = item, isActive = false,
+                        onClick = { onNavigate(item.id) })
+                }
+            }
         }
 
         // Footer
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Text(
-                "IT Connect v2.0",
-                style  = MaterialTheme.typography.labelSmall,
-                color  = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
-            )
+        Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("IT Connect v3.0",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
         }
     }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        modifier   = Modifier.padding(horizontal = 24.dp, vertical = 6.dp),
+        style      = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color      = MaterialTheme.colorScheme.primary,
+        letterSpacing = 1.sp
+    )
 }
 
 // ── Drawer nav item ───────────────────────────────────────────────────────────
@@ -332,7 +349,7 @@ private fun DrawerNavItem(
     onClick : () -> Unit
 ) {
     val bgColor  = if (isActive) MaterialTheme.colorScheme.primary.copy(0.1f)
-    else          Color.Transparent
+    else Color.Transparent
     val iconTint = when {
         item.isDestructive -> MaterialTheme.colorScheme.error
         isActive           -> MaterialTheme.colorScheme.primary
@@ -355,36 +372,24 @@ private fun DrawerNavItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Active indicator bar
         Box(
             modifier = Modifier
-                .width(3.dp)
-                .height(20.dp)
+                .width(3.dp).height(20.dp)
                 .clip(RoundedCornerShape(2.dp))
                 .background(if (isActive) MaterialTheme.colorScheme.primary else Color.Transparent)
         )
 
-        Icon(item.icon, null,
-            modifier = Modifier.size(20.dp),
-            tint     = iconTint)
+        Icon(item.icon, null, modifier = Modifier.size(20.dp), tint = iconTint)
 
-        Text(
-            item.label,
-            modifier   = Modifier.weight(1f),
+        Text(item.label, modifier = Modifier.weight(1f),
             fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-            fontSize   = 14.sp,
-            color      = textColor
-        )
+            fontSize = 14.sp, color = textColor)
 
         if (item.badge != null) {
-            Surface(
-                color = MaterialTheme.colorScheme.primary,
-                shape = CircleShape
-            ) {
+            Surface(color = MaterialTheme.colorScheme.primary, shape = CircleShape) {
                 Text(item.badge,
                     modifier   = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                    fontSize   = 10.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontSize   = 10.sp, fontWeight = FontWeight.Bold,
                     color      = MaterialTheme.colorScheme.onPrimary)
             }
         }
@@ -392,7 +397,7 @@ private fun DrawerNavItem(
         if (isActive) {
             Icon(Icons.Default.ChevronRight, null,
                 modifier = Modifier.size(14.dp),
-                tint     = MaterialTheme.colorScheme.primary.copy(0.5f))
+                tint = MaterialTheme.colorScheme.primary.copy(0.5f))
         }
     }
 }

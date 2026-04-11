@@ -1,6 +1,7 @@
 package com.example.ritik_2.windowscontrol.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -12,35 +13,47 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ritik_2.theme.ITConnectGlass
 import com.example.ritik_2.windowscontrol.viewmodel.PcConnectionStatus
 
 /**
- * Shared top bar used by ALL PC-control screens.
- * Consistent height, color, connection chip and optional extra actions.
- * No system status bar is shown — activities hide it via hideSystemBars().
+ * Shared glass-style header used by ALL PC-control screens.
+ * Replaces the old TopAppBar with a glassmorphism box that matches
+ * the File Browser header style.
  *
- * IMPORTANT: Remove the duplicate PcScreenTopBar function from
- * PcControlPlansUI.kt to avoid "Conflicting overloads" build error.
+ * Features:
+ * - Glass background with border (dark/light aware)
+ * - Connection status chip (tap to ping)
+ * - Optional navigation icon and extra actions
+ * - Status bar padding built in
  */
 @Composable
 fun PcScreenTopBar(
-    title          : String,
-    connectionStatus: PcConnectionStatus,
-    onPing         : () -> Unit,
-    navigationIcon : (@Composable () -> Unit)?        = null,
-    extraActions   : (@Composable RowScope.() -> Unit)? = null
+    title            : String,
+    connectionStatus : PcConnectionStatus,
+    onPing           : () -> Unit,
+    navigationIcon   : (@Composable () -> Unit)?        = null,
+    extraActions     : (@Composable RowScope.() -> Unit)? = null
 ) {
+    val isDark = isSystemInDarkTheme()
+    val glassBg     = if (isDark) ITConnectGlass.darkGlassBg else ITConnectGlass.lightGlassBg
+    val glassBorder = if (isDark) ITConnectGlass.darkGlassBorder else ITConnectGlass.lightGlassBorder
+    val accent      = if (isDark) ITConnectGlass.darkAccentBlue else ITConnectGlass.lightAccentBlue
+
     val (chipColor, chipLabel) = when (connectionStatus) {
         PcConnectionStatus.ONLINE   -> Color(0xFF4ADE80) to "Online"
         PcConnectionStatus.OFFLINE  -> Color(0xFFFF6B6B) to "Offline"
         PcConnectionStatus.CHECKING -> Color(0xFFFBBF24) to "..."
-        PcConnectionStatus.UNKNOWN  -> MaterialTheme.colorScheme.onPrimary.copy(0.55f) to "Ping"
+        PcConnectionStatus.UNKNOWN  -> MaterialTheme.colorScheme.onSurface.copy(0.4f) to "Ping"
     }
 
     Surface(
-        color          = MaterialTheme.colorScheme.primaryContainer,
-        tonalElevation = 4.dp,
-        modifier       = Modifier.fillMaxWidth()
+        color  = MaterialTheme.colorScheme.surfaceVariant,
+        shape  = RoundedCornerShape(12.dp),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(0.3f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
     ) {
         Row(
             modifier = Modifier
@@ -55,8 +68,8 @@ fun PcScreenTopBar(
             Text(
                 text       = title,
                 fontWeight = FontWeight.Bold,
-                fontSize   = 15.sp,
-                color      = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontSize   = 16.sp,
+                color      = MaterialTheme.colorScheme.onSurface,
                 modifier   = Modifier.weight(1f),
                 maxLines   = 1,
                 overflow   = TextOverflow.Ellipsis
@@ -66,13 +79,12 @@ fun PcScreenTopBar(
 
             Surface(
                 onClick = onPing,
-                shape   = RoundedCornerShape(20.dp),
-                color   = chipColor.copy(alpha = 0.18f),
-                border  = BorderStroke(1.dp, chipColor.copy(alpha = 0.45f))
+                shape   = RoundedCornerShape(12.dp),
+                color   = chipColor.copy(alpha = 0.15f),
             ) {
                 Text(
                     text       = "● $chipLabel",
-                    modifier   = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                    modifier   = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     fontSize   = 10.sp,
                     fontWeight = FontWeight.SemiBold,
                     color      = chipColor

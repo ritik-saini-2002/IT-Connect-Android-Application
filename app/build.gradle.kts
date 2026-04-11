@@ -15,8 +15,8 @@ android {
         applicationId             = "com.example.itconnect"
         minSdk                    = 26
         targetSdk                 = 35
-        versionCode               = 1
-        versionName               = "2.0.0"
+        versionCode               = 2
+        versionName               = "3.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Read PocketBase config from local.properties (never commit credentials)
@@ -33,7 +33,11 @@ android {
         debug {
             isDebuggable        = true
             isMinifyEnabled     = false
-            applicationIdSuffix = ".debug"
+            // FIX: Removed applicationIdSuffix = ".debug"
+            // This was causing "reinstall APK" errors when cloning repo to another
+            // computer because debug builds had package "com.example.itconnect.debug"
+            // while release builds had "com.example.itconnect" — Android treats these
+            // as different apps so you had to uninstall the old one first.
         }
         release {
             isMinifyEnabled   = true
@@ -148,6 +152,4 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
-
-
 }

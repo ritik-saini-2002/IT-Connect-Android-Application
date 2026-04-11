@@ -196,7 +196,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    fun updateSettings(ip: String, port: Int = 5000, secretKey: String = "my_secret_123") {
+    fun updateSettings(ip: String, port: Int = 5000, secretKey: String = "Ritik@2002") {
         PcControlMain.updateConnection(ip, port, secretKey)
         _settings.value = PcControlMain.getSettings()
         pingPc()
@@ -373,6 +373,31 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    // ── App minimize / restore ─────────────────────────────
+    // NEW: Calls agent v10 /app/minimize and /app/restore endpoints
+
+    fun minimizeApp(exePath: String) {
+        viewModelScope.launch {
+            try {
+                val result = api.executeQuickStep(PcStep("KILL_APP", value = "")) // placeholder
+                // Use dedicated endpoint via post
+                input.post("/app/minimize", mapOf("name" to exePath))
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "minimizeApp: ${e.message}")
+            }
+        }
+    }
+
+    fun restoreApp(exePath: String) {
+        viewModelScope.launch {
+            try {
+                input.post("/app/restore", mapOf("name" to exePath))
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "restoreApp: ${e.message}")
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────
     //  BROWSE — FILES
     // ─────────────────────────────────────────────────────
@@ -446,17 +471,9 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    // ── Server-side file search with 300ms debounce ────────
-    /**
-     * Search for files/folders matching [query] under [rootPath].
-     * Results are written into [_dirItems] so the existing
-     * SearchResultsView picks them up automatically.
-     * Debounced — rapid successive calls cancel the previous one.
-     */
     fun searchFiles(rootPath: String, query: String) {
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
-            // Short debounce so we don't hammer the agent while the user types
             delay(300)
             if (query.isBlank() || rootPath.isBlank()) return@launch
             try {
@@ -466,7 +483,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                     _dirItems.value = r.data ?: emptyList()
                 } else {
                     android.util.Log.w("PcControl", "searchFiles error: ${r.error}")
-                    // Keep whatever items were shown before rather than clearing to empty
                 }
             } catch (e: Exception) {
                 android.util.Log.e("PcControl", "searchFiles: ${e.message}")
@@ -523,7 +539,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     // ── File Transfer ──────────────────────────────────────
 
-    // ── downloadFile — streams directly to URI, no ByteArray in memory ─────────
     fun downloadFile(
         remotePath      : String,
         saveToUri       : android.net.Uri,
@@ -558,7 +573,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    // ── uploadFileStream — streams from URI, no ByteArray in memory ───────────
     fun uploadFileStream(
         contentResolver : android.content.ContentResolver,
         uri             : android.net.Uri,
@@ -598,9 +612,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     fun clearTransferProgress() { _transferProgress.value = null }
 
-    // ── Open With dialog polling ───────────────────────────
-    // Kept for backwards compatibility — no longer triggered by OPEN_FILE
-    // but still callable if needed from other contexts.
+    // ── Open With dialog ───────────────────────────────────
 
     fun startOpenWithPolling() {
         openWithPollJob?.cancel()
@@ -645,16 +657,10 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    /**
-     * Scroll the mouse wheel.
-     * @param amount      Positive = scroll up, negative = scroll down.
-     * @param horizontal  If true, sends a horizontal scroll (2-finger side swipe).
-     */
     fun sendMouseScroll(amount: Int, horizontal: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (horizontal) {
-                    // Agent v9 scroll endpoint supports horizontal flag natively
                     input.scrollMouse(amount, horizontal = true)
                 } else {
                     input.scrollMouse(amount)
@@ -665,9 +671,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    /**
-     * Hold a mouse button down — used for drag mode on the touchpad.
-     */
     fun mouseButtonDown(button: String = "left") {
         viewModelScope.launch(Dispatchers.IO) {
             try { input.mouseButtonDown(button) }
@@ -675,9 +678,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    /**
-     * Release a held mouse button — ends drag mode on the touchpad.
-     */
     fun mouseButtonUp(button: String = "left") {
         viewModelScope.launch(Dispatchers.IO) {
             try { input.mouseButtonUp(button) }
@@ -696,6 +696,41 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try { input.typeText(text) }
             catch (e: Exception) { android.util.Log.e("PcControl","sendText: ${e.message}") }
+        }
+    }
+
+    // ── NEW: Key hold / release for functional keyboard bar ──
+    // These call the agent v10 /input/keyboard/hold and /input/keyboard/release endpoints.
+    // Used by PcControlKeyboardUI for modifier keys (Shift, Ctrl, Alt, Win, AltGr)
+    // that stay pressed until explicitly released.
+
+    fun holdKey(keyName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                input.holdKey(keyName)
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "holdKey: ${e.message}")
+            }
+        }
+    }
+
+    fun releaseHeldKey(keyName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                input.releaseKey(keyName)
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "releaseHeldKey: ${e.message}")
+            }
+        }
+    }
+
+    fun releaseAllHeldKeys() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                input.releaseKey("ALL")
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "releaseAllHeldKeys: ${e.message}")
+            }
         }
     }
 
@@ -755,6 +790,8 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         stopLiveScreen()
         openWithPollJob?.cancel()
         searchJob?.cancel()
+        // Release any held keys when leaving
+        releaseAllHeldKeys()
     }
 }
 

@@ -4,6 +4,7 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -19,19 +20,18 @@ class PcControlActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         PcControlCrashHandler.install(this)
 
-        // Respect system auto-rotate setting
-        applyRotationPolicy()
+        if (intent.getBooleanExtra("crash_restart", false)) {
+            val msg = intent.getStringExtra("crash_message") ?: "Unknown error"
+            Toast.makeText(this, "Recovered from crash: $msg", Toast.LENGTH_LONG).show()
+            PcControlCrashHandler.clearCrash(this)
+        }
 
+        applyRotationPolicy()
         viewModel.startRealTimeRefresh(3000L)
 
-        setContent {
-            ITConnectTheme {
-                PcControlEntry()
-            }
-        }
+        setContent { ITConnectTheme { PcControlEntry() } }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -45,24 +45,14 @@ class PcControlActivity : ComponentActivity() {
     }
 
     private fun applyRotationPolicy() {
-        val autoRotateOn = Settings.System.getInt(
-            contentResolver,
-            Settings.System.ACCELEROMETER_ROTATION,
-            0
-        ) == 1
-
-        requestedOrientation = if (autoRotateOn) {
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR
-        } else {
-            // Lock to current orientation — don't override user preference
-            ActivityInfo.SCREEN_ORIENTATION_LOCKED
-        }
+        val autoRotate = try {
+            Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
+        } catch (_: Exception) { false }
+        requestedOrientation = if (autoRotate) ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        else ActivityInfo.SCREEN_ORIENTATION_LOCKED
     }
 
-    override fun onStop() {
-        super.onStop()
-        viewModel.stopRealTimeRefresh()
-    }
+    override fun onStop() { super.onStop(); viewModel.stopRealTimeRefresh() }
 
     override fun onRestart() {
         super.onRestart()

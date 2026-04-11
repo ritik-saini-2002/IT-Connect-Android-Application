@@ -8,20 +8,23 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
+import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
 
 class PcControlAppDirectoryActivity : ComponentActivity() {
 
-    private val viewModel: PcControlViewModel by viewModels()
+    // FIX: Use PcControlViewModelFactory (requires Context) — not the default factory
+    private val viewModel: PcControlViewModel by viewModels {
+        PcControlViewModelFactory(applicationContext)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Draws behind system bars so the UI feels full-screen in both orientations
         enableEdgeToEdge()
 
         setContent {
-            MaterialTheme {
+            ITConnectTheme {
                 Surface {
                     PcControlAppDirectoryUI(viewModel = viewModel)
                 }
@@ -29,13 +32,7 @@ class PcControlAppDirectoryActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Called whenever the device rotates.
-     * Compose reacts to [LocalConfiguration] automatically, so we just let it recompose.
-     * Override here only if you need to do extra work on rotation (e.g. analytics, logging).
-     */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        // No manual handling needed — Compose observes LocalConfiguration changes reactively.
     }
 }

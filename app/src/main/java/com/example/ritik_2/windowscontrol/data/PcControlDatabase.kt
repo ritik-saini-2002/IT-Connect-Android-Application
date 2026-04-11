@@ -5,7 +5,7 @@ import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
 // ─────────────────────────────────────────────────────────────
-//  DAO
+//  DAO — Plans
 // ─────────────────────────────────────────────────────────────
 
 @Dao
@@ -30,13 +30,68 @@ interface PcPlanDao {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  DATABASE — No @TypeConverters needed (stepsJson is plain String)
+//  CONNECTION LOG ENTITY — stores PC connection history
+//  NEW: Saves user profile info for each connection session
 // ─────────────────────────────────────────────────────────────
 
-@Database(entities = [PcPlan::class], version = 2, exportSchema = false)
-// ✅ No @TypeConverters annotation — PcPlan.stepsJson is a plain String column
+@Entity(tableName = "pc_connection_logs")
+data class PcConnectionLog(
+    @PrimaryKey(autoGenerate = true)
+    val id          : Long   = 0,
+    val pcIp        : String = "",
+    val pcPort      : Int    = 5000,
+    val pcName      : String = "",
+    val userName    : String = "",
+    val userEmail   : String = "",
+    val userRole    : String = "",
+    val userCompany : String = "",
+    val connectedAt : Long   = System.currentTimeMillis(),
+    val disconnectedAt: Long = 0,
+    val sessionDurationMs: Long = 0,
+    val secretKeyHash: String = "",  // SHA256 first 8 chars — never store full key
+    val agentVersion: String = ""
+)
+
+// ─────────────────────────────────────────────────────────────
+//  DAO — Connection Logs
+// ─────────────────────────────────────────────────────────────
+
+@Dao
+interface PcConnectionLogDao {
+    @Query("SELECT * FROM pc_connection_logs ORDER BY connectedAt DESC LIMIT 50")
+    fun getRecentLogs(): Flow<List<PcConnectionLog>>
+
+    @Query("SELECT * FROM pc_connection_logs ORDER BY connectedAt DESC LIMIT :limit")
+    suspend fun getRecentLogsSync(limit: Int = 50): List<PcConnectionLog>
+
+    @Insert
+    suspend fun insert(log: PcConnectionLog): Long
+
+    @Update
+    suspend fun update(log: PcConnectionLog)
+
+    @Query("UPDATE pc_connection_logs SET disconnectedAt = :time, sessionDurationMs = :duration WHERE id = :logId")
+    suspend fun endSession(logId: Long, time: Long, duration: Long)
+
+    @Query("DELETE FROM pc_connection_logs WHERE connectedAt < :before")
+    suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT COUNT(*) FROM pc_connection_logs")
+    suspend fun count(): Int
+}
+
+// ─────────────────────────────────────────────────────────────
+//  DATABASE — version 3 (added connection logs table)
+// ─────────────────────────────────────────────────────────────
+
+@Database(
+    entities = [PcPlan::class, PcConnectionLog::class],
+    version = 3,
+    exportSchema = false
+)
 abstract class PcControlDatabase : RoomDatabase() {
     abstract fun planDao(): PcPlanDao
+    abstract fun connectionLogDao(): PcConnectionLogDao
 
     companion object {
         @Volatile private var INSTANCE: PcControlDatabase? = null
@@ -48,7 +103,7 @@ abstract class PcControlDatabase : RoomDatabase() {
                     PcControlDatabase::class.java,
                     "pccontrol_database"
                 )
-                    .fallbackToDestructiveMigration() // version 1→2: old steps column gone
+                    .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }
             }
@@ -57,119 +112,90 @@ abstract class PcControlDatabase : RoomDatabase() {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  REPOSITORY
+//  REPOSITORY — extended with connection logging
 // ─────────────────────────────────────────────────────────────
 
-class PcControlRepository(private val dao: PcPlanDao) {
+class PcControlRepository(
+    private val planDao: PcPlanDao,
+    private val logDao: PcConnectionLogDao? = null
+) {
+    val allPlans: Flow<List<PcPlan>> = planDao.getAllPlans()
 
-    val allPlans: Flow<List<PcPlan>> = dao.getAllPlans()
-
-    suspend fun insertPlan(plan: PcPlan) = dao.insert(plan)
-    suspend fun deletePlan(plan: PcPlan) = dao.delete(plan)
-    suspend fun updatePlan(plan: PcPlan) = dao.update(plan)
-    suspend fun getPlanById(id: String)  = dao.getById(id)
+    suspend fun insertPlan(plan: PcPlan) = planDao.insert(plan)
+    suspend fun deletePlan(plan: PcPlan) = planDao.delete(plan)
+    suspend fun updatePlan(plan: PcPlan) = planDao.update(plan)
+    suspend fun getPlanById(id: String)  = planDao.getById(id)
 
     suspend fun seedIfEmpty() {
-        if (dao.count() > 0) return
+        if (planDao.count() > 0) return
         val samples = listOf(
-
-            // ── Default System Plans ────────────────────────
-
-            PcPlan.create(
-                planId   = "sys_lock",
-                planName = "Lock PC",
-                icon     = "🔒",
-                steps    = listOf(PcStep("SYSTEM_CMD", "LOCK"))
-            ),
-            PcPlan.create(
-                planId   = "sys_sleep",
-                planName = "Sleep PC",
-                icon     = "😴",
-                steps    = listOf(PcStep("SYSTEM_CMD", "SLEEP"))
-            ),
-            PcPlan.create(
-                planId   = "sys_shutdown",
-                planName = "Shutdown",
-                icon     = "⏻",
-                steps    = listOf(PcStep("SYSTEM_CMD", "SHUTDOWN"))
-            ),
-            PcPlan.create(
-                planId   = "sys_restart",
-                planName = "Restart",
-                icon     = "🔄",
-                steps    = listOf(PcStep("SYSTEM_CMD", "RESTART"))
-            ),
-
-            // ── Wake + Login ────────────────────────────────
-
-            PcPlan.create(
-                planId   = "sys_wake",
-                planName = "Wake Screen",
-                icon     = "☀️",
-                steps    = listOf(
-                    PcStep("SYSTEM_CMD", "WAKE_SCREEN"),  // wakes from sleep
+            PcPlan.create(planId = "sys_lock", planName = "Lock PC", icon = "🔒",
+                steps = listOf(PcStep("SYSTEM_CMD", "LOCK"))),
+            PcPlan.create(planId = "sys_sleep", planName = "Sleep PC", icon = "😴",
+                steps = listOf(PcStep("SYSTEM_CMD", "SLEEP"))),
+            PcPlan.create(planId = "sys_shutdown", planName = "Shutdown", icon = "⏻",
+                steps = listOf(PcStep("SYSTEM_CMD", "SHUTDOWN"))),
+            PcPlan.create(planId = "sys_restart", planName = "Restart", icon = "🔄",
+                steps = listOf(PcStep("SYSTEM_CMD", "RESTART"))),
+            PcPlan.create(planId = "sys_wake", planName = "Wake Screen", icon = "☀️",
+                steps = listOf(
+                    PcStep("SYSTEM_CMD", "WAKE_SCREEN"),
                     PcStep("WAIT", ms = 1000),
-                    PcStep("KEY_PRESS", "ENTER")           // dismiss lock screen
-                )
-            ),
-            PcPlan.create(
-                planId   = "sys_unlock",
-                planName = "Wake + Enter Password",
-                icon     = "🔑",
-                steps    = listOf(
+                    PcStep("KEY_PRESS", "ENTER")
+                )),
+            PcPlan.create(planId = "sys_unlock", planName = "Wake + Enter Password", icon = "🔑",
+                steps = listOf(
                     PcStep("SYSTEM_CMD", "WAKE_SCREEN"),
                     PcStep("WAIT", ms = 1500),
-                    PcStep("MOUSE_CLICK", x = 0, y = 0),  // click center to focus
+                    PcStep("MOUSE_CLICK", x = 0, y = 0),
                     PcStep("WAIT", ms = 300),
-                    PcStep("TYPE_TEXT", value = ""),       // ← user edits this: enter password
+                    PcStep("TYPE_TEXT", value = ""),
                     PcStep("KEY_PRESS", "ENTER")
-                )
-            ),
-
-            // ── Media Plans ─────────────────────────────────
-
-            PcPlan.create(
-                planId   = "media_movie",
-                planName = "Movie Night (VLC)",
-                icon     = "🎬",
-                steps    = listOf(
+                )),
+            PcPlan.create(planId = "media_movie", planName = "Movie Night (VLC)", icon = "🎬",
+                steps = listOf(
                     PcStep("LAUNCH_APP", "vlc.exe"),
                     PcStep("WAIT", ms = 2000),
-                    PcStep("KEY_PRESS", "F11")             // fullscreen
-                )
-            ),
-            PcPlan.create(
-                planId   = "media_ppt",
-                planName = "Start Presentation",
-                icon     = "📊",
-                steps    = listOf(
+                    PcStep("KEY_PRESS", "F11")
+                )),
+            PcPlan.create(planId = "media_ppt", planName = "Start Presentation", icon = "📊",
+                steps = listOf(
                     PcStep("LAUNCH_APP", "powerpnt.exe"),
                     PcStep("WAIT", ms = 4000),
-                    PcStep("KEY_PRESS", "F5")              // slideshow
-                )
-            ),
-
-            // ── Productivity ─────────────────────────────────
-
-            PcPlan.create(
-                planId   = "prod_screenshot",
-                planName = "Screenshot",
-                icon     = "📸",
-                steps    = listOf(PcStep("SYSTEM_CMD", "SCREENSHOT"))
-            ),
-            PcPlan.create(
-                planId   = "prod_mute",
-                planName = "Toggle Mute",
-                icon     = "🔇",
-                steps    = listOf(PcStep("SYSTEM_CMD", "MUTE"))
-            ),
-            PcPlan.create(
-                planId   = "prod_desktop",
-                planName = "Show Desktop",
-                icon     = "🖥️",
-                steps    = listOf(PcStep("KEY_PRESS", "WIN+D"))
-            )
+                    PcStep("KEY_PRESS", "F5")
+                )),
+            PcPlan.create(planId = "prod_screenshot", planName = "Screenshot", icon = "📸",
+                steps = listOf(PcStep("SYSTEM_CMD", "SCREENSHOT"))),
+            PcPlan.create(planId = "prod_mute", planName = "Toggle Mute", icon = "🔇",
+                steps = listOf(PcStep("SYSTEM_CMD", "MUTE"))),
+            PcPlan.create(planId = "prod_desktop", planName = "Show Desktop", icon = "🖥️",
+                steps = listOf(PcStep("KEY_PRESS", "WIN+D")))
         )
-        samples.forEach { dao.insert(it) }
+        samples.forEach { planDao.insert(it) }
+    }
+
+    // ── Connection logging ────────────────────────────────────
+
+    val connectionLogs: Flow<List<PcConnectionLog>>?
+        get() = logDao?.getRecentLogs()
+
+    suspend fun logConnection(log: PcConnectionLog): Long =
+        logDao?.insert(log) ?: -1
+
+    suspend fun endConnectionSession(logId: Long) {
+        if (logId <= 0) return
+        val now = System.currentTimeMillis()
+        val logs = logDao?.getRecentLogsSync(1) ?: return
+        val session = logs.find { it.id == logId } ?: return
+        val duration = now - session.connectedAt
+        logDao.endSession(logId, now, duration)
+    }
+
+    suspend fun getRecentConnectionLogs(): List<PcConnectionLog> =
+        logDao?.getRecentLogsSync(50) ?: emptyList()
+
+    suspend fun cleanOldLogs(daysToKeep: Int = 30) {
+        val cutoff = System.currentTimeMillis() - (daysToKeep * 86_400_000L)
+        logDao?.deleteOlderThan(cutoff)
     }
 }

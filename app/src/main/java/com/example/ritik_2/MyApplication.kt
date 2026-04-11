@@ -22,20 +22,23 @@ class MyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // Initialize PC Control — loads saved IP/port/key from SharedPreferences
         PcControlMain.init(this, "")
 
         appScope.launch {
             try {
                 Log.d("MyApplication", "Running PocketBase initializer...")
                 PocketBaseInitializer.initialize()
-                Log.d("MyApplication", "PocketBase initializer complete ✅")
+                Log.d("MyApplication", "PocketBase initializer complete")
 
                 dataSource.ensureCollectionsExist()
-                    .onSuccess { Log.d("MyApplication", "Collections verified ✅") }
+                    .onSuccess { Log.d("MyApplication", "Collections verified") }
                     .onFailure { Log.e("MyApplication", "Collections check: ${it.message}") }
             } catch (e: Exception) {
                 Log.e("MyApplication", "App init failed: ${e.message}", e)
             }
         }
+
+        Log.d("MyApplication", "IT Connect v3.0 initialized")
     }
 }

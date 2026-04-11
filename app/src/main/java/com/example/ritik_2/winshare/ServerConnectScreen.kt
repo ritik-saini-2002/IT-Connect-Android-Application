@@ -68,20 +68,17 @@ data class AppColors(
 @Composable
 private fun appColors(): AppColors {
     val dark = isSystemInDarkTheme()
-    return if (dark) AppColors(
-        bg = Color(0xFF0D0D1A), bgGradientEnd = Color(0xFF0F0F23),
-        glassBg = Color.White.copy(alpha = 0.08f), glassBorder = Color.White.copy(alpha = 0.15f),
-        glassHighlight = Color.White.copy(alpha = 0.04f), surface = Color(0xFF1A1A2E),
-        accent = Color(0xFF6C63FF), accentSecondary = Color(0xFF00D4AA),
-        danger = Color(0xFFFF6B9D),
-        textPrimary = Color.White, textSecondary = Color.White.copy(0.65f), textTertiary = Color.White.copy(0.4f)
-    ) else AppColors(
-        bg = Color(0xFFF0F2F5), bgGradientEnd = Color(0xFFE8EBF0),
-        glassBg = Color.White.copy(alpha = 0.65f), glassBorder = Color.Black.copy(alpha = 0.08f),
-        glassHighlight = Color.White.copy(alpha = 0.5f), surface = Color.White,
-        accent = Color(0xFF5B52E0), accentSecondary = Color(0xFF00B894),
-        danger = Color(0xFFE74C6F),
-        textPrimary = Color(0xFF1A1A2E), textSecondary = Color(0xFF555770), textTertiary = Color(0xFF9094A6)
+    val cs = MaterialTheme.colorScheme
+    return AppColors(
+        bg = cs.background, bgGradientEnd = cs.background,
+        glassBg = cs.surfaceVariant.copy(alpha = if (dark) 0.5f else 0.8f),
+        glassBorder = cs.outline.copy(alpha = 0.3f),
+        glassHighlight = cs.surfaceVariant.copy(alpha = if (dark) 0.15f else 0.5f),
+        surface = cs.surface,
+        accent = cs.primary, accentSecondary = cs.secondary,
+        danger = cs.error,
+        textPrimary = cs.onSurface, textSecondary = cs.onSurfaceVariant,
+        textTertiary = cs.onSurfaceVariant.copy(0.5f)
     )
 }
 
@@ -243,7 +240,7 @@ private fun BoxScope.DraggableFab(c: AppColors, onUpload: () -> Unit, onNewFolde
         FloatingActionButton(
             onClick = { expanded = !expanded },
             containerColor = c.accent,
-            contentColor = Color.White,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             shape = CircleShape
         ) {
             Icon(if (expanded) Icons.Default.Close else Icons.Default.Add, contentDescription = "Actions")
@@ -258,7 +255,7 @@ private fun MiniFabItem(c: AppColors, icon: ImageVector, label: String, onClick:
             Text(label, color = c.textSecondary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), fontSize = 12.sp)
         }
         Spacer(Modifier.width(8.dp))
-        SmallFloatingActionButton(onClick = onClick, containerColor = c.accentSecondary, contentColor = Color.White, shape = CircleShape) {
+        SmallFloatingActionButton(onClick = onClick, containerColor = c.accentSecondary, contentColor = MaterialTheme.colorScheme.onPrimary, shape = CircleShape) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
         }
     }
@@ -411,7 +408,7 @@ private fun GlassDisconnectedScreen(c: AppColors, onConnect: () -> Unit, savedSe
                     Spacer(Modifier.height(16.dp)); Text("WinShare", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = c.textPrimary)
                     Spacer(Modifier.height(4.dp)); Text("Connect to SMB server for fast file sharing", fontSize = 13.sp, color = c.textSecondary, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(24.dp))
-                    Button(onClick = onConnect, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(c.accent, Color.White), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("New Connection", fontWeight = FontWeight.SemiBold) }
+                    Button(onClick = onConnect, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(c.accent, MaterialTheme.colorScheme.onPrimary), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("New Connection", fontWeight = FontWeight.SemiBold) }
                 }
             }
         }

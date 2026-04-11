@@ -46,6 +46,20 @@ class ChatRoomViewModel @Inject constructor(
 
     fun setCurrentUserAvatar(url: String) { currentUserAvatar = url }
 
+    // ── Convenience getters ──────────────────────────────────────────────────
+
+    fun getCurrentUserId(): String = currentUserId
+
+    /**
+     * FIX: Check if current user is the group admin (creator).
+     * Group admin = the first entry in adminIds = the person who created the group.
+     * This replaces any role-based admin check with creator-only logic.
+     */
+    fun isCurrentUserAdmin(): Boolean {
+        val room = _state.value.room ?: return false
+        return room.adminIds.contains(currentUserId)
+    }
+
     // ── Messages ──────────────────────────────────────────────────────────────
 
     private fun loadMessages() {
@@ -97,7 +111,6 @@ class ChatRoomViewModel @Inject constructor(
     fun clearSelectedFile() =
         _state.update { it.copy(selectedFile = null, selectedFileName = "", selectedFileMime = "") }
 
-    /** Dismiss conflict dialog without sending */
     fun dismissFileConflict() =
         _state.update { it.copy(fileConflict = null) }
 
@@ -183,13 +196,6 @@ class ChatRoomViewModel @Inject constructor(
     }
 
     // ── Send file ─────────────────────────────────────────────────────────────
-    //
-    // Flow:
-    //   1. Read file size from ContentResolver (no bytes loaded yet).
-    //   2. Check if a file with the same name already exists in the room.
-    //      If yes → show FileConflict dialog (rename / replace).
-    //   3. If no conflict, or conflict resolved, read bytes from stream.
-    //   4. For large files, progress is reported via UploadProgress state.
 
     fun sendFile(context: Context) {
         val s    = _state.value
@@ -201,10 +207,8 @@ class ChatRoomViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isSending = true) }
 
-            // Step 1: check for filename conflict
             val conflict = repo.checkFileNameConflict(roomId, name)
             if (conflict != null) {
-                // Pause and ask user — bytes not yet loaded
                 val baseName  = name.substringBeforeLast(".")
                 val extension = if (name.contains(".")) ".${name.substringAfterLast(".")}" else ""
                 val suggested = "${baseName}_${System.currentTimeMillis()}$extension"
@@ -220,15 +224,10 @@ class ChatRoomViewModel @Inject constructor(
                 return@launch
             }
 
-            // No conflict — proceed to upload
             doSendFile(context, uri, name, mime)
         }
     }
 
-    /**
-     * Called from the UI when the user chooses "Rename" in the conflict dialog.
-     * Uses the auto-suggested name.
-     */
     fun sendFileWithRename(context: Context) {
         val conflict = _state.value.fileConflict ?: return
         _state.update { it.copy(fileConflict = null, isSending = true) }
@@ -237,10 +236,6 @@ class ChatRoomViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Called from the UI when the user chooses "Replace" in the conflict dialog.
-     * Uses the original name, overwriting the existing file reference.
-     */
     fun sendFileWithReplace(context: Context) {
         val conflict = _state.value.fileConflict ?: return
         _state.update { it.copy(fileConflict = null, isSending = true) }
@@ -256,7 +251,6 @@ class ChatRoomViewModel @Inject constructor(
         mime    : String
     ) {
         try {
-            // Determine file size without loading bytes
             val fileSize = context.contentResolver.openFileDescriptor(uri, "r")?.use {
                 it.statSize
             } ?: 0L
@@ -266,7 +260,6 @@ class ChatRoomViewModel @Inject constructor(
                     "Large file: ${fileSize / 1024 / 1024} MB — using chunked upload")
             }
 
-            // Stream bytes — use buffered read to avoid OOM on large files
             val bytes = context.contentResolver.openInputStream(uri)?.use { stream ->
                 stream.readBytes()
             } ?: throw Exception("Cannot read file")
@@ -329,6 +322,7 @@ class ChatRoomViewModel @Inject constructor(
     // ── Group management ──────────────────────────────────────────────────────
 
     fun updateGroupInfo(name: String, avatarBytes: ByteArray?) {
+        if (!isCurrentUserAdmin()) return  // Only admin (creator) can edit group
         viewModelScope.launch {
             val updated = repo.updateGroupInfo(roomId, name, avatarBytes)
             _state.update { s ->
@@ -342,6 +336,8 @@ class ChatRoomViewModel @Inject constructor(
         memberNames  : List<String>,
         memberAvatars: List<String>
     ) {
+        // Only admin can remove members
+        if (!isCurrentUserAdmin()) return
         val room = _state.value.room ?: return
         viewModelScope.launch {
             val ok = repo.removeMember(
@@ -360,6 +356,46 @@ class ChatRoomViewModel @Inject constructor(
                         memberAvatars = memberAvatars.filterIndexed         { i, _ -> i != idx }
                     ))
                 }
+            }
+        }
+    }
+
+    /**
+     * FIX: Allow any user to leave a group themselves.
+     * The user removes themselves from the members list.
+     * If the leaving user is the admin, the group persists but with no admin
+     * (members can still chat, but no one can manage the group).
+     *
+     * Returns true if leave was successful — the caller (ChatActivity/Screen)
+     * should navigate back to the chat list.
+     */
+    fun leaveGroup(onLeft: () -> Unit) {
+        val room = _state.value.room ?: return
+        if (room.type != RoomType.GROUP) return
+
+        viewModelScope.launch {
+            val ok = repo.removeMember(
+                roomId         = roomId,
+                currentMembers = room.members,
+                currentNames   = room.memberNames,
+                currentAvatars = room.memberAvatars,
+                removeId       = currentUserId
+            )
+            if (ok) {
+                // Send a system message so other members see who left
+                repo.sendMessage(
+                    roomId     = roomId,
+                    senderId   = currentUserId,
+                    senderName = currentUserName,
+                    type       = MessageType.TEXT,
+                    text       = "$currentUserName left the group",
+                    fileBytes  = null,
+                    fileName   = "",
+                    fileMime   = ""
+                )
+                onLeft()
+            } else {
+                _state.update { it.copy(error = "Failed to leave group") }
             }
         }
     }

@@ -93,9 +93,30 @@
         <activity android:name=".contact.ContactActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
+
+        <!-- FIX: Added configChanges so PC Control activities handle
+             orientation changes without destroying/recreating.
+             Compose observes LocalConfiguration automatically. -->
         <activity android:name=".windowscontrol.PcControlActivity"
             android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
+
+        <activity android:name=".windowscontrol.pcfilebrowser.PcControlFileBrowserActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.Ritik_2" />
+
+        <activity android:name=".windowscontrol.pccontrolappdirectory.PcControlAppDirectoryActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.Ritik_2" />
+
+        <activity android:name=".windowscontrol.pctouchpad.PcControlTouchpadActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.Ritik_2" />
+
         <activity android:name=".winshare.ServerConnectActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
@@ -148,6 +169,7 @@
         <activity android:name=".notifications.NotificationActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
+
         <!-- ── File Provider ──────────────────────────────── -->
         <provider
             android:name="androidx.core.content.FileProvider"

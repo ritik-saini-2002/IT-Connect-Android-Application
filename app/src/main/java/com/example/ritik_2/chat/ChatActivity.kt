@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -93,6 +94,15 @@ class ChatActivity : ComponentActivity() {
                     }
                 }
 
+                // ── FIX: Proper back navigation ──────────────────────────────
+                // When in a room → go back to list (don't finish activity)
+                // When in list → finish activity
+                // This prevents the "instant close" bug where pressing back
+                // in a chat room would kill the entire ChatActivity.
+                BackHandler(enabled = currentRoom != null) {
+                    _currentRoom.value = null
+                }
+
                 if (currentRoom != null) {
                     ChatRoomScreen(
                         room          = currentRoom!!,
@@ -104,6 +114,11 @@ class ChatActivity : ComponentActivity() {
                         onViewProfile = { userId -> openMemberProfile(userId) }
                     )
                 } else {
+                    // When on the list screen, system back finishes the activity
+                    BackHandler(enabled = true) {
+                        finish()
+                    }
+
                     ChatListScreen(
                         viewModel  = listVm,
                         onOpenRoom = { room -> openRoom(room) },

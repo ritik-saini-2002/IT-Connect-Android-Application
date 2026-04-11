@@ -83,25 +83,32 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .header("X-Device-Name", runCatching {
             android.os.Build.MODEL + "/" + android.os.Build.MANUFACTURER
         }.getOrElse { "Android" })
+        .header("X-Device-Id", runCatching {
+            android.os.Build.MODEL + "_" + android.os.Build.SERIAL.takeLast(6)
+        }.getOrElse { "android_device" })
 
     protected suspend fun get(path: String): PcNetworkResult<String> =
         withContext(Dispatchers.IO) {
             try {
                 val resp = http.newCall(baseRequest(path).get().build()).execute()
-                if (resp.isSuccessful) PcNetworkResult(true, resp.body?.string())
-                else PcNetworkResult(false, error = "HTTP ${resp.code}")
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}")
+                }
             } catch (e: Exception) {
                 PcNetworkResult(false, error = e.message ?: "Network error")
             }
         }
 
-    protected suspend fun post(path: String, body: Any): PcNetworkResult<String> =
+    suspend fun post(path: String, body: Any): PcNetworkResult<String> =
         withContext(Dispatchers.IO) {
             try {
                 val rb   = gson.toJson(body).toRequestBody(JSON_MT)
                 val resp = http.newCall(baseRequest(path).post(rb).build()).execute()
-                if (resp.isSuccessful) PcNetworkResult(true, resp.body?.string())
-                else PcNetworkResult(false, error = "HTTP ${resp.code}")
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}")
+                }
             } catch (e: Exception) {
                 PcNetworkResult(false, error = e.message ?: "Network error")
             }
@@ -116,10 +123,12 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
     suspend fun ping(): PcNetworkResult<PcPingResponse> = withContext(Dispatchers.IO) {
         try {
             val resp = httpFast.newCall(baseRequest("/ping").get().build()).execute()
-            if (resp.isSuccessful)
-                PcNetworkResult(true, gson.fromJson(resp.body?.string(), PcPingResponse::class.java))
-            else
-                PcNetworkResult(false, error = "HTTP ${resp.code}")
+            resp.use { r ->
+                if (r.isSuccessful)
+                    PcNetworkResult(true, gson.fromJson(r.body?.string(), PcPingResponse::class.java))
+                else
+                    PcNetworkResult(false, error = "HTTP ${r.code}")
+            }
         } catch (e: Exception) {
             PcNetworkResult(false, error = e.message ?: "Unreachable")
         }
@@ -195,6 +204,76 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
 
     suspend fun resolveOpenWithDialog(exePath: String): PcNetworkResult<String> =
         post("/dialog/openwith/resolve", mapOf("exe" to exePath))
+
+    // ── Master Key Admin Endpoints ────────────────────────────────────────────
+    // These require X-Secret-Key = MASTER_KEY (not user secret key).
+    // The masterKey param overrides the header for these calls.
+
+    suspend fun getConnectedUsers(masterKey: String): PcNetworkResult<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resp = http.newCall(
+                    Request.Builder()
+                        .url("${settings.baseUrl}/connections")
+                        .header("X-Secret-Key", masterKey)
+                        .get().build()
+                ).execute()
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}")
+                }
+            } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+        }
+
+    suspend fun kickUser(masterKey: String, deviceId: String): PcNetworkResult<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = gson.toJson(mapOf("device_id" to deviceId)).toRequestBody(JSON_MT)
+                val resp = http.newCall(
+                    Request.Builder()
+                        .url("${settings.baseUrl}/connections/kick")
+                        .header("X-Secret-Key", masterKey)
+                        .post(body).build()
+                ).execute()
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}")
+                }
+            } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+        }
+
+    suspend fun changeSecretKey(masterKey: String, newKey: String): PcNetworkResult<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = gson.toJson(mapOf("new_key" to newKey)).toRequestBody(JSON_MT)
+                val resp = http.newCall(
+                    Request.Builder()
+                        .url("${settings.baseUrl}/settings/key")
+                        .header("X-Secret-Key", masterKey)
+                        .post(body).build()
+                ).execute()
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}")
+                }
+            } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+        }
+
+    suspend fun getConnectionLogs(masterKey: String): PcNetworkResult<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resp = http.newCall(
+                    Request.Builder()
+                        .url("${settings.baseUrl}/connections/logs")
+                        .header("X-Secret-Key", masterKey)
+                        .get().build()
+                ).execute()
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}")
+                }
+            } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+        }
 }
 
 // ── Browse client ─────────────────────────────────────────────────────────────
@@ -259,16 +338,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
 
-    // ── DOWNLOAD — streams directly to OutputStream, never loads file into RAM ─
-    //
-    // The old code read all chunks into a List<ByteArray> then assembled them into
-    // a single ByteArray before returning — that held 2× the file size in memory.
-    // (171 MB file → 342 MB peak RAM → OOM with 256 MB heap limit.)
-    //
-    // Fix: the caller supplies an OutputStream (from ContentResolver.openOutputStream).
-    // We pipe the response body straight into it with a small 64 KB read buffer.
-    // Peak RAM is always ≤ buffer size regardless of file size.
-    //
+    // ── DOWNLOAD — streams directly to OutputStream ───────────────────────────
     suspend fun downloadFile(
         remotePath : String,
         outputStream: OutputStream,
@@ -279,7 +349,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
             val req = Request.Builder()
                 .url(url)
                 .header("X-Secret-Key", settings.secretKey)
-                .header("Accept-Encoding", "identity")  // disable gzip — binary data
+                .header("Accept-Encoding", "identity")
                 .get().build()
 
             val resp = httpTransfer.newCall(req).execute()
@@ -294,7 +364,6 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
             var lastReportMs = System.currentTimeMillis()
             var lastBytes    = 0L
 
-            // 64 KB read buffer — negligible RAM, fast streaming
             val readBuf = ByteArray(64 * 1024)
 
             outputStream.buffered(256 * 1024).use { out ->
@@ -324,17 +393,8 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
         }
     }
 
-    // ── UPLOAD — streams from InputStream, never loads file into RAM ───────────
-    //
-    // Old path: Activity called cr.openInputStream(uri)?.readBytes() → full file
-    // in a ByteArray → passed to uploadFile(ByteArray) → another copy for chunking.
-    // (354 MB file → 700+ MB peak RAM → instant OOM.)
-    //
-    // Fix: accept InputStream + file size. For ≤ 16 MB we still buffer (fine).
-    // For > 16 MB we stream chunks directly from the InputStream using okio,
-    // so we only ever hold one CHUNK_SIZE slice in RAM at a time.
-    //
-    private val CHUNKED_THRESHOLD = 16 * 1024 * 1024  // 16 MB
+    // ── UPLOAD — streams from InputStream ─────────────────────────────────────
+    private val CHUNKED_THRESHOLD = 16 * 1024 * 1024
 
     suspend fun uploadFile(
         inputStream  : InputStream,
@@ -363,7 +423,6 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
             var lastReportMs = System.currentTimeMillis()
             var lastBytes    = 0L
 
-            // Stream the InputStream directly into the OkHttp sink — no ByteArray copy
             val filePart = object : RequestBody() {
                 override fun contentType()   = BINARY_MT
                 override fun contentLength() = total
@@ -422,13 +481,11 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
             var lastReportMs = System.currentTimeMillis()
             var lastBytes    = 0L
 
-            // One chunk buffer — reused across all chunks
             val chunkBuf = ByteArray(CHUNK_SIZE)
 
             inputStream.use { input ->
                 var index = 0
                 while (true) {
-                    // Read exactly one chunk (may be shorter on the last chunk)
                     var bytesRead = 0
                     while (bytesRead < CHUNK_SIZE) {
                         val n = input.read(chunkBuf, bytesRead, CHUNK_SIZE - bytesRead)
@@ -437,10 +494,9 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
                     }
                     if (bytesRead == 0) break
 
-                    val chunkSize = bytesRead  // actual bytes in this chunk
-                    val capturedIndex = index  // capture for lambda
+                    val chunkSize = bytesRead
+                    val capturedIndex = index
 
-                    // Build RequestBody that writes from the pre-filled buffer
                     val body = object : RequestBody() {
                         override fun contentType()   = BINARY_MT
                         override fun contentLength() = chunkSize.toLong()
@@ -459,7 +515,7 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
                         .build()
 
                     val resp = httpTransfer.newCall(req).execute()
-                    resp.body?.string(); resp.close()  // drain body
+                    resp.body?.string(); resp.close()
                     if (!resp.isSuccessful)
                         return@withContext PcNetworkResult(
                             false, error = "Chunk $capturedIndex failed: HTTP ${resp.code}")
@@ -505,6 +561,28 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
 
     suspend fun typeText(text: String) =
         post("/input/keyboard/type", mapOf("value" to text))
+
+    // ── NEW: Key hold / release for functional keyboard bar ──────────────
+    // Calls agent v10 /input/keyboard/hold and /input/keyboard/release endpoints.
+    // Used for modifier keys (Shift, Ctrl, Alt, Win, AltGr) that stay pressed
+    // until explicitly released.
+
+    suspend fun holdKey(keyName: String) =
+        post("/input/keyboard/hold", mapOf("value" to keyName))
+
+    suspend fun releaseKey(keyName: String) =
+        post("/input/keyboard/release", mapOf("value" to keyName))
+
+    // ── NEW: App minimize / restore ──────────────────────────────────────
+    // Calls agent v10 /app/minimize and /app/restore endpoints.
+
+    suspend fun minimizeApp(name: String) =
+        post("/app/minimize", mapOf("name" to name))
+
+    suspend fun restoreApp(name: String) =
+        post("/app/restore", mapOf("name" to name))
+
+    // ── Screen ───────────────────────────────────────────────────────────
 
     suspend fun fetchScreenSnapshot(): PcNetworkResult<String> = withContext(Dispatchers.IO) {
         try {

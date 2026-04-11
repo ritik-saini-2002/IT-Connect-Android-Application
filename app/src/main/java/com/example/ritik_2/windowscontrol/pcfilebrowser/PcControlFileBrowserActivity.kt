@@ -78,11 +78,22 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         })
     }
 
+    // ── Server state ─────────────────────────────────────────────────────────
+    val context = LocalContext.current
+    var savedServers by remember {
+        mutableStateOf(ServerCredentialStore.load(context))
+    }
+    var showServerDialog by remember { mutableStateOf(false) }
+    var editingServer    by remember { mutableStateOf<SavedServerCredential?>(null) }
+
+    // ── Clipboard for copy/move operations ───────────────────────────────────
+    var clipboardItem    by remember { mutableStateOf<PcFileItem?>(null) }
+    var clipboardAction  by remember { mutableStateOf("") }
+
     var openingFile  by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
 
     val scope   = rememberCoroutineScope()
-    val context = LocalContext.current
 
     // ── One-time init ─────────────────────────────────────────────────────────
     LaunchedEffect(Unit) {
@@ -93,7 +104,7 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         }
     }
 
-    // ── Back handler ──────────────────────────────────────────────────────────
+    // ── Back handler — navigate folder-by-folder ─────────────────────────────
     BackHandler(enabled = level !is BrowserLevel.Root) {
         val parent = resolveParentLevel(level, drives)
         persistLevel(parent)
@@ -115,9 +126,6 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     }
 
     // ── Upload file launcher ──────────────────────────────────────────────────
-    // FIX: Never call readBytes() on the URI — that loads the entire file into RAM.
-    // Instead, pass the Uri + ContentResolver directly to the ViewModel, which
-    // opens an InputStream and streams it chunk-by-chunk to the PC agent.
     var uploadDestPath by remember { mutableStateOf("") }
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -126,14 +134,11 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         scope.launch {
             try {
                 val cr   = context.contentResolver
-
-                // Query display name — small metadata call, no file bytes loaded
                 val name = cr.query(uri, null, null, null, null)?.use { cur ->
                     val idx = cur.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (cur.moveToFirst() && idx >= 0) cur.getString(idx) else null
                 } ?: "upload_${System.currentTimeMillis()}"
 
-                // Query file size for chunking threshold decision
                 val fileSize = cr.query(
                     uri, arrayOf(OpenableColumns.SIZE), null, null, null
                 )?.use { cur ->
@@ -141,7 +146,6 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
                     if (cur.moveToFirst() && idx >= 0) cur.getLong(idx) else -1L
                 } ?: -1L
 
-                // Pass InputStream to ViewModel — no ByteArray ever created
                 vm.uploadFileStream(
                     contentResolver = cr,
                     uri             = uri,
@@ -165,8 +169,6 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     }
 
     // ── Download launcher ─────────────────────────────────────────────────────
-    // FIX: The ViewModel now receives the Uri + ContentResolver and streams the
-    // download response body directly to the output stream — no ByteArray returned.
     var downloadItem by remember { mutableStateOf<PcFileItem?>(null) }
     val downloadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
@@ -214,31 +216,63 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
                     vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
                 ItemAction.RENAME -> {
-                    val newPath = item.path.substringBeforeLast('/') + "/" + item.name
+                    val currentDir = item.path.substringBeforeLast('/')
+                        .substringBeforeLast('\\')
+                    val newPath = if (currentDir.isNotEmpty())
+                        "$currentDir/${item.name}" else item.name
                     vm.executeQuickStep(
                         PcStep("FILE_OP", action = "RENAME",
-                            from = item.path.substringBeforeLast('/') +
-                                    "/" + item.path.substringAfterLast('/'),
+                            from = item.path,
                             to   = newPath)
                     )
                     delay(400)
                     vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
-                ItemAction.MOVE -> {
-                    val srcPath = item.path.substringBeforeLast('/')
-                    vm.executeQuickStep(PcStep("FILE_OP", action = "MOVE",
-                        from = srcPath, to = item.path))
-                    delay(400)
-                    vm.browseDir(currentPath, vmFilter, isRefresh = true)
-                }
                 ItemAction.COPY -> {
-                    val destPath = "$currentPath/${item.name}_copy"
-                    vm.executeQuickStep(PcStep("FILE_OP", action = "COPY",
-                        from = item.path, to = destPath))
-                    delay(400)
+                    // FIX: Proper in-place copy with correct extension handling
+                    val srcPath = item.path
+                    val destPath = if (item.isDir) {
+                        "${srcPath}_copy"
+                    } else {
+                        val dir  = srcPath.substringBeforeLast('/').substringBeforeLast('\\')
+                        val name = item.name
+                        val ext  = if ('.' in name) ".${name.substringAfterLast('.')}" else ""
+                        val base = if (ext.isNotEmpty()) name.substringBeforeLast('.') else name
+                        val newName = "${base}_copy$ext"
+                        if (dir.isNotEmpty()) "$dir/$newName" else newName
+                    }
+                    vm.executeQuickStep(
+                        PcStep("FILE_OP", action = "COPY",
+                            from = srcPath, to = destPath)
+                    )
+                    delay(500)
                     vm.browseDir(currentPath, vmFilter, isRefresh = true)
                 }
-                ItemAction.PASTE, ItemAction.PROPERTIES -> { /* handled in UI */ }
+                ItemAction.MOVE -> {
+                    // FIX: Set clipboard for move — user navigates to dest and pastes
+                    clipboardItem   = item
+                    clipboardAction = "MOVE"
+                }
+                ItemAction.PASTE -> {
+                    val clip = clipboardItem ?: return@launch
+                    val destDir = currentPath
+                    if (destDir.isBlank()) return@launch
+
+                    val destPath = "$destDir/${clip.name}"
+                    when (clipboardAction) {
+                        "COPY" -> vm.executeQuickStep(
+                            PcStep("FILE_OP", action = "COPY",
+                                from = clip.path, to = destPath))
+                        "MOVE" -> vm.executeQuickStep(
+                            PcStep("FILE_OP", action = "MOVE",
+                                from = clip.path, to = destPath))
+                    }
+                    clipboardItem = null
+                    clipboardAction = ""
+                    delay(500)
+                    vm.browseDir(currentPath, vmFilter, isRefresh = true)
+                }
+                ItemAction.PROPERTIES -> { /* handled in UI */ }
             }
         }
     }
@@ -281,6 +315,21 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
             trimmed.isEmpty() && currentPath.isNotEmpty() ->
                 vm.browseDir(currentPath, vmFilter, isRefresh = false)
         }
+    }
+
+    // ── Server dialogs ───────────────────────────────────────────────────────
+    if (showServerDialog) {
+        ServerCredentialDialog(
+            existing  = editingServer,
+            onSave    = { cred ->
+                val updated = savedServers.filter { it.id != cred.id } + cred
+                savedServers = updated
+                ServerCredentialStore.save(context, updated)
+                showServerDialog = false
+                editingServer = null
+            },
+            onDismiss = { showServerDialog = false; editingServer = null }
+        )
     }
 
     // ── Build UI state ────────────────────────────────────────────────────────

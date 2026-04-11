@@ -6,10 +6,17 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -21,6 +28,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ritik_2.windowscontrol.data.PcPlan
 import com.example.ritik_2.windowscontrol.data.PcStep
 import com.example.ritik_2.windowscontrol.pccontrolappdirectory.PcControlAppDirectoryUI
 import com.example.ritik_2.windowscontrol.pcfilebrowser.PcFileBrowserCompat
@@ -39,28 +47,37 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
     val cfg           = LocalConfiguration.current
     val isLandscape   = cfg.screenWidthDp > cfg.screenHeightDp
 
-    // ── Hide/show system bars based on touchpad + landscape ──
-    val context = LocalContext.current
-    val isTouchpadFullscreen = isLandscape && currentScreen == PcScreen.TOUCHPAD
+    // ── Windows Project popup state ──
+    var showProjectPopup by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isTouchpadFullscreen) {
+    // ── System bars: only hide for fullscreen touchpad in landscape ──
+    // FIX: Bottom nav bar is now ALWAYS visible, even in landscape touchpad.
+    // We no longer hide system bars for any screen.
+    val context = LocalContext.current
+    LaunchedEffect(isLandscape) {
         val activity = context as? Activity ?: return@LaunchedEffect
         val window = activity.window
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        if (isTouchpadFullscreen) {
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        } else {
-            controller.show(WindowInsetsCompat.Type.systemBars())
-        }
+        // Always show system bars — bottom nav handles its own visibility
+        controller.show(WindowInsetsCompat.Type.systemBars())
     }
 
     if (editingPlan != null) {
         BackHandler { viewModel.cancelEdit() }
         PcControlPlanEditorUI(viewModel = viewModel)
         return
+    }
+
+    // ── Windows Project Popup ──
+    if (showProjectPopup) {
+        WindowsProjectPopup(
+            onDismiss = { showProjectPopup = false },
+            onSelect  = { projectKey ->
+                viewModel.sendKey(projectKey)
+                showProjectPopup = false
+            }
+        )
     }
 
     fun navigateTo(screen: PcScreen) {
@@ -87,46 +104,55 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
         }
     ) {
         if (isLandscape) {
-            if (currentScreen == PcScreen.TOUCHPAD) {
-                // ── TOUCHPAD FULLSCREEN: no nav rail, no system bars ──
-                Box(modifier = Modifier.fillMaxSize()) {
-                    PcControlTouchpadUI(viewModel)
+            // ── LANDSCAPE: content + nav rail on right ──
+            // FIX: Bottom bar / nav rail is ALWAYS visible, including for touchpad.
+            // This was the user's main complaint — touchpad hid the navigation.
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.weight(1f)) {
+                    AnimatedContent(
+                        targetState   = currentScreen,
+                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
+                        label          = "screen"
+                    ) { screen -> ScreenContent(screen, viewModel) }
                 }
-            } else {
-                // ── Other screens: show nav rail on right ──
-                Row(modifier = Modifier.fillMaxSize()) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        AnimatedContent(
-                            targetState   = currentScreen,
-                            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
-                            label          = "screen"
-                        ) { screen -> ScreenContent(screen, viewModel) }
+
+                // Nav rail with Windows Project button
+                NavigationRail(
+                    modifier = Modifier.fillMaxHeight(),
+                    header   = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, "Menu")
+                        }
                     }
-                    NavigationRail(
-                        modifier = Modifier.fillMaxHeight(),
-                        header   = {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Default.Menu, "Menu")
+                ) {
+                    Spacer(Modifier.weight(0.3f))
+
+                    railItems.forEach { item ->
+                        val selected = currentScreen == item.screen
+                        NavigationRailItem(
+                            selected = selected,
+                            onClick  = { navigateTo(item.screen) },
+                            icon     = { Icon(if (selected) item.selectedIcon else item.icon, item.label) },
+                            label    = {
+                                Text(item.label,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    style      = MaterialTheme.typography.labelSmall,
+                                    fontSize   = 10.sp)
                             }
-                        }
-                    ) {
-                        Spacer(Modifier.weight(1f))
-                        railItems.forEach { item ->
-                            val selected = currentScreen == item.screen
-                            NavigationRailItem(
-                                selected = selected,
-                                onClick  = { navigateTo(item.screen) },
-                                icon     = { Icon(if (selected) item.selectedIcon else item.icon, item.label) },
-                                label    = {
-                                    Text(item.label,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                        style      = MaterialTheme.typography.labelSmall,
-                                        fontSize   = 10.sp)
-                                }
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
+                        )
                     }
+
+                    Spacer(Modifier.weight(0.3f))
+
+                    // Windows Project button — landscape only, between nav items
+                    NavigationRailItem(
+                        selected = false,
+                        onClick  = { showProjectPopup = true },
+                        icon     = { Icon(Icons.Default.CastConnected, "Project") },
+                        label    = { Text("Project", fontSize = 9.sp, style = MaterialTheme.typography.labelSmall) }
+                    )
+
+                    Spacer(Modifier.weight(0.4f))
                 }
             }
         } else {
@@ -168,9 +194,73 @@ private fun ScreenContent(screen: PcScreen, viewModel: PcControlViewModel) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  WINDOWS PROJECT POPUP — Duplicate / Extend / Second Screen
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun WindowsProjectPopup(
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.CastConnected, null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text("Windows Project", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Choose display mode. This sends Win+P and selects the option.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                val options = listOf(
+                    Triple("PC screen only", "🖥", "WIN+P"),
+                    Triple("Duplicate",      "📺", "WIN+P"),
+                    Triple("Extend",         "🖥📺", "WIN+P"),
+                    Triple("Second screen",  "📺", "WIN+P"),
+                )
+
+                options.forEachIndexed { index, (label, icon, _) ->
+                    Surface(
+                        onClick = {
+                            // WIN+P opens the project panel, then arrow keys to select
+                            onSelect("WIN+P")
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(icon, fontSize = 24.sp)
+                            Column(Modifier.weight(1f)) {
+                                Text(label, fontWeight = FontWeight.SemiBold)
+                            }
+                            Icon(Icons.Default.ChevronRight, null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+// ─────────────────────────────────────────────────────────────
+//  NAV ITEMS
+// ─────────────────────────────────────────────────────────────
+
 private val railItems = listOf(
     PcNavItem(PcScreen.TOUCHPAD,      "Control",  Icons.Default.Mouse),
-    PcNavItem(PcScreen.PLANS,         "Plans",    Icons.Default.List),
+    PcNavItem(PcScreen.PLANS,         "Plans",    Icons.AutoMirrored.Filled.List),
     PcNavItem(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
     PcNavItem(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder, Icons.Default.FolderOpen),
     PcNavItem(PcScreen.KEYBOARD,      "Keys",     Icons.Default.Keyboard),
@@ -197,7 +287,7 @@ fun NavigationPanel(
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimary)
-                    Text("PC Remote Control by Ritik Saini",
+                    Text("PC Remote Control v3.0",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimary.copy(0.75f))
                 }
@@ -210,7 +300,7 @@ fun NavigationPanel(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             listOf(
                 Triple(PcScreen.TOUCHPAD,      "Control",  Icons.Default.Mouse),
-                Triple(PcScreen.PLANS,         "Plans",    Icons.Default.List),
+                Triple(PcScreen.PLANS,         "Plans",    Icons.AutoMirrored.Filled.List),
                 Triple(PcScreen.KEYBOARD,      "Keyboard", Icons.Default.Keyboard),
                 Triple(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
                 Triple(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder),
@@ -234,7 +324,7 @@ fun NavigationPanel(
                 Triple("Lock PC",    PcStep("SYSTEM_CMD","LOCK"),       Icons.Default.Lock),
                 Triple("Sleep",      PcStep("SYSTEM_CMD","SLEEP"),      Icons.Default.DarkMode),
                 Triple("Screenshot", PcStep("SYSTEM_CMD","SCREENSHOT"), Icons.Default.Screenshot),
-                Triple("Mute",       PcStep("SYSTEM_CMD","MUTE"),       Icons.Default.VolumeOff),
+                Triple("Mute",       PcStep("SYSTEM_CMD","MUTE"),       Icons.AutoMirrored.Filled.VolumeOff),
             ).forEach { (label, step, icon) ->
                 ListItem(
                     headlineContent = { Text(label, style = MaterialTheme.typography.bodyMedium) },

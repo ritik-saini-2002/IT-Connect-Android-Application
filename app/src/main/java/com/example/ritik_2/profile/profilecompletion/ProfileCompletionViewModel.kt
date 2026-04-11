@@ -34,7 +34,6 @@ data class ProfileSaveData(
     val emergencyContactPhone    : String = "",
     val emergencyContactRelation : String = "",
     val existingImageUrl         : String = "",
-    // Admin-only fields
     val name                     : String = "",
     val phoneNumber              : String = "",
     val designation              : String = "",
@@ -60,13 +59,7 @@ class ProfileCompletionViewModel @Inject constructor(
             }
             dataSource.getUserProfile(userId)
                 .onSuccess { p ->
-                    _uiState.update {
-                        it.copy(
-                            userProfile = p,
-                            isLoading   = false,
-                            isEditing   = !isEditMode
-                        )
-                    }
+                    _uiState.update { it.copy(userProfile = p, isLoading = false, isEditing = !isEditMode) }
                 }
                 .onFailure { e ->
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
@@ -94,12 +87,19 @@ class ProfileCompletionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
+            // FIX: Upload avatar FIRST, get URL, then include in unified profile save.
+            // Old code uploaded avatar then separately PATCHed profile JSON with ONLY
+            // imageUrl, overwriting address/emergency/salary fields.
             var imageUrl = data.existingImageUrl
             val bytes    = imageBytes ?: _uiState.value.pendingImageBytes
             val fname    = _uiState.value.pendingImageName.ifBlank { "profile_$userId.jpg" }
+
             if (bytes != null) {
                 dataSource.uploadProfileImage(userId, bytes, fname, "")
-                    .onSuccess { url -> imageUrl = url }
+                    .onSuccess { url ->
+                        imageUrl = url
+                        android.util.Log.d("ProfileVM", "Avatar uploaded OK: $url")
+                    }
                     .onFailure { e ->
                         android.util.Log.w("ProfileVM", "Image upload failed: ${e.message}")
                     }
@@ -107,6 +107,7 @@ class ProfileCompletionViewModel @Inject constructor(
 
             val existing = _uiState.value.userProfile
 
+            // FIX: Build COMPLETE profile JSON with all fields + new imageUrl
             val profileJson = JSONObject().apply {
                 put("imageUrl",    imageUrl)
                 put("address",     data.address)
@@ -159,6 +160,7 @@ class ProfileCompletionViewModel @Inject constructor(
                         it.copy(
                             isLoading         = false,
                             isSaved           = true,
+                            selectedImageUri  = null,
                             pendingImageBytes = null,
                             pendingImageName  = ""
                         )

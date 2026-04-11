@@ -43,7 +43,8 @@ fun ChatListScreen(
         if (search.isBlank()) state.rooms
         else state.rooms.filter {
             it.name.contains(search, true) ||
-                    it.lastMessage.contains(search, true)
+                    it.lastMessage.contains(search, true) ||
+                    it.memberNames.any { n -> n.contains(search, true) }
         }
     }
 
@@ -75,25 +76,30 @@ fun ChatListScreen(
             }
         },
         floatingActionButton = {
-            Column(horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // FIX: Reduced FAB padding for minimal gravity position
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(bottom = 8.dp)  // minimal gravity
+            ) {
                 AnimatedVisibility(visible = fabExpand,
                     enter = slideInVertically { it } + fadeIn(),
                     exit  = slideOutVertically { it } + fadeOut()) {
                     Column(horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         FabOption("New Group", Icons.Default.Group,
                             Color(0xFF1976D2)) { fabExpand = false; onNewGroup() }
-                        FabOption("New Message", Icons.Default.PersonAdd,
+                        FabOption("New Chat", Icons.Default.PersonAdd,
                             Color(0xFF388E3C)) { fabExpand = false; onNewDM() }
                     }
                 }
-                FloatingActionButton(
+                SmallFloatingActionButton(
                     onClick           = { fabExpand = !fabExpand },
-                    containerColor    = MaterialTheme.colorScheme.primary
+                    containerColor    = MaterialTheme.colorScheme.primary,
+                    modifier          = Modifier.size(48.dp)
                 ) {
                     Icon(if (fabExpand) Icons.Default.Close else Icons.Default.Edit,
-                        null, tint = Color.White)
+                        null, tint = Color.White, modifier = Modifier.size(20.dp))
                 }
             }
         }
@@ -162,6 +168,36 @@ fun ChatListScreen(
 
 @Composable
 private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) {
+    // FIX: For DMs, show the OTHER user's name (not "UserA & UserB")
+    // For groups, show group name with member count
+    val displayName = when (room.type) {
+        RoomType.DIRECT -> {
+            // Find the other member's name
+            val myIdx   = room.members.indexOf(myUserId)
+            val otherIdx = if (myIdx == 0) 1 else 0
+            room.memberNames.getOrElse(otherIdx) {
+                room.name.replace("&", "·").trim()
+            }
+        }
+        RoomType.GROUP -> room.name
+    }
+
+    // FIX: For DMs, show the other user's avatar; for groups, show group avatar or icon
+    val otherAvatarUrl = when (room.type) {
+        RoomType.DIRECT -> {
+            val myIdx   = room.members.indexOf(myUserId)
+            val otherIdx = if (myIdx == 0) 1 else 0
+            room.memberAvatars.getOrElse(otherIdx) { room.avatarUrl }
+        }
+        RoomType.GROUP -> room.avatarUrl
+    }
+
+    // Subtitle: for groups show member count
+    val subtitle = when (room.type) {
+        RoomType.GROUP  -> "${room.members.size} members"
+        RoomType.DIRECT -> ""
+    }
+
     Row(
         Modifier.fillMaxWidth().clickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -178,25 +214,34 @@ private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) 
                     ),
                 Alignment.Center
             ) {
-                if (room.avatarUrl.isNotBlank()) {
+                if (otherAvatarUrl.isNotBlank()) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(room.avatarUrl).crossfade(true).build(),
+                            .data(otherAvatarUrl).crossfade(true).build(),
                         contentDescription = null,
                         modifier     = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Icon(
-                        if (room.type == RoomType.GROUP) Icons.Default.Group
-                        else Icons.Default.Person,
-                        null,
-                        tint     = if (room.type == RoomType.GROUP) Color(0xFF1976D2)
-                        else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
+                    // FIX: Show initials of the OTHER user for DMs, group icon for groups
+                    if (room.type == RoomType.GROUP) {
+                        Icon(Icons.Default.Group, null,
+                            tint = Color(0xFF1976D2), modifier = Modifier.size(28.dp))
+                    } else {
+                        val initials = displayName
+                            .split(" ").take(2)
+                            .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
+                            .joinToString("")
+                        Text(
+                            initials.ifBlank { "?" },
+                            fontSize   = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
+            // Unread badge
             if (room.unreadCount > 0) {
                 Box(
                     Modifier.size(18.dp).clip(CircleShape)
@@ -215,13 +260,18 @@ private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) 
         Column(Modifier.weight(1f)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween,
                 Alignment.CenterVertically) {
-                Text(room.name, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
+                Text(displayName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f))
                 if (room.lastMessageAt > 0)
                     Text(formatRoomTime(room.lastMessageAt),
                         fontSize = 11.sp,
                         color    = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // Subtitle (member count for groups)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.primary.copy(0.7f))
             }
             Spacer(Modifier.height(2.dp))
             Text(room.lastMessage.ifBlank { "No messages yet" },

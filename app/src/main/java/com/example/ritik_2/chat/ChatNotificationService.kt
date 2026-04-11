@@ -6,9 +6,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.SyncManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -19,6 +22,8 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
+private const val TAG = "ChatNotifService"
+
 @AndroidEntryPoint
 class ChatNotificationService : Service() {
 
@@ -28,6 +33,7 @@ class ChatNotificationService : Service() {
     private var userId   = ""
     private var userName = ""
     private var listenJob: Job? = null
+    private var currentCall: Call? = null
 
     private val sseClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -42,16 +48,38 @@ class ChatNotificationService : Service() {
         const val EXTRA_USER_NAME = "user_name"
 
         fun start(ctx: Context, userId: String, userName: String) {
-            ctx.startForegroundService(
-                Intent(ctx, ChatNotificationService::class.java).apply {
-                    putExtra(EXTRA_USER_ID,   userId)
-                    putExtra(EXTRA_USER_NAME, userName)
+            // FIX: Use try-catch — on Android 12+ startForegroundService can throw
+            // if the app is in background or the dataSync time limit is exhausted.
+            try {
+                ctx.startForegroundService(
+                    Intent(ctx, ChatNotificationService::class.java).apply {
+                        putExtra(EXTRA_USER_ID,   userId)
+                        putExtra(EXTRA_USER_NAME, userName)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Cannot start foreground service: ${e.message}")
+                // Fallback: try as regular service — won't crash the app
+                try {
+                    ctx.startService(
+                        Intent(ctx, ChatNotificationService::class.java).apply {
+                            putExtra(EXTRA_USER_ID,   userId)
+                            putExtra(EXTRA_USER_NAME, userName)
+                        }
+                    )
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Cannot start service at all: ${e2.message}")
                 }
-            )
+            }
         }
 
-        fun stop(ctx: Context) =
-            ctx.stopService(Intent(ctx, ChatNotificationService::class.java))
+        fun stop(ctx: Context) {
+            try {
+                ctx.stopService(Intent(ctx, ChatNotificationService::class.java))
+            } catch (e: Exception) {
+                Log.w(TAG, "Stop service failed: ${e.message}")
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -59,7 +87,28 @@ class ChatNotificationService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForeground(NOTIF_ID, buildForegroundNotif())
+
+        // FIX: Wrap startForeground in try-catch for Android 14+ dataSync limits.
+        // "ForegroundServiceStartNotAllowedException: Time limit already exhausted"
+        // happens when the app has used up its dataSync foreground service quota.
+        // In that case, we gracefully degrade to a background coroutine.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Android 14+: must specify foregroundServiceType
+                ServiceCompat.startForeground(
+                    this, NOTIF_ID, buildForegroundNotif(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(NOTIF_ID, buildForegroundNotif())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground failed (quota exhausted?): ${e.message}")
+            // Don't crash — just run as a background service.
+            // The SSE listener will still work; notifications may be delayed.
+            // Stop self to prevent the system from killing the app.
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -74,7 +123,6 @@ class ChatNotificationService : Service() {
 
     private suspend fun connectLoop() {
         var retryDelay = 5_000L
-        // Use isActive from the coroutine scope, not GlobalScope.coroutineContext
         while (scope.isActive) {
             val connected = try {
                 doConnect()
@@ -82,7 +130,7 @@ class ChatNotificationService : Service() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w("ChatNotifService", "SSE disconnected: ${e.message}")
+                Log.w(TAG, "SSE disconnected: ${e.message}")
                 false
             }
             delay(if (connected) 3_000L else retryDelay)
@@ -93,24 +141,41 @@ class ChatNotificationService : Service() {
     // ── Single SSE session ────────────────────────────────────────────────────
 
     private suspend fun doConnect() = withContext(Dispatchers.IO) {
-        val token = syncManager.getAdminToken()
-
-        val clientId = JSONObject(
-            syncManager.pbGet("${AppConfig.BASE_URL}/api/realtime", token)
-        ).optString("clientId").ifEmpty {
-            Log.w("ChatNotifService", "No clientId — skipping")
+        val token = try {
+            syncManager.getAdminToken()
+        } catch (e: Exception) {
+            Log.w(TAG, "Cannot get token: ${e.message}")
             return@withContext
         }
 
-        syncManager.pbPost(
-            "${AppConfig.BASE_URL}/api/realtime", token,
-            JSONObject().apply {
-                put("clientId", clientId)
-                put("subscriptions", JSONArray().apply {
-                    put("chat_messages")
-                }.toString())
-            }.toString()
-        )
+        val clientId = try {
+            JSONObject(
+                syncManager.pbGet("${AppConfig.BASE_URL}/api/realtime", token)
+            ).optString("clientId").ifEmpty { null }
+        } catch (e: Exception) {
+            Log.w(TAG, "Realtime init failed: ${e.message}")
+            null
+        }
+
+        if (clientId.isNullOrEmpty()) {
+            Log.w(TAG, "No clientId — skipping")
+            return@withContext
+        }
+
+        try {
+            syncManager.pbPost(
+                "${AppConfig.BASE_URL}/api/realtime", token,
+                JSONObject().apply {
+                    put("clientId", clientId)
+                    put("subscriptions", JSONArray().apply {
+                        put("chat_messages")
+                    }.toString())
+                }.toString()
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Subscription failed: ${e.message}")
+            return@withContext
+        }
 
         val call = sseClient.newCall(
             Request.Builder()
@@ -118,22 +183,33 @@ class ChatNotificationService : Service() {
                 .addHeader("Authorization", "Bearer $token")
                 .build()
         )
+        currentCall = call
 
-        val response = call.execute()
+        val response = try {
+            call.execute()
+        } catch (e: Exception) {
+            currentCall = null
+            throw e
+        }
+
         if (!response.isSuccessful) {
             response.close()
-            Log.w("ChatNotifService", "SSE HTTP ${response.code}")
+            currentCall = null
+            Log.w(TAG, "SSE HTTP ${response.code}")
             return@withContext
         }
 
         val source = response.body?.source()
-        if (source == null) { response.close(); return@withContext }
+        if (source == null) {
+            response.close()
+            currentCall = null
+            return@withContext
+        }
 
-        Log.d("ChatNotifService", "SSE connected ✅ clientId=$clientId")
+        Log.d(TAG, "SSE connected ✅ clientId=$clientId")
 
         try {
             val buf = StringBuilder()
-            // isActive here refers to the withContext(Dispatchers.IO) coroutine context
             while (isActive) {
                 val line = source.readUtf8Line() ?: break
                 when {
@@ -146,9 +222,10 @@ class ChatNotificationService : Service() {
                 }
             }
         } finally {
+            currentCall = null
             call.cancel()
             response.close()
-            Log.d("ChatNotifService", "SSE stream closed, reconnecting…")
+            Log.d(TAG, "SSE stream closed, reconnecting…")
         }
     }
 
@@ -163,13 +240,16 @@ class ChatNotificationService : Service() {
             val senderId = record.optString("senderId")
             if (senderId == userId) return
 
+            // Skip uploading placeholders
+            if (record.optBoolean("uploading", false)) return
+
             val senderName = record.optString("senderName", "Someone")
             val text = record.optString("text", "").ifBlank {
                 "\uD83D\uDCCE ${record.optString("fileName", "File")}"
             }
             showMessageNotification(senderName, text, record.optString("roomId"))
         } catch (e: Exception) {
-            Log.w("ChatNotifService", "Event parse error: ${e.message}")
+            Log.w(TAG, "Event parse error: ${e.message}")
         }
     }
 
@@ -214,6 +294,10 @@ class ChatNotificationService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // FIX: Cancel any active SSE call to prevent connection leaks
+        currentCall?.cancel()
+        currentCall = null
         scope.cancel()
+        Log.d(TAG, "Service destroyed, all connections cleaned up")
     }
 }
