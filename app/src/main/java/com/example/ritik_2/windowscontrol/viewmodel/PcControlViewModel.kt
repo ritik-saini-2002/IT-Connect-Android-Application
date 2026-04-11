@@ -735,6 +735,62 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     }
 
     // ─────────────────────────────────────────────────────
+    //  VOLUME & BRIGHTNESS — slider control
+    // ─────────────────────────────────────────────────────
+
+    private val _volumeLevel    = MutableStateFlow(-1)
+    val volumeLevel: StateFlow<Int> = _volumeLevel
+    private val _volumeMuted    = MutableStateFlow(false)
+    val volumeMuted: StateFlow<Boolean> = _volumeMuted
+    private val _brightnessLevel = MutableStateFlow(-1)
+    val brightnessLevel: StateFlow<Int> = _brightnessLevel
+
+    fun fetchVolume() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val r = input.getVolume()
+                if (r.success && r.data != null) {
+                    val json = org.json.JSONObject(r.data)
+                    _volumeLevel.value = json.optInt("volume", -1)
+                    _volumeMuted.value = json.optBoolean("muted", false)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "fetchVolume: ${e.message}")
+            }
+        }
+    }
+
+    fun setVolume(level: Int) {
+        _volumeLevel.value = level
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.setVolume(level) }
+            catch (e: Exception) { android.util.Log.e("PcControl", "setVolume: ${e.message}") }
+        }
+    }
+
+    fun fetchBrightness() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val r = input.getBrightness()
+                if (r.success && r.data != null) {
+                    val json = org.json.JSONObject(r.data)
+                    _brightnessLevel.value = json.optInt("brightness", -1)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "fetchBrightness: ${e.message}")
+            }
+        }
+    }
+
+    fun setBrightness(level: Int) {
+        _brightnessLevel.value = level
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.setBrightness(level) }
+            catch (e: Exception) { android.util.Log.e("PcControl", "setBrightness: ${e.message}") }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
     //  REAL-TIME REFRESH
     // ─────────────────────────────────────────────────────
 

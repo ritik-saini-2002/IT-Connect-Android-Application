@@ -50,17 +50,21 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
     // ── Windows Project popup state ──
     var showProjectPopup by remember { mutableStateOf(false) }
 
-    // ── System bars: only hide for fullscreen touchpad in landscape ──
-    // FIX: Bottom nav bar is now ALWAYS visible, even in landscape touchpad.
-    // We no longer hide system bars for any screen.
+    // ── System bars: hide in landscape touchpad for full immersive mode ──
     val context = LocalContext.current
-    LaunchedEffect(isLandscape) {
+    LaunchedEffect(currentScreen, isLandscape) {
         val activity = context as? Activity ?: return@LaunchedEffect
         val window = activity.window
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        // Always show system bars — bottom nav handles its own visibility
-        controller.show(WindowInsetsCompat.Type.systemBars())
+        if (isLandscape && currentScreen == PcScreen.TOUCHPAD) {
+            // Full immersive: hide status bar + nav bar, swipe from edge to reveal
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     if (editingPlan != null) {

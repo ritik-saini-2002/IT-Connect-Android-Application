@@ -613,4 +613,16 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
                 PcNetworkResult(false, error = e.message)
             }
         }
+
+    // ── Volume & Brightness control ──────────────────────────────────────
+
+    suspend fun getVolume(): PcNetworkResult<String> = get("/system/volume")
+
+    suspend fun setVolume(level: Int): PcNetworkResult<String> =
+        post("/system/volume/set", mapOf("level" to level))
+
+    suspend fun getBrightness(): PcNetworkResult<String> = get("/system/brightness")
+
+    suspend fun setBrightness(level: Int): PcNetworkResult<String> =
+        post("/system/brightness/set", mapOf("level" to level))
 }

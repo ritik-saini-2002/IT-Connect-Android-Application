@@ -140,6 +140,10 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
     var showUrlBar   by remember { mutableStateOf(false) }
     var urlText      by remember { mutableStateOf("") }
     var shortcutGroup by remember { mutableStateOf<ModifierGroup?>(null) }
+    var showVolumeSlider by remember { mutableStateOf(false) }
+    var showBrightnessSlider by remember { mutableStateOf(false) }
+    val volumeLevel    = viewModel.volumeLevel.collectAsStateWithLifecycle(initialValue = -1)
+    val brightnessLevel = viewModel.brightnessLevel.collectAsStateWithLifecycle(initialValue = -1)
 
     val showFeedback: (String) -> Unit = remember(scope) { { msg ->
         feedback = msg; fbJob?.cancel(); fbJob = scope.launch { delay(1_000); feedback = "" }
@@ -162,14 +166,39 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
                 onLiveToggle = { liveScreenOn = it }, onFeedback = showFeedback,
                 onSensChange = { sensitivity = it }, onToggleUrlBar = { showUrlBar = !showUrlBar },
                 onUrlChange = { urlText = it }, onOpenUrl = openUrl,
-                shortcutGroup = shortcutGroup, onShortcutGroupChange = { shortcutGroup = it })
+                shortcutGroup = shortcutGroup, onShortcutGroupChange = { shortcutGroup = it },
+                onShowVolumeSlider = { viewModel.fetchVolume(); showVolumeSlider = true },
+                onShowBrightnessSlider = { viewModel.fetchBrightness(); showBrightnessSlider = true })
         } else {
             PortraitLayout(vm = viewModel, sensitivity = sensitivity, feedback = feedback,
                 connectionStatus = connectionStatus, showUrlBar = showUrlBar, urlText = urlText,
                 onFeedback = showFeedback, onSensChange = { sensitivity = it },
                 onToggleUrlBar = { showUrlBar = !showUrlBar },
-                onUrlChange = { urlText = it }, onOpenUrl = openUrl)
+                onUrlChange = { urlText = it }, onOpenUrl = openUrl,
+                onShowVolumeSlider = { viewModel.fetchVolume(); showVolumeSlider = true },
+                onShowBrightnessSlider = { viewModel.fetchBrightness(); showBrightnessSlider = true })
         }
+    }
+
+    // ── Volume Slider Popup ──────────────────────────────────────────────
+    if (showVolumeSlider) {
+        SystemSliderPopup(
+            title = "🔊 Volume",
+            value = volumeLevel.value.coerceIn(0, 100),
+            onValueChange = { viewModel.setVolume(it) },
+            onDismiss = { showVolumeSlider = false }
+        )
+    }
+
+    // ── Brightness Slider Popup ──────────────────────────────────────────
+    if (showBrightnessSlider) {
+        SystemSliderPopup(
+            title = "🔆 Brightness",
+            value = if (brightnessLevel.value < 0) 50 else brightnessLevel.value.coerceIn(0, 100),
+            onValueChange = { viewModel.setBrightness(it) },
+            onDismiss = { showBrightnessSlider = false },
+            unavailable = brightnessLevel.value < 0
+        )
     }
 }
 
@@ -278,6 +307,7 @@ private fun LandscapeLayout(
     onSensChange: (Float) -> Unit, onToggleUrlBar: () -> Unit,
     onUrlChange: (String) -> Unit, onOpenUrl: (String) -> Unit,
     shortcutGroup: ModifierGroup? = null, onShortcutGroupChange: (ModifierGroup?) -> Unit = {},
+    onShowVolumeSlider: () -> Unit = {}, onShowBrightnessSlider: () -> Unit = {},
 ) {
     val c = glassColors()
     val dotColor = connectionStatus.toGlassColor(c)
@@ -293,9 +323,11 @@ private fun LandscapeLayout(
 
         Row(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
 
-            // ── SHORTCUT PANEL (landscape only — replaces touchpad centre when active) ──
+            // ── FAR LEFT: Modifier keys column (ALWAYS visible in landscape) ──
+            ShortcutModifierColumn(c = c, selected = shortcutGroup, onSelect = { onShortcutGroupChange(it) }, modifier = Modifier.width(52.dp).fillMaxHeight())
+
             if (shortcutGroup != null) {
-                ShortcutModifierColumn(c = c, selected = shortcutGroup, onSelect = { onShortcutGroupChange(it) }, modifier = Modifier.width(52.dp).fillMaxHeight())
+                // ── SHORTCUTS MODE: grid replaces the entire touchpad centre ──
                 ShortcutsGrid(c = c, group = shortcutGroup, vm = vm, onFeedback = onFeedback, modifier = Modifier.weight(1f).fillMaxHeight())
             } else {
                 // ── LEFT PANEL ──
@@ -334,7 +366,7 @@ private fun LandscapeLayout(
                 Column(modifier = Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(gap)) {
                     GlassStatusBar(c = c, connectionStatus = connectionStatus, dotColor = dotColor, liveScreenOn = liveScreenOn, feedback = feedback, sensitivity = sensitivity, onSensChange = onSensChange, modifier = Modifier.fillMaxWidth().height(26.dp).alpha(btnAlpha))
                     Row(Modifier.fillMaxWidth().height(32.dp).alpha(btnAlpha), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        GlassMediaButtons(c = c, vm = vm, onFeedback = onFeedback)
+                        GlassMediaButtons(c = c, vm = vm, onFeedback = onFeedback, onShowVolumeSlider = onShowVolumeSlider, onShowBrightnessSlider = onShowBrightnessSlider)
                     }
                     // Touchpad with integrated scroll slider on right
                     LaptopTouchpad(c = c, modifier = Modifier.fillMaxWidth().weight(1f), sensitivity = sensitivity, feedback = feedback, onFeedback = onFeedback, vm = vm, semiTransparent = liveScreenOn, showScrollSlider = true)
@@ -377,6 +409,7 @@ fun PortraitLayout(
     connectionStatus: PcConnectionStatus, showUrlBar: Boolean, urlText: String,
     onFeedback: (String) -> Unit, onSensChange: (Float) -> Unit,
     onToggleUrlBar: () -> Unit, onUrlChange: (String) -> Unit, onOpenUrl: (String) -> Unit,
+    onShowVolumeSlider: () -> Unit = {}, onShowBrightnessSlider: () -> Unit = {},
 ) {
     val c = glassColors()
     val dotColor = connectionStatus.toGlassColor(c)
@@ -410,8 +443,8 @@ fun PortraitLayout(
                 GlassButton(c, "🌐", Modifier.width(46.dp).fillMaxHeight(), if (showUrlBar) c.accent else null, onClick = onToggleUrlBar)
                 GlassButton(c, "Alt+F4", Modifier.weight(1.2f).fillMaxHeight(), c.danger) { vm.sendKey("ALT+F4"); onFeedback("Alt+F4") }
                 GlassButton(c, "Enter", Modifier.weight(1f).fillMaxHeight(), c.accent) { vm.sendKey("ENTER"); onFeedback("Enter") }
-                GlassButton(c, "Vol-", Modifier.weight(0.85f).fillMaxHeight()) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "VOLUME_DOWN")); onFeedback("Vol-") }
-                GlassButton(c, "Vol+", Modifier.weight(0.85f).fillMaxHeight()) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "VOLUME_UP")); onFeedback("Vol+") }
+                GlassButton(c, "Volume", Modifier.weight(0.85f).fillMaxHeight()) { onShowVolumeSlider() }
+                GlassButton(c, "Brightness", Modifier.weight(0.85f).fillMaxHeight()) { onShowBrightnessSlider() }
                 GlassButton(c, "Mute", Modifier.weight(0.85f).fillMaxHeight()) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "MUTE")); onFeedback("Mute") }
             }
             Row(Modifier.fillMaxWidth().height(50.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -451,13 +484,13 @@ private fun GlassStatusBar(c: GlassColors, connectionStatus: PcConnectionStatus,
 }
 
 @Composable
-private fun RowScope.GlassMediaButtons(c: GlassColors, vm: PcControlViewModel, onFeedback: (String) -> Unit) {
+private fun RowScope.GlassMediaButtons(c: GlassColors, vm: PcControlViewModel, onFeedback: (String) -> Unit, onShowVolumeSlider: () -> Unit = {}, onShowBrightnessSlider: () -> Unit = {}) {
     data class Btn(val label: String, val tint: Color?, val action: () -> Unit)
     listOf(
         Btn("Alt+F4", c.danger) { vm.sendKey("ALT+F4"); onFeedback("Alt+F4") },
-        Btn("Vol-", null) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "VOLUME_DOWN")); onFeedback("Vol-") },
+        Btn("Volume", null) { onShowVolumeSlider() },
         Btn("Mute", null) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "MUTE")); onFeedback("Mute") },
-        Btn("Vol+", null) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "VOLUME_UP")); onFeedback("Vol+") },
+        Btn("Brightness", null) { onShowBrightnessSlider() },
         Btn("F5", c.accentSecondary) { vm.sendKey("F5"); onFeedback("F5") },
         Btn("F11", c.accent) { vm.sendKey("F11"); onFeedback("F11") },
     ).forEach { btn -> GlassButton(c, btn.label, Modifier.weight(1f).fillMaxHeight(), btn.tint, btn.action) }
@@ -519,6 +552,9 @@ fun LaptopTouchpad(
     var scrollBufJob by remember { mutableStateOf<Job?>(null) }
     var scrollAccY by remember { mutableFloatStateOf(0f) }; var scrollAccX by remember { mutableFloatStateOf(0f) }
     var didScroll by remember { mutableStateOf(false) }
+    var pinchStartDist by remember { mutableFloatStateOf(0f) }  // distance between fingers at pinch start
+    var pinchAccum by remember { mutableFloatStateOf(0f) }      // accumulated pinch delta
+
 
     // Scroll slider state — spring-back to center on release
     var sliderHeightPx by remember { mutableIntStateOf(0) }
@@ -526,7 +562,7 @@ fun LaptopTouchpad(
     var sliderCenterY by remember { mutableFloatStateOf(0f) }
 
     val showScroll: (String) -> Unit = { dir -> scrollBuf = dir; scrollBufJob?.cancel(); scrollBufJob = scope.launch { delay(600); scrollBuf = "" } }
-    fun resetAll() { state = TouchState.IDLE; isActive = false; totalMoveX = 0f; totalMoveY = 0f; scrollAccX = 0f; scrollAccY = 0f; didScroll = false; holdJob?.cancel(); holdJob = null }
+    fun resetAll() { state = TouchState.IDLE; isActive = false; totalMoveX = 0f; totalMoveY = 0f; scrollAccX = 0f; scrollAccY = 0f; didScroll = false; pinchStartDist = 0f; pinchAccum = 0f; holdJob?.cancel(); holdJob = null }
 
     val surfaceAlpha = if (semiTransparent) 0.45f else 1f
     val sliderWidthDp = 26.dp
@@ -589,7 +625,7 @@ fun LaptopTouchpad(
                                                     }
                                                 }
                                             }
-                                            2 -> { holdJob?.cancel(); state = TouchState.TWO_FINGER; p1x = pressed[0].position.x; p1y = pressed[0].position.y; p2x = pressed[1].position.x; p2y = pressed[1].position.y; scrollAccX = 0f; scrollAccY = 0f }
+                                            2 -> { holdJob?.cancel(); state = TouchState.TWO_FINGER; p1x = pressed[0].position.x; p1y = pressed[0].position.y; p2x = pressed[1].position.x; p2y = pressed[1].position.y; scrollAccX = 0f; scrollAccY = 0f; pinchStartDist = kotlin.math.hypot((p2x - p1x).toDouble(), (p2y - p1y).toDouble()).toFloat(); pinchAccum = 0f }
                                             else -> { holdJob?.cancel(); state = TouchState.THREE_FINGER }
                                         }
                                     }
@@ -608,16 +644,38 @@ fun LaptopTouchpad(
                                                 if (pressed.size < 2) { state = TouchState.ONE_FINGER } else {
                                                     val np1y = pressed[0].position.y; val np2y = pressed[1].position.y; val np1x = pressed[0].position.x; val np2x = pressed[1].position.x
                                                     val avgDy = ((np1y - p1y) + (np2y - p2y)) / 2f; val avgDx = ((np1x - p1x) + (np2x - p2x)) / 2f
-                                                    scrollAccY += avgDy; scrollAccX += avgDx
-                                                    if (abs(scrollAccY) > SCROLL_MIN_PX) {
-                                                        val ticks = (scrollAccY / SCROLL_MIN_PX).toInt(); vm.sendMouseScroll(-ticks)
-                                                        showScroll(if (ticks < 0) "↓" else "↑"); onFeedback(if (ticks < 0) "Scroll ↓" else "Scroll ↑")
-                                                        scrollAccY -= ticks * SCROLL_MIN_PX
-                                                        didScroll = true
-                                                    }
-                                                    if (abs(scrollAccX) > SCROLL_MIN_PX * 2 && abs(scrollAccX) > abs(scrollAccY)) {
-                                                        val hTicks = (scrollAccX / (SCROLL_MIN_PX * 2)).toInt()
-                                                        if (hTicks != 0) { vm.sendMouseScroll(hTicks, horizontal = true); scrollAccX -= hTicks * SCROLL_MIN_PX * 2; didScroll = true }
+
+                                                    // ── PINCH DETECTION — zoom in/out ──
+                                                    val curDist = kotlin.math.hypot((np2x - np1x).toDouble(), (np2y - np1y).toDouble()).toFloat()
+                                                    val pinchDelta = curDist - pinchStartDist
+                                                    val pinchThreshold = 30f  // px before triggering zoom
+
+                                                    if (abs(pinchDelta) > pinchThreshold && abs(pinchDelta) > abs(avgDy) * 2) {
+                                                        // Pinch gesture detected — send CTRL+Plus or CTRL+Minus
+                                                        pinchAccum += (curDist - kotlin.math.hypot((p2x - p1x).toDouble(), (p2y - p1y).toDouble()).toFloat())
+                                                        val pinchStep = 25f
+                                                        if (abs(pinchAccum) > pinchStep) {
+                                                            if (pinchAccum > 0) {
+                                                                vm.sendKey("CTRL+PLUS"); onFeedback("Zoom +")
+                                                            } else {
+                                                                vm.sendKey("CTRL+MINUS"); onFeedback("Zoom −")
+                                                            }
+                                                            showScroll(if (pinchAccum > 0) "🔍+" else "🔍−")
+                                                            pinchAccum = 0f; didScroll = true
+                                                        }
+                                                    } else {
+                                                        // Normal two-finger scroll
+                                                        scrollAccY += avgDy; scrollAccX += avgDx
+                                                        if (abs(scrollAccY) > SCROLL_MIN_PX) {
+                                                            val ticks = (scrollAccY / SCROLL_MIN_PX).toInt(); vm.sendMouseScroll(-ticks)
+                                                            showScroll(if (ticks < 0) "↓" else "↑"); onFeedback(if (ticks < 0) "Scroll ↓" else "Scroll ↑")
+                                                            scrollAccY -= ticks * SCROLL_MIN_PX
+                                                            didScroll = true
+                                                        }
+                                                        if (abs(scrollAccX) > SCROLL_MIN_PX * 2 && abs(scrollAccX) > abs(scrollAccY)) {
+                                                            val hTicks = (scrollAccX / (SCROLL_MIN_PX * 2)).toInt()
+                                                            if (hTicks != 0) { vm.sendMouseScroll(hTicks, horizontal = true); scrollAccX -= hTicks * SCROLL_MIN_PX * 2; didScroll = true }
+                                                        }
                                                     }
                                                     p1x = np1x; p1y = np1y; p2x = np2x; p2y = np2y
                                                 }
@@ -759,6 +817,84 @@ fun LaptopTouchpad(
             }
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SYSTEM SLIDER POPUP — reusable for volume and brightness
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+fun SystemSliderPopup(
+    title: String,
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    unavailable: Boolean = false
+) {
+    val cs = MaterialTheme.colorScheme
+    var sliderValue by remember(value) { mutableFloatStateOf(value.toFloat()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(Modifier.weight(1f))
+                Surface(shape = RoundedCornerShape(8.dp), color = cs.primaryContainer) {
+                    Text("${sliderValue.toInt()}%",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                        color = cs.onPrimaryContainer)
+                }
+            }
+        },
+        text = {
+            if (unavailable) {
+                Text("Not available on this PC (desktop PCs don't support brightness control)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Slider(
+                        value = sliderValue,
+                        onValueChange = { sliderValue = it },
+                        onValueChangeFinished = { onValueChange(sliderValue.toInt()) },
+                        valueRange = 0f..100f,
+                        steps = 19,
+                        colors = SliderDefaults.colors(
+                            thumbColor = cs.primary,
+                            activeTrackColor = cs.primary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("0", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                        Text("100", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                    }
+                    // Quick preset buttons
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(0, 25, 50, 75, 100).forEach { preset ->
+                            Surface(
+                                onClick = { sliderValue = preset.toFloat(); onValueChange(preset) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (sliderValue.toInt() == preset) cs.primary.copy(0.2f) else cs.surfaceVariant,
+                                border = BorderStroke(0.5.dp, if (sliderValue.toInt() == preset) cs.primary.copy(0.5f) else cs.outline.copy(0.2f)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("$preset", modifier = Modifier.padding(vertical = 6.dp),
+                                    textAlign = TextAlign.Center, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (sliderValue.toInt() == preset) cs.primary else cs.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        }
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
