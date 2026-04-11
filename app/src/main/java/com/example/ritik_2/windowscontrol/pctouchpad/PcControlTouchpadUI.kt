@@ -69,18 +69,17 @@ data class GlassColors(
 
 @Composable
 private fun glassColors(): GlassColors {
-    val dark = isSystemInDarkTheme()
     val cs = MaterialTheme.colorScheme
     return GlassColors(
-        bg = cs.background, bgGradientEnd = cs.background,
-        glassBg = cs.surfaceVariant.copy(alpha = if (dark) 0.5f else 0.8f),
-        glassBorder = cs.outline.copy(alpha = 0.3f),
+        bg = cs.surface, bgGradientEnd = cs.surface,
+        glassBg = cs.surfaceVariant,
+        glassBorder = cs.outline.copy(alpha = 0.25f),
         surface = cs.surface, accent = cs.primary, accentSecondary = cs.secondary,
         danger = cs.error, textPrimary = cs.onSurface, textSecondary = cs.onSurfaceVariant,
         textTertiary = cs.onSurfaceVariant.copy(0.5f),
         buttonBg = cs.surfaceVariant,
         buttonBorder = cs.outline.copy(alpha = 0.25f),
-        touchpadBg = if (dark) cs.surfaceVariant.copy(alpha = 0.6f) else cs.surfaceVariant.copy(alpha = 0.8f)
+        touchpadBg = cs.surfaceVariant
     )
 }
 
@@ -250,8 +249,8 @@ fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
 fun UrlBarRow(c: GlassColors, visible: Boolean, urlText: String, onUrlChange: (String) -> Unit, onOpenUrl: (String) -> Unit, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     AnimatedVisibility(visible = visible, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut(), modifier = modifier) {
         Surface(
-            color = c.glassBg, shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(0.5.dp, c.glassBorder),
+            color = c.glassBg, shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, c.glassBorder),
             modifier = Modifier.fillMaxWidth().height(32.dp)
         ) {
             Row(
@@ -314,7 +313,7 @@ private fun LandscapeLayout(
     val btnAlpha = if (liveScreenOn) 0.6f else 1f
     val haptic = LocalHapticFeedback.current
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.bg, c.bgGradientEnd)))) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(c.surface)) {
         val sideWL = maxWidth * 0.195f
         val sideWR = maxWidth * 0.10f
         val gap = 4.dp
@@ -415,9 +414,9 @@ fun PortraitLayout(
     val dotColor = connectionStatus.toGlassColor(c)
     val gap = 4.dp
 
-    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.bg, c.bgGradientEnd)))) {
+    Box(modifier = Modifier.fillMaxSize().background(c.surface)) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
-            Surface(color = c.glassBg, shape = RoundedCornerShape(8.dp), border = BorderStroke(0.5.dp, c.glassBorder), modifier = Modifier.fillMaxWidth().height(30.dp)) {
+            Surface(color = c.glassBg, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, c.glassBorder), modifier = Modifier.fillMaxWidth().height(30.dp)) {
                 Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Surface(onClick = { vm.pingPc() }, shape = RoundedCornerShape(20.dp), color = dotColor.copy(0.15f)) {
                         Row(Modifier.padding(horizontal = 7.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -443,8 +442,8 @@ fun PortraitLayout(
                 GlassButton(c, "🌐", Modifier.width(46.dp).fillMaxHeight(), if (showUrlBar) c.accent else null, onClick = onToggleUrlBar)
                 GlassButton(c, "Alt+F4", Modifier.weight(1.2f).fillMaxHeight(), c.danger) { vm.sendKey("ALT+F4"); onFeedback("Alt+F4") }
                 GlassButton(c, "Enter", Modifier.weight(1f).fillMaxHeight(), c.accent) { vm.sendKey("ENTER"); onFeedback("Enter") }
-                GlassButton(c, "Volume", Modifier.weight(0.85f).fillMaxHeight()) { onShowVolumeSlider() }
-                GlassButton(c, "Brightness", Modifier.weight(0.85f).fillMaxHeight()) { onShowBrightnessSlider() }
+                GlassButton(c, "🔊", Modifier.weight(0.85f).fillMaxHeight()) { onShowVolumeSlider() }
+                GlassButton(c, "🔆", Modifier.weight(0.85f).fillMaxHeight()) { onShowBrightnessSlider() }
                 GlassButton(c, "Mute", Modifier.weight(0.85f).fillMaxHeight()) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "MUTE")); onFeedback("Mute") }
             }
             Row(Modifier.fillMaxWidth().height(50.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -470,7 +469,7 @@ fun PortraitLayout(
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun GlassStatusBar(c: GlassColors, connectionStatus: PcConnectionStatus, dotColor: Color, liveScreenOn: Boolean, feedback: String, sensitivity: Float, onSensChange: (Float) -> Unit, modifier: Modifier) {
-    Surface(color = c.glassBg, shape = RoundedCornerShape(8.dp), border = BorderStroke(0.5.dp, c.glassBorder), modifier = modifier) {
+    Surface(color = c.glassBg, shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, c.glassBorder), modifier = modifier) {
         Row(Modifier.fillMaxSize().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(dotColor))
             Text(connectionStatus.label, fontSize = 9.sp, color = dotColor, fontWeight = FontWeight.Bold)
@@ -488,9 +487,9 @@ private fun RowScope.GlassMediaButtons(c: GlassColors, vm: PcControlViewModel, o
     data class Btn(val label: String, val tint: Color?, val action: () -> Unit)
     listOf(
         Btn("Alt+F4", c.danger) { vm.sendKey("ALT+F4"); onFeedback("Alt+F4") },
-        Btn("Volume", null) { onShowVolumeSlider() },
+        Btn("🔊", null) { onShowVolumeSlider() },
         Btn("Mute", null) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "MUTE")); onFeedback("Mute") },
-        Btn("Brightness", null) { onShowBrightnessSlider() },
+        Btn("🔆", null) { onShowBrightnessSlider() },
         Btn("F5", c.accentSecondary) { vm.sendKey("F5"); onFeedback("F5") },
         Btn("F11", c.accent) { vm.sendKey("F11"); onFeedback("F11") },
     ).forEach { btn -> GlassButton(c, btn.label, Modifier.weight(1f).fillMaxHeight(), btn.tint, btn.action) }
@@ -498,7 +497,7 @@ private fun RowScope.GlassMediaButtons(c: GlassColors, vm: PcControlViewModel, o
 
 @Composable
 private fun GlassScrollWheel(c: GlassColors, vm: PcControlViewModel, onFeedback: (String) -> Unit) {
-    Box(Modifier.width(20.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp)).background(c.glassBg).border(0.5.dp, c.glassBorder, RoundedCornerShape(6.dp))
+    Box(Modifier.width(20.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp)).background(c.glassBg).border(1.dp, c.glassBorder, RoundedCornerShape(6.dp))
         .scrollable(rememberScrollableState { d -> vm.sendMouseScroll(if (d > 0) 3 else -3); onFeedback(if (d > 0) "Scroll ↑" else "Scroll ↓"); d }, Orientation.Vertical),
         contentAlignment = Alignment.Center) { Text("⋮", color = c.textSecondary, fontSize = 12.sp) }
 }
@@ -510,9 +509,9 @@ private fun GlassScrollWheel(c: GlassColors, vm: PcControlViewModel, onFeedback:
 fun LiveToggleButton(c: GlassColors, isOn: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier = Modifier) {
     val haptic = LocalHapticFeedback.current
     val pulseAlpha by rememberInfiniteTransition(label = "p").animateFloat(0.4f, 1f, infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse), "pa")
-    Surface(onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onToggle(!isOn) }, modifier = modifier, shape = RoundedCornerShape(8.dp),
+    Surface(onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onToggle(!isOn) }, modifier = modifier, shape = RoundedCornerShape(10.dp),
         color = if (isOn) Color(0xFFEF4444).copy(0.18f) else c.glassBg,
-        border = BorderStroke(if (isOn) 1.5.dp else 0.5.dp, if (isOn) Color(0xFFEF4444).copy(pulseAlpha) else c.glassBorder)) {
+        border = BorderStroke(if (isOn) 1.5.dp else 1.dp, if (isOn) Color(0xFFEF4444).copy(pulseAlpha) else c.glassBorder)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 if (isOn) { Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFEF4444).copy(pulseAlpha))); Spacer(Modifier.height(1.dp)) }
@@ -571,7 +570,7 @@ fun LaptopTouchpad(
     Box(modifier = modifier) {
         // Scroll indicator overlay
         AnimatedVisibility(visible = scrollBuf.isNotEmpty(), enter = fadeIn(tween(80)), exit = fadeOut(tween(300)), modifier = Modifier.align(Alignment.TopStart).padding(6.dp)) {
-            Surface(shape = RoundedCornerShape(8.dp), color = c.accent.copy(0.2f)) { Text(scrollBuf, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.accent) }
+            Surface(shape = RoundedCornerShape(10.dp), color = c.accent.copy(0.2f)) { Text(scrollBuf, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = c.accent) }
         }
         if (state == TouchState.DRAGGING) {
             Surface(modifier = Modifier.align(Alignment.TopEnd).padding(if (showScrollSlider) (sliderWidthDp + 10.dp) else 6.dp, 6.dp), shape = RoundedCornerShape(6.dp), color = c.accent) {
@@ -594,7 +593,7 @@ fun LaptopTouchpad(
                         }
                     )
                     .border(
-                        width = if (isActive || state == TouchState.DRAGGING) 1.5.dp else 0.5.dp,
+                        width = if (isActive || state == TouchState.DRAGGING) 1.5.dp else 1.dp,
                         color = when {
                             state == TouchState.DRAGGING -> c.accent
                             isActive -> c.accent.copy(0.5f)
@@ -729,7 +728,7 @@ fun LaptopTouchpad(
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp))
                         .background(c.touchpadBg.copy(alpha = surfaceAlpha * 0.9f))
-                        .border(0.5.dp, c.glassBorder, RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp))
+                        .border(1.dp, c.glassBorder, RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp))
                         .onSizeChanged { size ->
                             sliderHeightPx = size.height
                             val center = (size.height / 2f) - (dotSizePx / 2f)
@@ -840,7 +839,7 @@ fun SystemSliderPopup(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(Modifier.weight(1f))
-                Surface(shape = RoundedCornerShape(8.dp), color = cs.primaryContainer) {
+                Surface(shape = RoundedCornerShape(10.dp), color = cs.primaryContainer) {
                     Text("${sliderValue.toInt()}%",
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         fontWeight = FontWeight.Bold, fontSize = 14.sp,
@@ -876,9 +875,9 @@ fun SystemSliderPopup(
                         listOf(0, 25, 50, 75, 100).forEach { preset ->
                             Surface(
                                 onClick = { sliderValue = preset.toFloat(); onValueChange(preset) },
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 color = if (sliderValue.toInt() == preset) cs.primary.copy(0.2f) else cs.surfaceVariant,
-                                border = BorderStroke(0.5.dp, if (sliderValue.toInt() == preset) cs.primary.copy(0.5f) else cs.outline.copy(0.2f)),
+                                border = BorderStroke(1.dp, if (sliderValue.toInt() == preset) cs.primary.copy(0.5f) else cs.outline.copy(0.2f)),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("$preset", modifier = Modifier.padding(vertical = 6.dp),
@@ -910,7 +909,7 @@ private fun ShortcutModifierColumn(c: GlassColors, selected: ModifierGroup?, onS
                 onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onSelect(if (isSel) null else group) },
                 color = if (isSel) c.accent.copy(0.2f) else c.buttonBg,
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(if (isSel) 1.5.dp else 1.dp, if (isSel) c.accent.copy(0.6f) else c.buttonBorder),
+                border = BorderStroke(if (isSel) 1.5.dp else 1.dp, if (isSel) c.accent.copy(0.4f) else c.buttonBorder),
                 tonalElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth().weight(1f)
             ) {
@@ -1006,9 +1005,10 @@ fun GlassButton(c: GlassColors, label: String, modifier: Modifier, tintColor: Co
                     }
                 }
             },
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(10.dp),
         color = if (pressed) fg.copy(0.15f) else c.buttonBg,
-        border = BorderStroke(if (pressed) 1.dp else 0.5.dp, if (pressed) fg.copy(0.4f) else c.buttonBorder)
+        border = BorderStroke(if (pressed) 1.5.dp else 1.dp, if (pressed) fg.copy(0.4f) else c.buttonBorder),
+        tonalElevation = 2.dp
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(label, fontSize = when { label.length > 8 -> 7.5.sp; label.length > 5 -> 9.sp; label.length > 3 -> 10.sp; else -> 12.sp },
