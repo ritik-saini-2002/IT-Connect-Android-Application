@@ -296,7 +296,7 @@ class ServerConnectModule : ViewModel() {
         try {
             val ctx = BaseContext(PropertyConfiguration(Properties()))
             val nbt = ctx.nameServiceClient.getByName(trimmed)
-            val ip  = nbt.inetAddress.hostAddress
+            val ip  = nbt.toInetAddress().hostAddress
             Log.d("ServerConnectModule", "NetBIOS resolved '$trimmed' → $ip")
             return@withContext ip
         } catch (e: Exception) {
