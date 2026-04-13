@@ -29,15 +29,24 @@ android {
         buildConfigField("String", "PB_ADMIN_PASSWORD",   "\"${props.getProperty("pb.admin.password",   "")}\"")
     }
 
+    // ── Consistent signing key ──────────────────────────────────────────────
+    // itconnect.jks is committed to the repo so every machine that clones
+    // this project signs with the same key.  Android will update the installed
+    // app rather than forcing an uninstall when you switch machines.
+    signingConfigs {
+        create("itconnect") {
+            storeFile     = file("itconnect.jks")
+            storePassword = "ITConnect@2024"
+            keyAlias      = "itconnect"
+            keyPassword   = "ITConnect@2024"
+        }
+    }
+
     buildTypes {
         debug {
-            isDebuggable        = true
-            isMinifyEnabled     = false
-            // FIX: Removed applicationIdSuffix = ".debug"
-            // This was causing "reinstall APK" errors when cloning repo to another
-            // computer because debug builds had package "com.example.itconnect.debug"
-            // while release builds had "com.example.itconnect" — Android treats these
-            // as different apps so you had to uninstall the old one first.
+            isDebuggable  = true
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("itconnect")
         }
         release {
             isMinifyEnabled   = true
@@ -46,8 +55,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
-            // Keeps mapping.txt for deobfuscating crash reports
+            signingConfig = signingConfigs.getByName("itconnect")
             ndk { debugSymbolLevel = "FULL" }
         }
     }
