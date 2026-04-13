@@ -221,13 +221,15 @@ private const val KEY_SAVED_SERVERS = "saved_servers"
 // LOCAL read buffer
 private const val READ_BUFFER = 8 * 1024 * 1024        // 8 MB
 
-// SMB2/3 with useLargeReadWrite=true negotiates MaxReadSize/MaxWriteSize
-// with the server (up to 8 MB on Windows 10/11, 1 MB on most NAS).
-// jcifs-ng handles splitting internally if our chunk exceeds MaxWriteSize,
-// so 1 MB is safe for ALL SMB2/3 servers and gives ~10× better throughput
-// than the old 60 KB limit.
-private const val SMB_READ_BUFFER  = 1024 * 1024        // 1 MB
-private const val SMB_WRITE_CHUNK  = 1024 * 1024        // 1 MB
+// jcifs-ng splits SMB2_READ requests automatically when the buffer exceeds
+// MaxReadSize — so a large Java read buffer is safe and fast.
+private const val SMB_READ_BUFFER  = 1024 * 1024        // 1 MB — jcifs-ng splits reads internally
+
+// jcifs-ng does NOT split SMB2_WRITE requests automatically.
+// The write chunk must stay within the server's negotiated MaxWriteSize
+// (commonly 64 KB on NAS / older Windows shares).  60 KB leaves room
+// for the SMB2 header and is safe for every server we might connect to.
+private const val SMB_WRITE_CHUNK  = 60 * 1024          // 60 KB — safe for all SMB2/3 servers
 
 // Local file write buffer (downloading FROM smb TO local disk)
 private const val LOCAL_WRITE_BUFFER = 4 * 1024 * 1024 // 4 MB
