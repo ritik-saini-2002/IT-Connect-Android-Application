@@ -23,8 +23,8 @@ android {
         val props = com.android.build.gradle.internal.cxx.configure
             .gradleLocalProperties(rootDir, providers)
 
-        buildConfigField("String", "PB_HOST",             "\"${props.getProperty("pb.host",             "192.168.1.100")}\"")
-        buildConfigField("String", "PB_PORT",             "\"${props.getProperty("pb.port",             "8090")}\"")
+        buildConfigField("String", "PB_HOST",             "\"${props.getProperty("pb.host",             "192.168.7.28")}\"")
+        buildConfigField("String", "PB_PORT",             "\"${props.getProperty("pb.port",             "5005")}\"")
         buildConfigField("String", "PB_ADMIN_EMAIL",      "\"${props.getProperty("pb.admin.email",      "")}\"")
         buildConfigField("String", "PB_ADMIN_PASSWORD",   "\"${props.getProperty("pb.admin.password",   "")}\"")
     }

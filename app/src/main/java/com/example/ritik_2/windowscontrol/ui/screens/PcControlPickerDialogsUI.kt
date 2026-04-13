@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -241,12 +242,12 @@ fun PcFilePickerDialog(
                                 color = MaterialTheme.colorScheme.primary)
                         }
                         items(files, key = { "f_${it.path}" }) { file ->
-                            val fileIcon = when (file.extension) {
-                                in listOf("mp4","mkv","avi","mov") -> "🎬"
-                                in listOf("mp3","wav","flac") -> "🎵"
-                                in listOf("py","bat","ps1") -> "⚙️"
-                                in listOf("pdf") -> "📕"
-                                else -> "📄"
+                            val fileIcon: ImageVector = when (file.extension) {
+                                in listOf("mp4","mkv","avi","mov") -> Icons.Default.Movie
+                                in listOf("mp3","wav","flac") -> Icons.Default.MusicNote
+                                in listOf("py","bat","ps1") -> Icons.Default.Code
+                                in listOf("pdf") -> Icons.Default.PictureAsPdf
+                                else -> Icons.Default.Description
                             }
                             Surface(
                                 onClick = { onPick(file.path) },
@@ -259,7 +260,7 @@ fun PcFilePickerDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(fileIcon, fontSize = 20.sp)
+                                    Icon(fileIcon, null, modifier = Modifier.size(20.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(file.name, fontWeight = FontWeight.Medium,
                                             style = MaterialTheme.typography.bodyMedium,

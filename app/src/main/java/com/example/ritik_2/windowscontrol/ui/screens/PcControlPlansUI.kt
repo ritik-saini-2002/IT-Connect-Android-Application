@@ -38,6 +38,7 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import com.example.ritik_2.windowscontrol.data.PcStepSerializer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,28 +46,30 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
     val plans            by viewModel.plans.observeAsState(emptyList())
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
     val uiState          by viewModel.uiState.collectAsStateWithLifecycle()
+    val drives           by viewModel.drives.collectAsStateWithLifecycle()
+    val dirItems         by viewModel.dirItems.collectAsStateWithLifecycle()
+    val currentPath      by viewModel.currentPath.collectAsStateWithLifecycle()
     val context           = LocalContext.current
     val cfg = LocalConfiguration.current
     val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
 
     LaunchedEffect(uiState) {
         when (val s = uiState) {
-            is PcUiState.Success -> { android.widget.Toast.makeText(context, "✅ ${s.message}", android.widget.Toast.LENGTH_SHORT).show(); viewModel.resetUiState() }
-            is PcUiState.Error -> { android.widget.Toast.makeText(context, "❌ ${s.message}", android.widget.Toast.LENGTH_SHORT).show(); viewModel.resetUiState() }
+            is PcUiState.Success -> { android.widget.Toast.makeText(context, s.message, android.widget.Toast.LENGTH_SHORT).show(); viewModel.resetUiState() }
+            is PcUiState.Error -> { android.widget.Toast.makeText(context, "Error: ${s.message}", android.widget.Toast.LENGTH_SHORT).show(); viewModel.resetUiState() }
             else -> {}
         }
     }
 
     var pickFileForPlan    by remember { mutableStateOf<PcPlan?>(null) }
     var pickFileAndExecute by remember { mutableStateOf<PcPlan?>(null) }
-    var filePickerPath     by remember { mutableStateOf("C:/") }
-    var filePickerItems    by remember { mutableStateOf<List<PcFileItem>>(emptyList()) }
-    var filePickerLoading  by remember { mutableStateOf(false) }
-    val scope              = rememberCoroutineScope()
+    // pickerOpen tracks whether user has explicitly opened the picker
+    val pickerOpen = pickFileForPlan != null || pickFileAndExecute != null
 
-    LaunchedEffect(filePickerPath) {
-        if (pickFileForPlan != null || pickFileAndExecute != null) {
-            filePickerLoading = true; filePickerItems = viewModel.browsePickerDir(filePickerPath); filePickerLoading = false
+    // Load drives when picker is opened
+    LaunchedEffect(pickerOpen) {
+        if (pickerOpen && drives.isEmpty()) {
+            viewModel.loadDrives()
         }
     }
 
@@ -82,7 +85,7 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
         if (plans.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("⚡", fontSize = 48.sp)
+                    Icon(Icons.Default.Bolt, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("No plans yet", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Tap + to create your first automation", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f), textAlign = TextAlign.Center)
                 }
@@ -101,9 +104,16 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     }
                     items(plans, key = { it.planId }) { plan ->
-                        SwipeablePlanCard(plan = plan, onExecute = { viewModel.executePlan(plan) }, onEdit = { viewModel.startEditPlan(plan) },
-                            onDelete = { viewModel.deletePlan(plan) }, onAddFileAndExecute = { p -> filePickerPath = "C:/"; pickFileAndExecute = p },
-                            onAddFileToPlan = { p -> filePickerPath = "C:/"; pickFileForPlan = p }, compact = true)
+                        SwipeablePlanCard(
+                            plan = plan,
+                            onExecute = { viewModel.executePlan(plan) },
+                            onEdit = { viewModel.startEditPlan(plan) },
+                            onDelete = { viewModel.deletePlan(plan) },
+                            onAddFileAndExecute = { p -> pickFileAndExecute = p },
+                            onAddFileToPlan = { p -> pickFileForPlan = p },
+                            onExecuteFileStep = { step -> viewModel.executeQuickStep(step) },
+                            compact = true
+                        )
                     }
                     item(span = { GridItemSpan(2) }) { Spacer(Modifier.height(60.dp)) }
                 }
@@ -115,14 +125,50 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
                 ) {
                     item { Text("← Swipe right to execute  •  Long-press for more options", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f), modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) }
                     items(plans, key = { it.planId }) { plan ->
-                        SwipeablePlanCard(plan = plan, onExecute = { viewModel.executePlan(plan) }, onEdit = { viewModel.startEditPlan(plan) },
-                            onDelete = { viewModel.deletePlan(plan) }, onAddFileAndExecute = { p -> filePickerPath = "C:/"; pickFileAndExecute = p },
-                            onAddFileToPlan = { p -> filePickerPath = "C:/"; pickFileForPlan = p })
+                        SwipeablePlanCard(
+                            plan = plan,
+                            onExecute = { viewModel.executePlan(plan) },
+                            onEdit = { viewModel.startEditPlan(plan) },
+                            onDelete = { viewModel.deletePlan(plan) },
+                            onAddFileAndExecute = { p -> pickFileAndExecute = p },
+                            onAddFileToPlan = { p -> pickFileForPlan = p },
+                            onExecuteFileStep = { step -> viewModel.executeQuickStep(step) }
+                        )
                     }
                     item { Spacer(Modifier.height(80.dp)) }
                 }
             }
         }
+    }
+
+    // ── File picker dialog for plans ─────────────────────────────────────────
+    if (pickerOpen) {
+        PcFilePickerDialog(
+            drives      = drives,
+            dirItems    = dirItems,
+            currentPath = currentPath,
+            filter      = PcFileFilter.ALL,
+            onBrowseDir = { path -> viewModel.browseDir(path, PcFileFilter.ALL) },
+            onNavigateUp = { viewModel.navigateUp() },
+            onPick      = { path ->
+                val step = PcStep("OPEN_FILE", path)
+                pickFileForPlan?.let { plan ->
+                    viewModel.savePlanDirectly(
+                        plan.copy(stepsJson = PcStepSerializer.toJson(plan.steps + step))
+                    )
+                    pickFileForPlan = null
+                }
+                pickFileAndExecute?.let { plan ->
+                    val updatedPlan = plan.copy(
+                        stepsJson = PcStepSerializer.toJson(plan.steps + step)
+                    )
+                    viewModel.savePlanDirectly(updatedPlan)
+                    viewModel.executePlan(updatedPlan)
+                    pickFileAndExecute = null
+                }
+            },
+            onDismiss   = { pickFileForPlan = null; pickFileAndExecute = null }
+        )
     }
 }
 
@@ -131,6 +177,7 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
 fun SwipeablePlanCard(
     plan: PcPlan, onExecute: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
     onAddFileAndExecute: (PcPlan) -> Unit = {}, onAddFileToPlan: (PcPlan) -> Unit = {},
+    onExecuteFileStep: (PcStep) -> Unit = {},
     compact: Boolean = false
 ) {
     val scope = rememberCoroutineScope(); val offsetX = remember { Animatable(0f) }
@@ -182,12 +229,26 @@ fun SwipeablePlanCard(
                         fileSteps.forEach { step ->
                             val name = step.filePathArg().substringAfterLast('/').substringAfterLast('\\').take(32)
                             val isMedia = step.fileExtension() in listOf("mp4","mkv","avi","mov","mp3","wav","flac","aac")
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(step.fileIcon(), fontSize = 12.sp)
-                                Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Surface(shape = RoundedCornerShape(6.dp), color = if (isMedia) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer) {
-                                    Text(if (isMedia) "▶" else "Open", Modifier.padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall,
-                                        color = if (isMedia) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer)
+                            Surface(
+                                onClick = { onExecuteFileStep(step) },
+                                shape   = RoundedCornerShape(6.dp),
+                                color   = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(step.fileIconVector(), null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Surface(shape = RoundedCornerShape(4.dp), color = if (isMedia) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer) {
+                                        if (isMedia) {
+                                            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp).size(12.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        } else {
+                                            Text("Open", Modifier.padding(horizontal = 4.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -198,7 +259,7 @@ fun SwipeablePlanCard(
     }
 
     if (showLongPressMenu) {
-        AlertDialog(onDismissRequest = { showLongPressMenu = false }, icon = { Text("⚡", fontSize = 24.sp) },
+        AlertDialog(onDismissRequest = { showLongPressMenu = false }, icon = { Icon(Icons.Default.Bolt, null) },
             title = { Text(plan.planName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

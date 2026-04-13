@@ -11,10 +11,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.theme.ITConnectTheme
@@ -25,16 +29,51 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 class PcControlFileBrowserActivity : ComponentActivity() {
     private lateinit var viewModel: PcControlViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        enableEdgeToEdge()
+        applyFullscreen()
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         viewModel = ViewModelProvider(this)[PcControlViewModel::class.java]
         setContent { ITConnectTheme { FileBrowserScreen(viewModel) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyFullscreen()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreen()
+    }
+
+    private fun applyFullscreen() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 }
 
@@ -56,10 +95,13 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
     val transferProg     by vm.transferProgress.collectAsStateWithLifecycle()
     val connectionStatus by vm.connectionStatus.collectAsStateWithLifecycle()
     val openWithDlg      by vm.openWithDialog.collectAsStateWithLifecycle()
+    val plans            by vm.plans.observeAsState(emptyList())
 
     val vmLevel       by vm.browserLevel.collectAsStateWithLifecycle()
     val vmFilter      by vm.selectedFilter.collectAsStateWithLifecycle()
     val vmSearchQuery by vm.searchQuery.collectAsStateWithLifecycle()
+
+    var addFileToPlanItem by remember { mutableStateOf<PcFileItem?>(null) }
 
     val level: BrowserLevel = when (val l = vmLevel) {
         is BrowserLevelState.Root      -> BrowserLevel.Root
@@ -349,6 +391,7 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         openWithDialog   = openWithDlg,
         searchQuery      = vmSearchQuery,
         isRefreshing     = isRefreshing,
+        savedServers     = savedServers,
     )
 
     val callbacks = FileBrowserCallbacks(
@@ -389,7 +432,76 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
         onOpenWithSelect  = { vm.resolveOpenWith(it.exePath) },
         onDismissOpenWith = { vm.dismissOpenWithDialog() },
         onSearchChange    = { query -> handleSearchChange(query) },
+        onAddServer       = { showServerDialog = true },
+        onEditServer      = { server -> editingServer = server; showServerDialog = true },
+        onDeleteServer    = { server ->
+            val updated = savedServers.filter { it.id != server.id }
+            savedServers = updated
+            ServerCredentialStore.save(context, updated)
+        },
+        onConnectServer   = { /* TODO: SMB server connect */ },
+        onAddFileToPlan   = if (plans.isNotEmpty()) { item -> addFileToPlanItem = item } else null,
     )
+
+    // ── Plan selector dialog (add file to plan) ───────────────────────────────
+    addFileToPlanItem?.let { fileItem ->
+        AlertDialog(
+            onDismissRequest = { addFileToPlanItem = null },
+            icon  = { Icon(Icons.Default.PlaylistAdd, null,
+                tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Add to Plan") },
+            text  = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Select a plan to add \"${fileItem.name}\"",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    LazyColumn(
+                        modifier            = Modifier.heightIn(max = 300.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(plans) { plan ->
+                            Surface(
+                                onClick = {
+                                    val step        = PcStep("OPEN_FILE", fileItem.path)
+                                    val updatedPlan = plan.copy(
+                                        stepsJson = PcStepSerializer.toJson(plan.steps + step)
+                                    )
+                                    vm.savePlanDirectly(updatedPlan)
+                                    addFileToPlanItem = null
+                                },
+                                shape    = RoundedCornerShape(10.dp),
+                                color    = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier.padding(10.dp),
+                                    verticalAlignment     = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Bolt, null, modifier = Modifier.size(20.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(plan.planName,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines   = 1,
+                                            overflow   = TextOverflow.Ellipsis)
+                                        Text("${plan.steps.size} steps",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Icon(Icons.Default.ChevronRight, null,
+                                        modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { addFileToPlanItem = null }) { Text("Cancel") } }
+        )
+    }
 
     PcControlFileBrowserUI(state = uiState, callbacks = callbacks)
 }

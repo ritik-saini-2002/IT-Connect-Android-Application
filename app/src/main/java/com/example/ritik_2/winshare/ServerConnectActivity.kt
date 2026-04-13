@@ -1,5 +1,6 @@
 package com.example.ritik_2.winshare
 
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.Window
@@ -14,9 +15,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.theme.Ritik_2Theme
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class ServerConnectActivity : ComponentActivity() {
+
+    @Inject lateinit var authRepository: AuthRepository
 
     private val viewModel: ServerConnectModule by viewModels()
 
@@ -59,6 +67,9 @@ class ServerConnectActivity : ComponentActivity() {
             }
         })
 
+        // Set auth state on ViewModel so it can guard file-browsing operations
+        viewModel.isLoggedIn = authRepository.isLoggedIn
+
         val autoConnectId = intent.getStringExtra("auto_connect_server_id")
 
         setContent {
@@ -68,8 +79,12 @@ class ServerConnectActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     ServerConnectApp(
-                        viewModel = viewModel,
-                        autoConnectServerId = autoConnectId
+                        viewModel           = viewModel,
+                        autoConnectServerId = autoConnectId,
+                        isLoggedIn          = authRepository.isLoggedIn,
+                        onLoginClick        = {
+                            startActivity(Intent(this@ServerConnectActivity, LoginActivity::class.java))
+                        }
                     )
                 }
             }
@@ -79,11 +94,17 @@ class ServerConnectActivity : ComponentActivity() {
 
 @Composable
 private fun ServerConnectApp(
-    viewModel: ServerConnectModule,
-    autoConnectServerId: String? = null
+    viewModel           : ServerConnectModule,
+    autoConnectServerId : String?  = null,
+    isLoggedIn          : Boolean  = true,
+    onLoginClick        : () -> Unit = {}
 ) {
     if (autoConnectServerId != null) {
         viewModel.handleEvent(ServerConnectEvent.AutoConnectServer(autoConnectServerId))
     }
-    ServerConnectScreen(viewModel = viewModel)
+    ServerConnectScreen(
+        viewModel    = viewModel,
+        isLoggedIn   = isLoggedIn,
+        onLoginClick = onLoginClick
+    )
 }

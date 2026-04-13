@@ -78,9 +78,9 @@ object PcControlMain {
 }
 
 @Composable
-fun PcControlEntry() {
+fun PcControlEntry(isLoggedIn: Boolean = true) {
     val context = PcControlMain.requireContext()
     val factory = remember { PcControlViewModelFactory(context) }
     val viewModel: PcControlViewModel = viewModel(factory = factory)
-    PcControlMainScreen(viewModel = viewModel)
+    PcControlMainScreen(viewModel = viewModel, isLoggedIn = isLoggedIn)
 }

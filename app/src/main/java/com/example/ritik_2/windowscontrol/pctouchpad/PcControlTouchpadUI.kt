@@ -131,9 +131,11 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
     val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
 
-    var sensitivity  by remember { mutableFloatStateOf(2f) }
-    var feedback     by remember { mutableStateOf("") }
-    var liveScreenOn by remember { mutableStateOf(false) }
+    var sensitivity     by remember { mutableFloatStateOf(2f) }
+    var feedback        by remember { mutableStateOf("") }
+    var liveScreenOn    by remember { mutableStateOf(false) }
+    var zoomLocked      by remember { mutableStateOf(true) }
+    var touchpadLocked  by remember { mutableStateOf(false) }
     val scope        = rememberCoroutineScope()
     var fbJob        by remember { mutableStateOf<Job?>(null) }
     var showUrlBar   by remember { mutableStateOf(false) }
@@ -153,51 +155,107 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
         showFeedback("Opening: $url"); urlText = ""; showUrlBar = false
     }}
 
-    AnimatedContent(
-        targetState = isLandscape,
-        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
-        label = "orientation"
-    ) { landscape ->
-        if (landscape) {
-            LandscapeLayout(vm = viewModel, sensitivity = sensitivity, feedback = feedback,
-                connectionStatus = connectionStatus, liveScreenOn = liveScreenOn,
-                showUrlBar = showUrlBar, urlText = urlText,
-                onLiveToggle = { liveScreenOn = it }, onFeedback = showFeedback,
-                onSensChange = { sensitivity = it }, onToggleUrlBar = { showUrlBar = !showUrlBar },
-                onUrlChange = { urlText = it }, onOpenUrl = openUrl,
-                shortcutGroup = shortcutGroup, onShortcutGroupChange = { shortcutGroup = it },
-                onShowVolumeSlider = { viewModel.fetchVolume(); showVolumeSlider = true },
-                onShowBrightnessSlider = { viewModel.fetchBrightness(); showBrightnessSlider = true })
-        } else {
-            PortraitLayout(vm = viewModel, sensitivity = sensitivity, feedback = feedback,
-                connectionStatus = connectionStatus, showUrlBar = showUrlBar, urlText = urlText,
-                onFeedback = showFeedback, onSensChange = { sensitivity = it },
-                onToggleUrlBar = { showUrlBar = !showUrlBar },
-                onUrlChange = { urlText = it }, onOpenUrl = openUrl,
-                onShowVolumeSlider = { viewModel.fetchVolume(); showVolumeSlider = true },
-                onShowBrightnessSlider = { viewModel.fetchBrightness(); showBrightnessSlider = true })
+    Box(Modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = isLandscape,
+            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+            label = "orientation"
+        ) { landscape ->
+            if (landscape) {
+                LandscapeLayout(vm = viewModel, sensitivity = sensitivity, feedback = feedback,
+                    connectionStatus = connectionStatus, liveScreenOn = liveScreenOn,
+                    showUrlBar = showUrlBar, urlText = urlText,
+                    zoomLocked = zoomLocked, touchpadLocked = touchpadLocked,
+                    onLiveToggle = { liveScreenOn = it }, onFeedback = showFeedback,
+                    onSensChange = { sensitivity = it }, onToggleUrlBar = { showUrlBar = !showUrlBar },
+                    onUrlChange = { urlText = it }, onOpenUrl = openUrl,
+                    onZoomLockToggle = { zoomLocked = !zoomLocked },
+                    onTouchpadLockToggle = { touchpadLocked = !touchpadLocked },
+                    shortcutGroup = shortcutGroup, onShortcutGroupChange = { shortcutGroup = it },
+                    onShowVolumeSlider = { viewModel.fetchVolume(); showVolumeSlider = true },
+                    onShowBrightnessSlider = { viewModel.fetchBrightness(); showBrightnessSlider = true })
+            } else {
+                PortraitLayout(vm = viewModel, sensitivity = sensitivity, feedback = feedback,
+                    connectionStatus = connectionStatus, showUrlBar = showUrlBar, urlText = urlText,
+                    zoomLocked = zoomLocked, onZoomLockToggle = { zoomLocked = !zoomLocked },
+                    touchpadLocked = touchpadLocked, onTouchpadLockToggle = { touchpadLocked = !touchpadLocked },
+                    onFeedback = showFeedback, onSensChange = { sensitivity = it },
+                    onToggleUrlBar = { showUrlBar = !showUrlBar },
+                    onUrlChange = { urlText = it }, onOpenUrl = openUrl,
+                    onShowVolumeSlider = { viewModel.fetchVolume(); showVolumeSlider = true },
+                    onShowBrightnessSlider = { viewModel.fetchBrightness(); showBrightnessSlider = true })
+            }
         }
-    }
 
-    // ── Volume Slider Popup ──────────────────────────────────────────────
-    if (showVolumeSlider) {
-        SystemSliderPopup(
-            title = "🔊 Volume",
-            value = volumeLevel.value.coerceIn(0, 100),
-            onValueChange = { viewModel.setVolume(it) },
-            onDismiss = { showVolumeSlider = false }
-        )
-    }
+        // ── Volume Slider Popup ──────────────────────────────────────────────
+        if (showVolumeSlider) {
+            SystemSliderPopup(
+                title = "🔊 Volume",
+                value = volumeLevel.value.coerceIn(0, 100),
+                onValueChange = { viewModel.setVolume(it) },
+                onDismiss = { showVolumeSlider = false }
+            )
+        }
 
-    // ── Brightness Slider Popup ──────────────────────────────────────────
-    if (showBrightnessSlider) {
-        SystemSliderPopup(
-            title = "🔆 Brightness",
-            value = if (brightnessLevel.value < 0) 50 else brightnessLevel.value.coerceIn(0, 100),
-            onValueChange = { viewModel.setBrightness(it) },
-            onDismiss = { showBrightnessSlider = false },
-            unavailable = brightnessLevel.value < 0
-        )
+        // ── Brightness Slider Popup ──────────────────────────────────────────
+        if (showBrightnessSlider) {
+            SystemSliderPopup(
+                title = "🔆 Brightness",
+                value = if (brightnessLevel.value < 0) 50 else brightnessLevel.value.coerceIn(0, 100),
+                onValueChange = { viewModel.setBrightness(it) },
+                onDismiss = { showBrightnessSlider = false },
+                unavailable = brightnessLevel.value < 0
+            )
+        }
+
+        // ── Full-screen activity lock overlay ────────────────────────────────
+        // Placed last in Box so it sits on top of everything.
+        // pointerInput on the background consumes all touches except the Unlock button.
+        if (touchpadLocked) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent().changes.forEach { it.consume() }
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(Icons.Default.Lock, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
+                    Text(
+                        "Activity Locked",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Text(
+                        "All controls are disabled",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { touchpadLocked = false },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    ) {
+                        Icon(Icons.Default.LockOpen, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Unlock Activity")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -302,9 +360,11 @@ private fun LandscapeLayout(
     vm: PcControlViewModel, sensitivity: Float, feedback: String,
     connectionStatus: PcConnectionStatus, liveScreenOn: Boolean,
     showUrlBar: Boolean, urlText: String,
+    zoomLocked: Boolean = false, touchpadLocked: Boolean = false,
     onLiveToggle: (Boolean) -> Unit, onFeedback: (String) -> Unit,
     onSensChange: (Float) -> Unit, onToggleUrlBar: () -> Unit,
     onUrlChange: (String) -> Unit, onOpenUrl: (String) -> Unit,
+    onZoomLockToggle: () -> Unit = {}, onTouchpadLockToggle: () -> Unit = {},
     shortcutGroup: ModifierGroup? = null, onShortcutGroupChange: (ModifierGroup?) -> Unit = {},
     onShowVolumeSlider: () -> Unit = {}, onShowBrightnessSlider: () -> Unit = {},
 ) {
@@ -339,6 +399,16 @@ private fun LandscapeLayout(
                         GlassButton(c, "↑", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseScroll(3); onFeedback("Scroll ↑") }
                         GlassButton(c, "↓", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseScroll(-3); onFeedback("Scroll ↓") }
                     }
+                    Row(Modifier.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        GlassButton(c, if (zoomLocked) "🔒 Zoom" else "🔓 Zoom", Modifier.weight(1f).fillMaxHeight(),
+                            tintColor = if (zoomLocked) c.danger else null) {
+                            onZoomLockToggle(); onFeedback(if (zoomLocked) "Zoom unlocked" else "Zoom locked")
+                        }
+                        GlassButton(c, if (touchpadLocked) "🔒 Pad" else "🔓 Pad", Modifier.weight(1f).fillMaxHeight(),
+                            tintColor = if (touchpadLocked) c.danger else null) {
+                            onTouchpadLockToggle(); onFeedback(if (touchpadLocked) "Pad unlocked" else "Pad locked")
+                        }
+                    }
                     UrlBarRow(c = c, visible = showUrlBar, urlText = urlText, onUrlChange = onUrlChange, onOpenUrl = onOpenUrl, onDismiss = onToggleUrlBar, modifier = Modifier.fillMaxWidth())
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(gap)) {
@@ -368,7 +438,7 @@ private fun LandscapeLayout(
                         GlassMediaButtons(c = c, vm = vm, onFeedback = onFeedback, onShowVolumeSlider = onShowVolumeSlider, onShowBrightnessSlider = onShowBrightnessSlider)
                     }
                     // Touchpad with integrated scroll slider on right
-                    LaptopTouchpad(c = c, modifier = Modifier.fillMaxWidth().weight(1f), sensitivity = sensitivity, feedback = feedback, onFeedback = onFeedback, vm = vm, semiTransparent = liveScreenOn, showScrollSlider = true)
+                    LaptopTouchpad(c = c, modifier = Modifier.fillMaxWidth().weight(1f), sensitivity = sensitivity, feedback = feedback, onFeedback = onFeedback, vm = vm, semiTransparent = liveScreenOn, showScrollSlider = true, zoomLocked = zoomLocked, touchpadLocked = touchpadLocked)
                     Row(Modifier.fillMaxWidth().height(42.dp).alpha(btnAlpha), horizontalArrangement = Arrangement.spacedBy(gap)) {
                         GlassButton(c, "Space", Modifier.weight(2f).fillMaxHeight(), c.accent) { vm.sendKey("SPACE"); onFeedback("Space") }
                         GlassButton(c, "Enter", Modifier.weight(1.5f).fillMaxHeight(), c.accent) { vm.sendKey("ENTER"); onFeedback("Enter") }
@@ -406,6 +476,8 @@ private fun LandscapeLayout(
 fun PortraitLayout(
     vm: PcControlViewModel, sensitivity: Float, feedback: String,
     connectionStatus: PcConnectionStatus, showUrlBar: Boolean, urlText: String,
+    zoomLocked: Boolean = false, onZoomLockToggle: () -> Unit = {},
+    touchpadLocked: Boolean = false, onTouchpadLockToggle: () -> Unit = {},
     onFeedback: (String) -> Unit, onSensChange: (Float) -> Unit,
     onToggleUrlBar: () -> Unit, onUrlChange: (String) -> Unit, onOpenUrl: (String) -> Unit,
     onShowVolumeSlider: () -> Unit = {}, onShowBrightnessSlider: () -> Unit = {},
@@ -432,18 +504,26 @@ fun PortraitLayout(
                 }
             }
             UrlBarRow(c = c, visible = showUrlBar, urlText = urlText, onUrlChange = onUrlChange, onOpenUrl = onOpenUrl, onDismiss = onToggleUrlBar, modifier = Modifier.fillMaxWidth())
-            LaptopTouchpad(c = c, modifier = Modifier.fillMaxWidth().weight(1f), sensitivity = sensitivity, feedback = feedback, onFeedback = onFeedback, vm = vm, semiTransparent = false, showScrollSlider = false)
+            LaptopTouchpad(c = c, modifier = Modifier.fillMaxWidth().weight(1f), sensitivity = sensitivity, feedback = feedback, onFeedback = onFeedback, vm = vm, semiTransparent = false, showScrollSlider = false, zoomLocked = zoomLocked, touchpadLocked = touchpadLocked)
             Row(Modifier.fillMaxWidth().height(52.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
                 GlassButton(c, "L", Modifier.weight(1f).fillMaxHeight(), c.accent) { vm.sendMouseClick("left"); onFeedback("L Click") }
                 GlassScrollWheel(c = c, vm = vm, onFeedback = onFeedback)
                 GlassButton(c, "R", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseClick("right"); onFeedback("R Click") }
+                GlassButton(c, if (zoomLocked) "🔒Z" else "Z", Modifier.width(42.dp).fillMaxHeight(),
+                    tintColor = if (zoomLocked) c.danger else null) {
+                    onZoomLockToggle(); onFeedback(if (zoomLocked) "Zoom unlocked" else "Zoom locked")
+                }
+                GlassButton(c, if (touchpadLocked) "🔒P" else "P", Modifier.width(42.dp).fillMaxHeight(),
+                    tintColor = if (touchpadLocked) c.danger else null) {
+                    onTouchpadLockToggle(); onFeedback(if (touchpadLocked) "Pad unlocked" else "Pad locked")
+                }
             }
             Row(Modifier.fillMaxWidth().height(50.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
                 GlassButton(c, "🌐", Modifier.width(46.dp).fillMaxHeight(), if (showUrlBar) c.accent else null, onClick = onToggleUrlBar)
                 GlassButton(c, "Alt+F4", Modifier.weight(1.2f).fillMaxHeight(), c.danger) { vm.sendKey("ALT+F4"); onFeedback("Alt+F4") }
                 GlassButton(c, "Enter", Modifier.weight(1f).fillMaxHeight(), c.accent) { vm.sendKey("ENTER"); onFeedback("Enter") }
-                GlassButton(c, "🔊", Modifier.weight(0.85f).fillMaxHeight()) { onShowVolumeSlider() }
-                GlassButton(c, "🔆", Modifier.weight(0.85f).fillMaxHeight()) { onShowBrightnessSlider() }
+                GlassButton(c, "Volume", Modifier.weight(0.85f).fillMaxHeight()) { onShowVolumeSlider() }
+                GlassButton(c, "Brightness", Modifier.weight(0.85f).fillMaxHeight()) { onShowBrightnessSlider() }
                 GlassButton(c, "Mute", Modifier.weight(0.85f).fillMaxHeight()) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "MUTE")); onFeedback("Mute") }
             }
             Row(Modifier.fillMaxWidth().height(50.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -487,9 +567,9 @@ private fun RowScope.GlassMediaButtons(c: GlassColors, vm: PcControlViewModel, o
     data class Btn(val label: String, val tint: Color?, val action: () -> Unit)
     listOf(
         Btn("Alt+F4", c.danger) { vm.sendKey("ALT+F4"); onFeedback("Alt+F4") },
-        Btn("🔊", null) { onShowVolumeSlider() },
+        Btn("Volume", null) { onShowVolumeSlider() },
         Btn("Mute", null) { vm.executeQuickStep(PcStep("SYSTEM_CMD", "MUTE")); onFeedback("Mute") },
-        Btn("🔆", null) { onShowBrightnessSlider() },
+        Btn("Brightness", null) { onShowBrightnessSlider() },
         Btn("F5", c.accentSecondary) { vm.sendKey("F5"); onFeedback("F5") },
         Btn("F11", c.accent) { vm.sendKey("F11"); onFeedback("F11") },
     ).forEach { btn -> GlassButton(c, btn.label, Modifier.weight(1f).fillMaxHeight(), btn.tint, btn.action) }
@@ -531,7 +611,8 @@ fun LaptopTouchpad(
     c: GlassColors, modifier: Modifier, sensitivity: Float,
     feedback: String, onFeedback: (String) -> Unit,
     vm: PcControlViewModel, semiTransparent: Boolean = false,
-    showScrollSlider: Boolean = false
+    showScrollSlider: Boolean = false, zoomLocked: Boolean = false,
+    touchpadLocked: Boolean = false
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -562,6 +643,11 @@ fun LaptopTouchpad(
 
     val showScroll: (String) -> Unit = { dir -> scrollBuf = dir; scrollBufJob?.cancel(); scrollBufJob = scope.launch { delay(600); scrollBuf = "" } }
     fun resetAll() { state = TouchState.IDLE; isActive = false; totalMoveX = 0f; totalMoveY = 0f; scrollAccX = 0f; scrollAccY = 0f; didScroll = false; pinchStartDist = 0f; pinchAccum = 0f; holdJob?.cancel(); holdJob = null }
+
+    // Use rememberUpdatedState so the gesture handler always reads the latest lock values
+    // without needing to restart (which caused the flicker on every toggle).
+    val touchpadLockedState = rememberUpdatedState(touchpadLocked)
+    val zoomLockedState     = rememberUpdatedState(zoomLocked)
 
     val surfaceAlpha = if (semiTransparent) 0.45f else 1f
     val sliderWidthDp = 26.dp
@@ -605,6 +691,8 @@ fun LaptopTouchpad(
                         awaitPointerEventScope {
                             while (true) {
                                 val event = awaitPointerEvent()
+                                // When touchpad is locked, consume all events and do nothing
+                                if (touchpadLockedState.value) { event.changes.forEach { it.consume() }; continue }
                                 val pressed = event.changes.filter { it.pressed }
                                 val count = pressed.size
                                 val first = pressed.firstOrNull() ?: event.changes.firstOrNull() ?: continue
@@ -649,7 +737,7 @@ fun LaptopTouchpad(
                                                     val pinchDelta = curDist - pinchStartDist
                                                     val pinchThreshold = 30f  // px before triggering zoom
 
-                                                    if (abs(pinchDelta) > pinchThreshold && abs(pinchDelta) > abs(avgDy) * 2) {
+                                                    if (!zoomLockedState.value && abs(pinchDelta) > pinchThreshold && abs(pinchDelta) > abs(avgDy) * 2) {
                                                         // Pinch gesture detected — send CTRL+Plus or CTRL+Minus
                                                         pinchAccum += (curDist - kotlin.math.hypot((p2x - p1x).toDouble(), (p2y - p1y).toDouble()).toFloat())
                                                         val pinchStep = 25f
@@ -659,7 +747,7 @@ fun LaptopTouchpad(
                                                             } else {
                                                                 vm.sendKey("CTRL+MINUS"); onFeedback("Zoom −")
                                                             }
-                                                            showScroll(if (pinchAccum > 0) "🔍+" else "🔍−")
+                                                            showScroll(if (pinchAccum > 0) "+" else "−")
                                                             pinchAccum = 0f; didScroll = true
                                                         }
                                                     } else {
@@ -704,7 +792,16 @@ fun LaptopTouchpad(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                if (!isActive && state == TouchState.IDLE) {
+                if (touchpadLocked) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Touch Lock", fontSize = 28.sp)
+                        Text("Touchpad Locked", style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold, color = c.danger)
+                        Text("Tap P / TouchPad to unlock",
+                            fontSize = 9.sp, textAlign = TextAlign.Center, color = c.textTertiary,
+                            modifier = Modifier.padding(horizontal = 20.dp))
+                    }
+                } else if (!isActive && state == TouchState.IDLE) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("Touchpad", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = c.textSecondary)
                         Text("1-finger: move/tap  •  2-finger: scroll/right-click\ndouble-tap: dbl-click  •  hold: drag",
@@ -975,7 +1072,27 @@ fun GlassButton(c: GlassColors, label: String, modifier: Modifier, tintColor: Co
     val scope = rememberCoroutineScope()
     var pressed by remember { mutableStateOf(false) }
     var repeatJob by remember { mutableStateOf<Job?>(null) }
-    val fg = tintColor ?: c.textSecondary
+    val cs = MaterialTheme.colorScheme
+
+    // Map tint → Material3 container/content tokens (same pattern as keyboard KbBtn)
+    val containerColor = when (tintColor) {
+        c.accent          -> cs.primaryContainer
+        c.accentSecondary -> cs.secondaryContainer
+        c.danger          -> cs.errorContainer
+        else              -> cs.surfaceVariant
+    }
+    val contentColor = when (tintColor) {
+        c.accent          -> cs.onPrimaryContainer
+        c.accentSecondary -> cs.onSecondaryContainer
+        c.danger          -> cs.error
+        else              -> cs.onSurfaceVariant
+    }
+    val borderColor = when (tintColor) {
+        c.accent          -> cs.primary.copy(alpha = 0.35f)
+        c.accentSecondary -> cs.secondary.copy(alpha = 0.35f)
+        c.danger          -> cs.error.copy(alpha = 0.35f)
+        else              -> cs.outline.copy(alpha = 0.25f)
+    }
 
     Surface(
         modifier = modifier
@@ -983,7 +1100,7 @@ fun GlassButton(c: GlassColors, label: String, modifier: Modifier, tintColor: Co
                 awaitPointerEventScope {
                     while (true) {
                         // Wait for press
-                        val down = awaitFirstDown(requireUnconsumed = false)
+                        awaitFirstDown(requireUnconsumed = false)
                         pressed = true
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onClick()
@@ -1006,13 +1123,13 @@ fun GlassButton(c: GlassColors, label: String, modifier: Modifier, tintColor: Co
                 }
             },
         shape = RoundedCornerShape(10.dp),
-        color = if (pressed) fg.copy(0.15f) else c.buttonBg,
-        border = BorderStroke(if (pressed) 1.5.dp else 1.dp, if (pressed) fg.copy(0.4f) else c.buttonBorder),
+        color = if (pressed) containerColor.copy(alpha = 0.75f) else containerColor,
+        border = BorderStroke(if (pressed) 1.5.dp else 1.dp, if (pressed) contentColor.copy(0.4f) else borderColor),
         tonalElevation = 2.dp
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(label, fontSize = when { label.length > 8 -> 7.5.sp; label.length > 5 -> 9.sp; label.length > 3 -> 10.sp; else -> 12.sp },
-                fontWeight = FontWeight.Bold, color = fg, textAlign = TextAlign.Center, lineHeight = 12.sp, modifier = Modifier.padding(horizontal = 1.dp))
+                fontWeight = FontWeight.Bold, color = contentColor, textAlign = TextAlign.Center, lineHeight = 12.sp, modifier = Modifier.padding(horizontal = 1.dp))
         }
     }
 }

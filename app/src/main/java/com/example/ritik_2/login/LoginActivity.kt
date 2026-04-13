@@ -13,6 +13,7 @@ import com.example.ritik_2.auth.LoginViewModel
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.registration.RegistrationActivity
+import com.example.ritik_2.windowscontrol.PcControlActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -34,6 +35,8 @@ class LoginActivity : ComponentActivity() {
                     onRegisterClick       = { startActivity(Intent(this, RegistrationActivity::class.java)) },
                     onForgotPasswordClick = { email -> viewModel.sendPasswordReset(email) },
                     onInfoClick           = { startActivity(Intent(this, ContactActivity::class.java)) },
+                    onPcControlClick      = { startActivity(Intent(this, PcControlActivity::class.java)) },
+                    onContactClick        = { startActivity(Intent(this, ContactActivity::class.java)) },
                     loginState            = viewModel.loginState,
                     resetState            = viewModel.resetState
                 )

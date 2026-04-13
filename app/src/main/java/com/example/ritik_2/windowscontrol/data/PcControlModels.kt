@@ -1,5 +1,8 @@
 package com.example.ritik_2.windowscontrol.data
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.room.*
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -24,18 +27,18 @@ data class PcStep(
     val message : String       = ""
 )
 
-enum class PcStepType(val display: String, val icon: String, val description: String) {
-    LAUNCH_APP  ("Launch App",     "▶",  "Open any application"),
-    KILL_APP    ("Kill App",       "✖",  "Close a running process"),
-    KEY_PRESS   ("Key Press",      "⌨",  "Press a key or shortcut"),
-    TYPE_TEXT   ("Type Text",      "📝", "Type text on PC"),
-    MOUSE_CLICK ("Mouse Click",    "🖱", "Click at screen position"),
-    MOUSE_MOVE  ("Mouse Move",     "➡", "Move mouse to position"),
-    MOUSE_SCROLL("Scroll",         "🔄", "Scroll mouse wheel"),
-    RUN_SCRIPT  ("Run Script",     "📜", "Execute .py/.bat/.ps1"),
-    OPEN_FILE   ("Open File",      "📂", "Open file with default app"),
-    SYSTEM_CMD  ("System Command", "⚙",  "Lock/Sleep/Volume etc"),
-    WAIT        ("Wait",           "⏱", "Pause between steps")
+enum class PcStepType(val display: String, val description: String) {
+    LAUNCH_APP  ("Launch App",     "Open any application"),
+    KILL_APP    ("Kill App",       "Close a running process"),
+    KEY_PRESS   ("Key Press",      "Press a key or shortcut"),
+    TYPE_TEXT   ("Type Text",      "Type text on PC"),
+    MOUSE_CLICK ("Mouse Click",    "Click at screen position"),
+    MOUSE_MOVE  ("Mouse Move",     "Move mouse to position"),
+    MOUSE_SCROLL("Scroll",         "Scroll mouse wheel"),
+    RUN_SCRIPT  ("Run Script",     "Execute .py/.bat/.ps1"),
+    OPEN_FILE   ("Open File",      "Open file with default app"),
+    SYSTEM_CMD  ("System Command", "Lock/Sleep/Volume etc"),
+    WAIT        ("Wait",           "Pause between steps")
 }
 
 // Returns true if this step has a launchable/openable file path
@@ -56,22 +59,22 @@ fun PcStep.filePathArg(): String = when (type) {
 fun PcStep.fileExtension(): String =
     filePathArg().substringAfterLast('.', "").lowercase()
 
-fun PcStep.fileIcon(): String {
+fun PcStep.fileIconVector(): ImageVector {
     val ext = fileExtension()
     return when {
-        ext in listOf("mp4","mkv","avi","mov","wmv")         -> "🎬"
-        ext in listOf("mp3","wav","flac","aac","m4a")         -> "🎵"
-        ext in listOf("jpg","jpeg","png","gif","bmp","webp")  -> "🖼️"
-        ext == "pdf"                                          -> "📕"
-        ext in listOf("doc","docx","rtf")                    -> "📘"
-        ext in listOf("xls","xlsx","csv")                    -> "📗"
-        ext in listOf("ppt","pptx")                          -> "📊"
-        ext in listOf("py","bat","ps1","sh","cmd")           -> "⚙️"
-        ext in listOf("txt","log","md")                      -> "📄"
-        ext in listOf("zip","rar","7z","tar","gz")           -> "🗜️"
-        ext in listOf("exe","msi")                           -> "🖥️"
-        value.startsWith("http")                             -> "🌐"
-        else                                                  -> "📂"
+        ext in listOf("mp4","mkv","avi","mov","wmv")         -> Icons.Default.Movie
+        ext in listOf("mp3","wav","flac","aac","m4a")         -> Icons.Default.MusicNote
+        ext in listOf("jpg","jpeg","png","gif","bmp","webp")  -> Icons.Default.Image
+        ext == "pdf"                                          -> Icons.Default.PictureAsPdf
+        ext in listOf("doc","docx","rtf")                    -> Icons.Default.Description
+        ext in listOf("xls","xlsx","csv")                    -> Icons.Default.GridOn
+        ext in listOf("ppt","pptx")                          -> Icons.Default.Slideshow
+        ext in listOf("py","bat","ps1","sh","cmd")           -> Icons.Default.Code
+        ext in listOf("txt","log","md")                      -> Icons.Default.Article
+        ext in listOf("zip","rar","7z","tar","gz")           -> Icons.Default.FolderZip
+        ext in listOf("exe","msi")                           -> Icons.Default.Computer
+        value.startsWith("http")                             -> Icons.Default.Language
+        else                                                  -> Icons.Default.InsertDriveFile
     }
 }
 
@@ -88,8 +91,10 @@ val PC_SYSTEM_COMMANDS = listOf(
     "LOCK","SLEEP","SHUTDOWN","RESTART",
     "VOLUME_UP","VOLUME_DOWN","MUTE","VOLUME_SET",
     "SCREENSHOT","OPEN_URL","OPEN_FOLDER","WIN_R",
-    "TASK_MANAGER","SETTINGS","CONTROL_PANEL"
+    "TASK_MANAGER","SETTINGS","CONTROL_PANEL",
+    "DISPLAY_INTERNAL","DISPLAY_CLONE","DISPLAY_EXTEND","DISPLAY_EXTERNAL"
 )
+
 
 val PC_FILE_ACTIONS = listOf("COPY","MOVE","DELETE","MKDIR","RENAME")
 
@@ -111,6 +116,12 @@ object PcStepSerializer {
             emptyList()
         }
     }
+
+    fun stepToJson(step: PcStep): String = gson.toJson(step)
+
+    fun stepFromJson(json: String): PcStep? = try {
+        gson.fromJson(json, PcStep::class.java)
+    } catch (e: Exception) { null }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -167,7 +178,7 @@ data class PcFileItem(
 data class PcInstalledApp(
     val name      : String,
     val exePath   : String,
-    val icon      : String  = "📦",
+    val icon      : String  = "",
     val isRunning : Boolean = false
 )
 
@@ -183,7 +194,7 @@ data class PcRecentPath(
     val path  : String,
     val label : String,
     val isApp : Boolean = false,
-    val icon  : String  = "📁"
+    val icon  : String  = ""
 )
 
 // ─────────────────────────────────────────────────────────────
@@ -258,7 +269,7 @@ data class PcTransferProgress(
 data class PcOpenWithChoice(
     val appName : String,
     val exePath : String,
-    val icon    : String = "📦"
+    val icon    : String = ""
 )
 
 data class PcOpenWithDialog(

@@ -120,6 +120,15 @@ class AuthRepository @Inject constructor(
                 }
             }
 
+            // Sync role permission templates in background — does NOT block login
+            val sanitizedCompany = session.documentPath.split("/").getOrNull(1) ?: ""
+            if (sanitizedCompany.isNotBlank()) {
+                bgScope.launch {
+                    try { syncManager.syncRoleDefinitions(sanitizedCompany) }
+                    catch (e: Exception) { Log.w(TAG, "Background syncRoleDefinitions: ${e.message}") }
+                }
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}")

@@ -129,21 +129,21 @@ class PcControlRepository(
     suspend fun seedIfEmpty() {
         if (planDao.count() > 0) return
         val samples = listOf(
-            PcPlan.create(planId = "sys_lock", planName = "Lock PC", icon = "🔒",
+            PcPlan.create(planId = "sys_lock", planName = "Lock PC",
                 steps = listOf(PcStep("SYSTEM_CMD", "LOCK"))),
-            PcPlan.create(planId = "sys_sleep", planName = "Sleep PC", icon = "😴",
+            PcPlan.create(planId = "sys_sleep", planName = "Sleep PC",
                 steps = listOf(PcStep("SYSTEM_CMD", "SLEEP"))),
-            PcPlan.create(planId = "sys_shutdown", planName = "Shutdown", icon = "⏻",
+            PcPlan.create(planId = "sys_shutdown", planName = "Shutdown",
                 steps = listOf(PcStep("SYSTEM_CMD", "SHUTDOWN"))),
-            PcPlan.create(planId = "sys_restart", planName = "Restart", icon = "🔄",
+            PcPlan.create(planId = "sys_restart", planName = "Restart",
                 steps = listOf(PcStep("SYSTEM_CMD", "RESTART"))),
-            PcPlan.create(planId = "sys_wake", planName = "Wake Screen", icon = "☀️",
+            PcPlan.create(planId = "sys_wake", planName = "Wake Screen",
                 steps = listOf(
                     PcStep("SYSTEM_CMD", "WAKE_SCREEN"),
                     PcStep("WAIT", ms = 1000),
                     PcStep("KEY_PRESS", "ENTER")
                 )),
-            PcPlan.create(planId = "sys_unlock", planName = "Wake + Enter Password", icon = "🔑",
+            PcPlan.create(planId = "sys_unlock", planName = "Wake + Enter Password",
                 steps = listOf(
                     PcStep("SYSTEM_CMD", "WAKE_SCREEN"),
                     PcStep("WAIT", ms = 1500),
@@ -152,24 +152,32 @@ class PcControlRepository(
                     PcStep("TYPE_TEXT", value = ""),
                     PcStep("KEY_PRESS", "ENTER")
                 )),
-            PcPlan.create(planId = "media_movie", planName = "Movie Night (VLC)", icon = "🎬",
+            PcPlan.create(planId = "media_movie", planName = "Movie Night (VLC)",
                 steps = listOf(
                     PcStep("LAUNCH_APP", "vlc.exe"),
                     PcStep("WAIT", ms = 2000),
                     PcStep("KEY_PRESS", "F11")
                 )),
-            PcPlan.create(planId = "media_ppt", planName = "Start Presentation", icon = "📊",
+            PcPlan.create(planId = "media_ppt", planName = "Start Presentation",
                 steps = listOf(
                     PcStep("LAUNCH_APP", "powerpnt.exe"),
                     PcStep("WAIT", ms = 4000),
                     PcStep("KEY_PRESS", "F5")
                 )),
-            PcPlan.create(planId = "prod_screenshot", planName = "Screenshot", icon = "📸",
+            PcPlan.create(planId = "prod_screenshot", planName = "Screenshot",
                 steps = listOf(PcStep("SYSTEM_CMD", "SCREENSHOT"))),
-            PcPlan.create(planId = "prod_mute", planName = "Toggle Mute", icon = "🔇",
+            PcPlan.create(planId = "prod_mute", planName = "Toggle Mute",
                 steps = listOf(PcStep("SYSTEM_CMD", "MUTE"))),
-            PcPlan.create(planId = "prod_desktop", planName = "Show Desktop", icon = "🖥️",
-                steps = listOf(PcStep("KEY_PRESS", "WIN+D")))
+            PcPlan.create(planId = "prod_desktop", planName = "Show Desktop",
+                steps = listOf(PcStep("KEY_PRESS", "WIN+D"))),
+            PcPlan.create(planId = "disp_internal", planName = "PC Screen Only",
+                steps = listOf(PcStep("SYSTEM_CMD", "DISPLAY_INTERNAL"))),
+            PcPlan.create(planId = "disp_clone", planName = "Duplicate Display",
+                steps = listOf(PcStep("SYSTEM_CMD", "DISPLAY_CLONE"))),
+            PcPlan.create(planId = "disp_extend", planName = "Extend Display",
+                steps = listOf(PcStep("SYSTEM_CMD", "DISPLAY_EXTEND"))),
+            PcPlan.create(planId = "disp_external", planName = "Second Screen Only",
+                steps = listOf(PcStep("SYSTEM_CMD", "DISPLAY_EXTERNAL")))
         )
         samples.forEach { planDao.insert(it) }
     }

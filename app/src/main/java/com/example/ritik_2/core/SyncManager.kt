@@ -84,11 +84,27 @@ class SyncManager @Inject constructor(
             val token = getReadToken()
             refreshUsers(sanitizedCompany, token)
             refreshRoles(sanitizedCompany, token)
+            refreshRoleDefinitions(sanitizedCompany, token)
             refreshDepartments(sanitizedCompany, token)
             refreshCompanies(token)
             Log.d(tag, "refreshCompanyData ✅ $sanitizedCompany")
         } catch (e: Exception) {
             Log.e(tag, "refreshCompanyData failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Fire-and-forget: called after login to sync role permission templates.
+     * Never blocks the login path — runs on bgScope in AuthRepository.
+     */
+    suspend fun syncRoleDefinitions(sanitizedCompany: String) = withContext(Dispatchers.IO) {
+        if (!monitor.serverReachable.value) return@withContext
+        try {
+            val token = getReadToken()
+            refreshRoleDefinitions(sanitizedCompany, token)
+            Log.d(tag, "syncRoleDefinitions ✅ $sanitizedCompany")
+        } catch (e: Exception) {
+            Log.w(tag, "syncRoleDefinitions failed (non-fatal): ${e.message}")
         }
     }
 
@@ -376,6 +392,98 @@ class SyncManager @Inject constructor(
                 Log.w(tag, "refreshRoles: self-heal patch failed: ${e.message}")
             }
         }
+    }
+
+    /**
+     * Reads the `role_definitions` collection to populate RoleEntity.permissions.
+     * If the collection is empty for this company, seeds it from local cache / forRole() defaults.
+     */
+    private suspend fun refreshRoleDefinitions(sc: String, token: String) {
+        val res   = try {
+            pbGet(
+                "${AppConfig.BASE_URL}/api/collections/role_definitions/records" +
+                        "?filter=(sanitizedCompanyName='$sc')&perPage=200",
+                token
+            )
+        } catch (e: Exception) {
+            Log.w(tag, "refreshRoleDefinitions: collection may not exist yet — ${e.message}")
+            return
+        }
+        val items = JSONObject(res).optJSONArray("items") ?: return
+        if (items.length() == 0) {
+            seedRoleDefinitions(sc, token)
+            return
+        }
+        for (i in 0 until items.length()) {
+            val obj      = items.getJSONObject(i)
+            val roleName = obj.optString("roleName")
+            if (roleName.isBlank()) continue
+            val permsArr = try { JSONArray(obj.optString("permissions", "[]")) }
+                           catch (_: Exception) { JSONArray() }
+            val perms    = (0 until permsArr.length())
+                .map { permsArr.optString(it) }
+                .filter { it.isNotBlank() }
+
+            // System_Administrator always gets ALL_PERMISSIONS regardless of server value
+            val finalPerms = if (roleName == Permissions.ROLE_SYSTEM_ADMIN)
+                Permissions.ALL_PERMISSIONS else perms
+
+            val existing = db.roleDao().getById("${sc}_$roleName")
+            if (existing != null) {
+                db.roleDao().upsert(existing.copy(permissions = finalPerms))
+            } else {
+                val companyName = db.companyDao().getByName(sc)?.originalName ?: sc
+                db.roleDao().upsert(
+                    RoleEntity(
+                        id                   = "${sc}_$roleName",
+                        name                 = roleName,
+                        sanitizedCompanyName = sc,
+                        companyName          = companyName,
+                        isCustom             = roleName !in Permissions.ALL_ROLES,
+                        permissions          = finalPerms
+                    )
+                )
+            }
+        }
+        Log.d(tag, "refreshRoleDefinitions: updated ${items.length()} role templates for $sc")
+    }
+
+    /**
+     * One-time bootstrap: seeds `role_definitions` from local cache or Permissions.forRole() defaults.
+     * Only permitted use of Permissions.forRole() — used to populate the server on first run.
+     */
+    private suspend fun seedRoleDefinitions(sc: String, token: String) {
+        val roles   = db.roleDao().getByCompany(sc)
+        val toSeed  = if (roles.isNotEmpty()) roles.map { it.name }
+                      else Permissions.ALL_ROLES
+
+        var seeded = 0
+        for (roleName in toSeed) {
+            val cached = roles.find { it.name == roleName }
+            @Suppress("DEPRECATION")
+            val perms  = when {
+                roleName == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
+                cached?.permissions?.isNotEmpty() == true -> cached.permissions
+                else -> Permissions.forRole(roleName)   // one-time bootstrap only
+            }
+            val payload = JSONObject().apply {
+                put("sanitizedCompanyName", sc)
+                put("roleName",   roleName)
+                put("permissions", JSONArray().also { a -> perms.forEach { a.put(it) } })
+                put("isBuiltIn",  roleName in Permissions.ALL_ROLES)
+            }.toString()
+            try {
+                pbPost(
+                    "${AppConfig.BASE_URL}/api/collections/role_definitions/records",
+                    token, payload
+                )
+                seeded++
+            } catch (e: Exception) {
+                Log.w(tag, "seedRoleDefinitions: failed to seed $roleName: ${e.message}")
+            }
+        }
+        Log.d(tag, "seedRoleDefinitions: seeded $seeded roles for $sc")
+        if (seeded > 0) refreshRoleDefinitions(sc, token)
     }
 
     private suspend fun refreshDepartments(sc: String, token: String) {

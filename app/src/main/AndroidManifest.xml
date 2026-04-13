@@ -117,6 +117,11 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
 
+        <activity android:name=".windowscontrol.ui.screens.PcAddStepActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.Ritik_2" />
+
         <activity android:name=".winshare.ServerConnectActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />

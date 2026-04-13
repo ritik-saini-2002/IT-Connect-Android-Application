@@ -11,7 +11,8 @@ data class AuthSession(
     val email       : String,
     val name        : String,
     val role        : String,
-    val documentPath: String
+    val documentPath: String,
+    val permissions : List<String> = emptyList()
 )
 
 /**

@@ -1,20 +1,21 @@
 package com.example.ritik_2.windowscontrol.pccontrolappdirectory
 
-import android.content.res.Configuration
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
 
 class PcControlAppDirectoryActivity : ComponentActivity() {
 
-    // FIX: Use PcControlViewModelFactory (requires Context) — not the default factory
     private val viewModel: PcControlViewModel by viewModels {
         PcControlViewModelFactory(applicationContext)
     }
@@ -22,6 +23,8 @@ class PcControlAppDirectoryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        applyFullscreen()
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
 
         setContent {
             ITConnectTheme {
@@ -32,7 +35,24 @@ class PcControlAppDirectoryActivity : ComponentActivity() {
         }
     }
 
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
+    override fun onResume() {
+        super.onResume()
+        applyFullscreen()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreen()
+    }
+
+    private fun applyFullscreen() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 }

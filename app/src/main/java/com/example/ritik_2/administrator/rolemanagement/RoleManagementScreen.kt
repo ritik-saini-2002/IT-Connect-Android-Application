@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.model.UserProfile
 
 // ── Navigation levels ─────────────────────────────────────────────────────────
@@ -465,7 +466,7 @@ private fun PermissionsEditorView(
                         Text("${role.name} Permissions",
                             fontWeight = FontWeight.Bold,
                             color      = roleColor(role.name))
-                        Text("${selectedPermissions.size} of ${ALL_PERMISSIONS.size} selected",
+                        Text("${selectedPermissions.size} of ${Permissions.ALL_PERMISSIONS.size} selected",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -819,7 +820,7 @@ private fun CreateRoleDialog(
                             Modifier.heightIn(max = 220.dp).padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            ALL_PERMISSIONS.forEach { perm ->
+                            Permissions.ALL_PERMISSIONS.forEach { perm ->
                                 item(key = perm) {
                                     Row(
                                         Modifier.fillMaxWidth()

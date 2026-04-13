@@ -51,25 +51,16 @@ class PcControlTouchpadActivity : ComponentActivity() {
      */
     private fun applyFullscreen() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
     private fun applyRotationPolicy() {
-        val autoRotate = runCatching {
-            Settings.System.getInt(
-                contentResolver,
-                Settings.System.ACCELEROMETER_ROTATION,
-                0
-            ) == 1
-        }.getOrDefault(false)
-
-        requestedOrientation = if (autoRotate)
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR
-        else
-            ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
     }
 }

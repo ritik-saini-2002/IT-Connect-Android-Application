@@ -54,7 +54,22 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     private val _currentScreen = MutableStateFlow(PcScreen.TOUCHPAD)
     val currentScreen: StateFlow<PcScreen> = _currentScreen
 
-    fun navigateTo(screen: PcScreen) { _currentScreen.value = screen }
+    /** Screens accessible without login */
+    val guestScreens: Set<PcScreen> = setOf(PcScreen.SETTINGS, PcScreen.TOUCHPAD)
+
+    private val _showLoginRequired = MutableStateFlow(false)
+    val showLoginRequired: StateFlow<Boolean> = _showLoginRequired.asStateFlow()
+
+    /** Navigate to [screen], guarded by [isLoggedIn]. Guest screens always accessible. */
+    fun navigateTo(screen: PcScreen, isLoggedIn: Boolean = true) {
+        if (!isLoggedIn && screen !in guestScreens) {
+            _showLoginRequired.value = true
+            return
+        }
+        _currentScreen.value = screen
+    }
+
+    fun dismissLoginRequired() { _showLoginRequired.value = false }
 
     // ── Connection ─────────────────────────────────────────
     private val _connectionStatus = MutableStateFlow(PcConnectionStatus.UNKNOWN)

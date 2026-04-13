@@ -104,7 +104,11 @@ private fun SmallGlassCard(c: AppColors, modifier: Modifier = Modifier, content:
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ServerConnectScreen(viewModel: ServerConnectModule = viewModel()) {
+fun ServerConnectScreen(
+    viewModel   : ServerConnectModule = viewModel(),
+    isLoggedIn  : Boolean = true,
+    onLoginClick: () -> Unit = {}
+) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -158,6 +162,40 @@ fun ServerConnectScreen(viewModel: ServerConnectModule = viewModel()) {
 
             when {
                 uiState.isLoading && !uiState.isTransferring -> GlassLoadingScreen(c)
+                !uiState.isConnected && !isLoggedIn -> {
+                    // Guest view: show server list but with a login prompt overlay for connecting
+                    GlassDisconnectedScreen(c = c,
+                        onConnect = { onLoginClick() },
+                        savedServers = uiState.savedServers,
+                        onAutoConnect = { onLoginClick() },
+                        onEditServer = { viewModel.handleEvent(ServerConnectEvent.ShowEditServerDialog(it)) },
+                        onDeleteServer = { viewModel.handleEvent(ServerConnectEvent.DeleteSavedServer(it)) })
+                    // Login prompt banner
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                                Text("Log in to browse and transfer files",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f))
+                                TextButton(onClick = onLoginClick) { Text("Log In") }
+                            }
+                        }
+                    }
+                }
                 !uiState.isConnected -> GlassDisconnectedScreen(c = c,
                     onConnect = { viewModel.handleEvent(ServerConnectEvent.ShowConnectionDialog) },
                     savedServers = uiState.savedServers,

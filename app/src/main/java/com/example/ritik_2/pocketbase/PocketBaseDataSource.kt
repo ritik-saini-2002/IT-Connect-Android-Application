@@ -18,6 +18,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Collections.emptyList
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -94,13 +95,20 @@ class PocketBaseDataSource @Inject constructor(
                 }
             }
 
+            val sessionPermissions: List<String> = when {
+                role == Permissions.ROLE_SYSTEM_ADMIN     -> Permissions.ALL_PERMISSIONS
+                !access?.permissions.isNullOrBlank()      -> parseJsonList(access!!.permissions)
+                else                                      -> emptyList<String>()
+            }
+
             val session = AuthSession(
                 userId       = uid,
                 token        = token,
                 email        = email,
                 name         = access?.name         ?: record.optString("name"),
                 role         = role,
-                documentPath = access?.documentPath ?: record.optString("documentPath")
+                documentPath = access?.documentPath ?: record.optString("documentPath"),
+                permissions  = sessionPermissions
             )
 
             Log.d(tag, "Login ✅  uid=$uid  role=$role")
@@ -264,8 +272,7 @@ class PocketBaseDataSource @Inject constructor(
             val token      = getAdminToken()
             val roleJson   = JSONObject().apply {
                 put("role", Permissions.ROLE_SYSTEM_ADMIN)
-                put("permissions", Json.encodeToString(
-                    Permissions.forRole(Permissions.ROLE_SYSTEM_ADMIN)))
+                put("permissions", Json.encodeToString(Permissions.ALL_PERMISSIONS))
             }.toString()
 
             // Update users record
@@ -421,7 +428,15 @@ class PocketBaseDataSource @Inject constructor(
                 val sc           = com.example.ritik_2.core.StringUtils.sanitize(request.companyName)
                 val sd           = com.example.ritik_2.core.StringUtils.sanitize(request.department)
                 val documentPath = "users/$sc/$sd/${request.role}/$userId"
-                val permissions  = Json.encodeToString(Permissions.forRole(request.role))
+                val rolePerms    = run {
+                    val roleEntity = db.roleDao().getById("${sc}_${request.role}")
+                    when {
+                        request.role == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
+                        roleEntity != null && roleEntity.permissions.isNotEmpty() -> roleEntity.permissions
+                        else -> listOf("view_profile")
+                    }
+                }
+                val permissions  = Json.encodeToString(rolePerms)
 
                 val profileJson = JSONObject().apply {
                     put("imageUrl", imageUrl); put("phoneNumber", request.phoneNumber)

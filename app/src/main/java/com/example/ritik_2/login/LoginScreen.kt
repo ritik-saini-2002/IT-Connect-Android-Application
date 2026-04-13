@@ -43,6 +43,8 @@ fun LoginScreen(
     onRegisterClick      : () -> Unit               = {},
     onForgotPasswordClick: (String) -> Unit         = {},
     onInfoClick          : () -> Unit               = {},
+    onPcControlClick     : () -> Unit               = {},
+    onContactClick       : () -> Unit               = {},
     // ✅ NEW — optional ViewModel state (null-safe so Preview still works)
     loginState           : StateFlow<AuthState>?    = null,
     resetState           : StateFlow<AuthState>?    = null
@@ -122,7 +124,7 @@ fun LoginScreen(
                         containerColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("🔐 Secure access to your workspace", fontSize = 13.sp,
+                        Text("Secure access to your workspace", fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onPrimary,
                             textAlign = TextAlign.Center, modifier = Modifier.padding(12.dp))
                     }
@@ -250,6 +252,32 @@ fun LoginScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // ── Bottom-left: Contact shortcut ──
+        FloatingActionButton(
+            onClick          = onContactClick,
+            modifier         = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp)
+                .navigationBarsPadding(),
+            containerColor   = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor     = MaterialTheme.colorScheme.onTertiaryContainer
+        ) {
+            Icon(Icons.Default.ContactSupport, contentDescription = "Contact")
+        }
+
+        // ── Bottom-right: Windows Control shortcut ──
+        FloatingActionButton(
+            onClick          = onPcControlClick,
+            modifier         = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .navigationBarsPadding(),
+            containerColor   = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor     = MaterialTheme.colorScheme.onSecondaryContainer
+        ) {
+            Icon(Icons.Default.Computer, contentDescription = "Windows Control")
         }
     }
 

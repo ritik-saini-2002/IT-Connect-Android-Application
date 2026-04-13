@@ -276,10 +276,16 @@ class DepartmentViewModel @Inject constructor(
             _state.update { it.copy(isLoading = true) }
             try {
                 db.userDao().setRole(user.id, newRole)
+                val roleEntity = db.roleDao().getById("${sanitizedCompany}_$newRole")
+                val newPerms  = when {
+                    newRole == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
+                    roleEntity != null && roleEntity.permissions.isNotEmpty() -> roleEntity.permissions
+                    else -> listOf("view_profile")
+                }
+                val permsJson = Json.encodeToString(newPerms)
+
                 if (monitor.serverReachable.value) {
                     val token    = syncManager.getAdminToken()
-                    val permsJson = Json.encodeToString(
-                        Permissions.forRole(newRole))
                     syncManager.pbPatch(
                         "${AppConfig.BASE_URL}/api/collections/users/records/${user.id}",
                         token,
@@ -292,8 +298,7 @@ class DepartmentViewModel @Inject constructor(
                     syncManager.enqueue("ROLE_CHANGE", "users", user.id,
                         JSONObject().apply {
                             put("role",        newRole)
-                            put("permissions", Json.encodeToString(
-                                Permissions.forRole(newRole)))
+                            put("permissions", permsJson)
                         }.toString()
                     )
                 }

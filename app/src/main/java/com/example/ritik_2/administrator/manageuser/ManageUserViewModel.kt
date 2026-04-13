@@ -261,7 +261,13 @@ class ManageUserViewModel @Inject constructor(
                 val sc           = StringUtils.sanitize(companyName)
                 val sd           = StringUtils.sanitize(department)
                 val token        = syncManager.getAdminToken()
-                val permsJson    = Json.encodeToString(Permissions.forRole(role))
+                val roleEntity   = db.roleDao().getById("${sc}_$role")
+                val perms        = when {
+                    role == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
+                    roleEntity != null && roleEntity.permissions.isNotEmpty() -> roleEntity.permissions
+                    else -> listOf("view_profile")
+                }
+                val permsJson    = Json.encodeToString(perms)
                 val documentPath = "users/$sc/$sd/$role"
 
                 // 1. Create auth record
@@ -360,7 +366,13 @@ class ManageUserViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val permsJson = Json.encodeToString(Permissions.forRole(newRole))
+                val roleEntity2 = db.roleDao().getById("${sanitizedCompany}_$newRole")
+                val newPerms    = when {
+                    newRole == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
+                    roleEntity2 != null && roleEntity2.permissions.isNotEmpty() -> roleEntity2.permissions
+                    else -> listOf("view_profile")
+                }
+                val permsJson = Json.encodeToString(newPerms)
                 val newPath   = "users/${user.companyName}/${user.deptName}/$newRole/${user.id}"
 
                 db.userDao().setRole(user.id, newRole)

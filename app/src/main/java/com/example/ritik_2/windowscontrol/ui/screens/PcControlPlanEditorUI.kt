@@ -1,5 +1,9 @@
 package com.example.ritik_2.windowscontrol.ui.screens
 
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -13,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -24,22 +29,18 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 @Composable
 fun PcControlPlanEditorUI(viewModel: PcControlViewModel) {
     val plan by viewModel.editingPlan.collectAsStateWithLifecycle()
-    val installedApps by viewModel.installedApps.collectAsStateWithLifecycle()
-    val drives by viewModel.drives.collectAsStateWithLifecycle()
-    val dirItems by viewModel.dirItems.collectAsStateWithLifecycle()
-    val currentPath by viewModel.currentPath.collectAsStateWithLifecycle()
-    val isLoading by viewModel.browseLoading.collectAsStateWithLifecycle()
     val cfg = LocalConfiguration.current
     val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
     val cs = MaterialTheme.colorScheme
 
-    var showAddStep by remember { mutableStateOf(false) }
-    var showFilePicker by remember { mutableStateOf(false) }
-    var filePickerFilter by remember { mutableStateOf(PcFileFilter.ALL) }
-    var filePickerTarget by remember { mutableStateOf("open_file") }
-    var pickedOpenFilePath by remember { mutableStateOf("") }
-    var pickedScriptPath by remember { mutableStateOf("") }
-    var pickedLaunchFile by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val addStepLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val stepJson = result.data?.getStringExtra(PcAddStepActivity.EXTRA_STEP_JSON)
+            val step = stepJson?.let { PcStepSerializer.stepFromJson(it) }
+            if (step != null) viewModel.addStep(step)
+        }
+    }
 
     if (plan == null) return
     val canSave = plan!!.planName.isNotBlank() && plan!!.steps.isNotEmpty()
@@ -71,9 +72,11 @@ fun PcControlPlanEditorUI(viewModel: PcControlViewModel) {
             }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { viewModel.loadInstalledApps(); viewModel.loadDrives(); showAddStep = true },
+            FloatingActionButton(
+                onClick = { addStepLauncher.launch(Intent(context, PcAddStepActivity::class.java)) },
                 containerColor = cs.primary, shape = RoundedCornerShape(16.dp),
-                modifier = if (isLandscape) Modifier.size(48.dp) else Modifier) {
+                modifier = if (isLandscape) Modifier.size(48.dp) else Modifier
+            ) {
                 Icon(Icons.Default.Add, "Add Step", modifier = if (isLandscape) Modifier.size(20.dp) else Modifier)
             }
         }
@@ -116,15 +119,6 @@ fun PcControlPlanEditorUI(viewModel: PcControlViewModel) {
         }
     }
 
-    if (showAddStep) PcAddStepSheet(key = "addStep", installedApps = installedApps, isLoadingApps = isLoading, pickedOpenFile = pickedOpenFilePath, pickedScript = pickedScriptPath, pickedLaunchFile = pickedLaunchFile,
-        onAdd = { step -> viewModel.addStep(step); pickedOpenFilePath = ""; pickedScriptPath = ""; pickedLaunchFile = ""; showAddStep = false },
-        onDismiss = { pickedOpenFilePath = ""; pickedScriptPath = ""; pickedLaunchFile = ""; showAddStep = false },
-        onPickFile = { filter, target -> filePickerFilter = filter; filePickerTarget = target; showFilePicker = true; showAddStep = false })
-
-    if (showFilePicker) PcFilePickerDialog(drives = drives, dirItems = dirItems, currentPath = currentPath, filter = filePickerFilter,
-        onBrowseDir = { path -> viewModel.browseDir(path, filePickerFilter) }, onNavigateUp = { viewModel.navigateUp() },
-        onPick = { path -> when (filePickerTarget) { "open_file" -> pickedOpenFilePath = path; "run_script" -> pickedScriptPath = path; "launch_file" -> pickedLaunchFile = path }; showFilePicker = false; showAddStep = true },
-        onDismiss = { showFilePicker = false; showAddStep = true })
 }
 
 @Composable
@@ -171,6 +165,12 @@ fun PcAddStepSheet(key: String = "sheet", installedApps: List<PcInstalledApp>, i
     var keyValue by remember(key) { mutableStateOf("ENTER") }; var textValue by remember(key) { mutableStateOf("") }
     var waitMs by remember(key) { mutableFloatStateOf(2000f) }; var sysCmd by remember(key) { mutableStateOf("LOCK") }
     var sysCmdArg by remember(key) { mutableStateOf("") }; var killName by remember(key) { mutableStateOf("") }
+    // Mouse/touchpad state
+    var mouseX by remember(key) { mutableStateOf("") }; var mouseY by remember(key) { mutableStateOf("") }
+    var mouseButton by remember(key) { mutableStateOf("left") }; var mouseDouble by remember(key) { mutableStateOf(false) }
+    var scrollAmount by remember(key) { mutableStateOf(3) }; var scrollDir by remember(key) { mutableStateOf("down") }
+    // Key tree tab
+    var keyTab by remember(key) { mutableIntStateOf(0) }
     val filteredApps = remember(installedApps, appSearch) { if (appSearch.isEmpty()) installedApps else installedApps.filter { it.name.contains(appSearch, ignoreCase = true) } }
     val canAdd = when (selectedType) { PcStepType.LAUNCH_APP -> pickedApp != null || manualPath.isNotBlank(); PcStepType.TYPE_TEXT -> textValue.isNotBlank(); PcStepType.RUN_SCRIPT -> pickedScript.isNotBlank(); PcStepType.OPEN_FILE -> pickedOpenFile.isNotBlank(); PcStepType.KILL_APP -> pickedApp != null || killName.isNotBlank(); else -> true }
     val chipCols = if (isLandscape) 4 else 3
@@ -222,8 +222,47 @@ fun PcAddStepSheet(key: String = "sheet", installedApps: List<PcInstalledApp>, i
                         OutlinedTextField(value = killName, onValueChange = { killName = it }, label = { Text("Process name") }, placeholder = { Text("vlc.exe") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), singleLine = true) }
                 }
                 PcStepType.KEY_PRESS -> {
-                    Surface(shape = RoundedCornerShape(10.dp), color = cs.primaryContainer, modifier = Modifier.fillMaxWidth()) { Text(keyValue, Modifier.padding(10.dp), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = cs.onPrimaryContainer) }
-                    PC_COMMON_KEYS.chunked(4).forEach { row -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) { row.forEach { k -> FilterChip(selected = keyValue == k, onClick = { keyValue = k }, label = { Text(k, style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.weight(1f)) }; repeat(4 - row.size) { Spacer(Modifier.weight(1f)) } } }
+                    // Selected key badge
+                    Surface(shape = RoundedCornerShape(10.dp), color = cs.primaryContainer, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("⌨", fontSize = 18.sp)
+                            Text(keyValue, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = cs.onPrimaryContainer, modifier = Modifier.weight(1f))
+                            Text("selected", style = MaterialTheme.typography.labelSmall, color = cs.onPrimaryContainer.copy(0.6f))
+                        }
+                    }
+                    // Tabbed key tree
+                    val keyCategories = listOf(
+                        "Navigate" to listOf("ENTER","ESC","SPACE","TAB","BACKSPACE","DELETE","UP","DOWN","LEFT","RIGHT","HOME","END","PAGE_UP","PAGE_DOWN"),
+                        "F-Keys"   to listOf("F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"),
+                        "Ctrl"     to listOf("CTRL+C","CTRL+V","CTRL+Z","CTRL+S","CTRL+A","CTRL+X","CTRL+N","CTRL+W","CTRL+T","CTRL+F","CTRL+P","CTRL+SHIFT+ESC"),
+                        "Win"      to listOf("WIN+D","WIN+L","WIN+R","WIN+E","WIN+TAB","WIN+I","WIN+A","WIN+S","WIN+X","WIN+PAUSE","WIN+PRINT"),
+                        "Alt"      to listOf("ALT+F4","ALT+TAB","ALT+F","ALT+E","ALT+SPACE","ALT+ENTER"),
+                    )
+                    ScrollableTabRow(
+                        selectedTabIndex = keyTab,
+                        edgePadding      = 0.dp,
+                        divider          = {}
+                    ) {
+                        keyCategories.forEachIndexed { idx, (label, _) ->
+                            Tab(selected = keyTab == idx, onClick = { keyTab = idx },
+                                text = { Text(label, style = MaterialTheme.typography.labelSmall) })
+                        }
+                    }
+                    val catKeys = keyCategories[keyTab].second
+                    val cols = if (isLandscape) 4 else 3
+                    catKeys.chunked(cols).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            row.forEach { k ->
+                                FilterChip(
+                                    selected = keyValue == k,
+                                    onClick  = { keyValue = k },
+                                    label    = { Text(k, style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            repeat(cols - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
                 }
                 PcStepType.TYPE_TEXT -> OutlinedTextField(value = textValue, onValueChange = { textValue = it }, label = { Text("Text to type *") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), minLines = 2)
                 PcStepType.OPEN_FILE -> {
@@ -239,11 +278,48 @@ fun PcAddStepSheet(key: String = "sheet", installedApps: List<PcInstalledApp>, i
                     if (pickedScript.isNotEmpty()) { Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(containerColor = cs.secondaryContainer)) { Row(Modifier.padding(10.dp)) { Text("⚙️ "); Text(pickedScript.substringAfterLast("\\").take(30), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, maxLines = 1) } } }
                     else Button(onClick = { onPickFile(PcFileFilter.SCRIPTS, "run_script") }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) { Icon(Icons.Default.Code, null, Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); Text("Browse Scripts") }
                 }
+                PcStepType.MOUSE_CLICK -> {
+                    Text("CLICK TYPE", style = MaterialTheme.typography.labelSmall, color = cs.primary)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("left" to "Left Click", "right" to "Right Click", "middle" to "Middle").forEach { (btn, lbl) ->
+                            FilterChip(selected = mouseButton == btn && !mouseDouble, onClick = { mouseButton = btn; mouseDouble = false },
+                                label = { Text(lbl, style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    FilterChip(selected = mouseDouble, onClick = { mouseDouble = !mouseDouble; mouseButton = "left" },
+                        label = { Text("🖱 Double Click", style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.fillMaxWidth())
+                    Text("POSITION (leave blank = current cursor)", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant.copy(0.7f))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(value = mouseX, onValueChange = { mouseX = it }, label = { Text("X px") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), singleLine = true)
+                        OutlinedTextField(value = mouseY, onValueChange = { mouseY = it }, label = { Text("Y px") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), singleLine = true)
+                    }
+                }
+                PcStepType.MOUSE_MOVE -> {
+                    Text("MOVE CURSOR TO", style = MaterialTheme.typography.labelSmall, color = cs.primary)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(value = mouseX, onValueChange = { mouseX = it }, label = { Text("X px") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), singleLine = true)
+                        OutlinedTextField(value = mouseY, onValueChange = { mouseY = it }, label = { Text("Y px") }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp), singleLine = true)
+                    }
+                    Text("Tip: use 0,0 = top-left corner", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant.copy(0.5f))
+                }
+                PcStepType.MOUSE_SCROLL -> {
+                    Text("SCROLL DIRECTION", style = MaterialTheme.typography.labelSmall, color = cs.primary)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("up" to "▲ Scroll Up", "down" to "▼ Scroll Down").forEach { (dir, lbl) ->
+                            FilterChip(selected = scrollDir == dir, onClick = { scrollDir = dir },
+                                label = { Text(lbl, style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    Text("AMOUNT: $scrollAmount notches", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Slider(value = scrollAmount.toFloat(), onValueChange = { scrollAmount = it.toInt() }, valueRange = 1f..15f, steps = 13, modifier = Modifier.fillMaxWidth())
+                }
                 else -> OutlinedTextField(value = manualPath, onValueChange = { manualPath = it }, label = { Text("Value") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), singleLine = true)
             }
 
-            Button(onClick = { onAdd(buildStep(selectedType, pickedApp, manualPath, pickedLaunchFile, keyValue, textValue, waitMs, sysCmd, sysCmdArg, pickedOpenFile, pickedScript, killName)) },
-                modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(10.dp), enabled = canAdd) {
+            Button(onClick = {
+                onAdd(buildStep(selectedType, pickedApp, manualPath, pickedLaunchFile, keyValue, textValue, waitMs, sysCmd, sysCmdArg, pickedOpenFile, pickedScript, killName,
+                    mouseX.toIntOrNull() ?: 0, mouseY.toIntOrNull() ?: 0, mouseButton, mouseDouble, scrollAmount, scrollDir))
+            }, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(10.dp), enabled = canAdd) {
                 Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add Step", fontWeight = FontWeight.Bold)
             }
         }
@@ -261,11 +337,23 @@ fun AppListRow(app: PcInstalledApp, onPick: () -> Unit) {
     }
 }
 
-private fun buildStep(type: PcStepType, pickedApp: PcInstalledApp?, manualPath: String, pickedFile: String, keyValue: String, textValue: String, waitMs: Float, sysCmd: String, sysCmdArg: String, openFilePath: String, scriptPath: String, killName: String): PcStep = when (type) {
-    PcStepType.LAUNCH_APP -> PcStep("LAUNCH_APP", pickedApp?.exePath ?: manualPath, args = if (pickedFile.isNotEmpty()) listOf(pickedFile) else emptyList())
-    PcStepType.KILL_APP -> PcStep("KILL_APP", pickedApp?.exePath?.substringAfterLast("\\")?.substringAfterLast("/") ?: killName)
-    PcStepType.KEY_PRESS -> PcStep("KEY_PRESS", keyValue); PcStepType.TYPE_TEXT -> PcStep("TYPE_TEXT", textValue)
-    PcStepType.WAIT -> PcStep("WAIT", ms = waitMs.toInt()); PcStepType.OPEN_FILE -> PcStep("OPEN_FILE", openFilePath)
-    PcStepType.SYSTEM_CMD -> PcStep("SYSTEM_CMD", sysCmd, args = if (sysCmdArg.isNotEmpty()) listOf(sysCmdArg) else emptyList())
-    PcStepType.RUN_SCRIPT -> PcStep("RUN_SCRIPT", scriptPath); else -> PcStep(type.name, manualPath)
+private fun buildStep(
+    type: PcStepType, pickedApp: PcInstalledApp?, manualPath: String, pickedFile: String,
+    keyValue: String, textValue: String, waitMs: Float, sysCmd: String, sysCmdArg: String,
+    openFilePath: String, scriptPath: String, killName: String,
+    mouseX: Int = 0, mouseY: Int = 0, mouseButton: String = "left", mouseDouble: Boolean = false,
+    scrollAmount: Int = 3, scrollDir: String = "down"
+): PcStep = when (type) {
+    PcStepType.LAUNCH_APP  -> PcStep("LAUNCH_APP", pickedApp?.exePath ?: manualPath, args = if (pickedFile.isNotEmpty()) listOf(pickedFile) else emptyList())
+    PcStepType.KILL_APP    -> PcStep("KILL_APP", pickedApp?.exePath?.substringAfterLast("\\")?.substringAfterLast("/") ?: killName)
+    PcStepType.KEY_PRESS   -> PcStep("KEY_PRESS", keyValue)
+    PcStepType.TYPE_TEXT   -> PcStep("TYPE_TEXT", textValue)
+    PcStepType.WAIT        -> PcStep("WAIT", ms = waitMs.toInt())
+    PcStepType.OPEN_FILE   -> PcStep("OPEN_FILE", openFilePath)
+    PcStepType.SYSTEM_CMD  -> PcStep("SYSTEM_CMD", sysCmd, args = if (sysCmdArg.isNotEmpty()) listOf(sysCmdArg) else emptyList())
+    PcStepType.RUN_SCRIPT  -> PcStep("RUN_SCRIPT", scriptPath)
+    PcStepType.MOUSE_CLICK -> PcStep("MOUSE_CLICK", x = mouseX, y = mouseY, button = mouseButton, double = mouseDouble)
+    PcStepType.MOUSE_MOVE  -> PcStep("MOUSE_MOVE", x = mouseX, y = mouseY)
+    PcStepType.MOUSE_SCROLL-> PcStep("MOUSE_SCROLL", value = scrollDir, amount = scrollAmount)
+    else                   -> PcStep(type.name, manualPath)
 }

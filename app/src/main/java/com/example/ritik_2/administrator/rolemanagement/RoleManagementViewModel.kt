@@ -1,5 +1,6 @@
 package com.example.ritik_2.administrator.rolemanagement
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ritik_2.auth.AuthRepository
@@ -20,33 +21,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 
-// ── All available permissions in the system ───────────────────────────────────
-val ALL_PERMISSIONS = listOf(
-    // User management
-    "create_user", "delete_user", "modify_user", "view_all_users",
-    // Role & company
-    "manage_roles", "manage_companies", "manage_permissions",
-    // Data & analytics
-    "view_analytics", "view_reports", "export_data", "access_all_data",
-    // Admin
-    "system_settings", "access_admin_panel", "database_manager",
-    // Team
-    "view_team_users", "modify_team_user", "view_team_analytics",
-    "assign_projects", "assign_tasks", "approve_requests",
-    "view_team_performance", "approve_leave",
-    // HR
-    "manage_employees", "access_personal_data", "generate_reports",
-    "view_hr_analytics",
-    // Profile
-    "view_profile", "edit_profile", "edit_basic_profile",
-    // Projects & tasks
-    "view_assigned_projects", "view_assigned_tasks",
-    "submit_reports",
-    // Complaints
-    "submit_complaints", "view_own_complaints",
-    "view_team_complaints", "view_department_complaints",
-    "view_all_complaints", "resolve_complaints"
-)
 
 data class RoleManagementUiState(
     val isLoading          : Boolean           = false,
@@ -120,24 +94,11 @@ class RoleManagementViewModel @Inject constructor(
                 name        = r.name,
                 userCount   = userEntities.count { it.role == r.name },
                 isCustom    = r.isCustom,
-                permissions = r.permissions.ifEmpty {
-                    Permissions.forRole(r.name)  // default permissions for built-in roles
-                }
+                permissions = r.permissions.ifEmpty { listOf("view_profile") }
             )
         }
 
-        // If no roles in cache, use default roles from Permissions
-        val finalRoles = if (roles.isEmpty()) {
-            Permissions.ALL_ROLES.mapIndexed { i, name ->
-                RoleInfo(
-                    id          = "${sanitizedCompany}_$name",
-                    name        = name,
-                    userCount   = userEntities.count { it.role == name },
-                    isCustom    = false,
-                    permissions = Permissions.forRole(name)
-                )
-            }
-        } else roles
+        val finalRoles = roles
 
         val users = userEntities.map { u ->
             UserProfile(
@@ -253,7 +214,12 @@ class RoleManagementViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val newPerms  = Permissions.forRole(newRole)
+                val roleEntity = db.roleDao().getById("${sanitizedCompany}_$newRole")
+                val newPerms   = when {
+                    newRole == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
+                    roleEntity != null && roleEntity.permissions.isNotEmpty() -> roleEntity.permissions
+                    else -> listOf("view_profile")
+                }
                 val permsJson = Json.encodeToString(newPerms)
                 val newPath   = "users/$sanitizedCompany/${user.sanitizedDept}/$newRole/${user.id}"
 
@@ -338,6 +304,39 @@ class RoleManagementViewModel @Inject constructor(
                 val existing = db.roleDao().getById(role.id)
                 if (existing != null) {
                     db.roleDao().upsert(existing.copy(permissions = perms))
+                }
+
+                // Persist role template to role_definitions collection
+                if (monitor.serverReachable.value) {
+                    try {
+                        val rdToken = syncManager.getAdminToken()
+                        val rdRes   = syncManager.pbGet(
+                            "${AppConfig.BASE_URL}/api/collections/role_definitions/records" +
+                                    "?filter=(sanitizedCompanyName='$sanitizedCompany'&&roleName='${role.name}')&perPage=1",
+                            rdToken
+                        )
+                        val rdId = JSONObject(rdRes).optJSONArray("items")?.optJSONObject(0)?.optString("id")
+                        if (!rdId.isNullOrEmpty()) {
+                            syncManager.pbPatch(
+                                "${AppConfig.BASE_URL}/api/collections/role_definitions/records/$rdId",
+                                rdToken,
+                                JSONObject().apply { put("permissions", permsJson) }.toString()
+                            )
+                        } else {
+                            syncManager.pbPost(
+                                "${AppConfig.BASE_URL}/api/collections/role_definitions/records",
+                                rdToken,
+                                JSONObject().apply {
+                                    put("sanitizedCompanyName", sanitizedCompany)
+                                    put("roleName",   role.name)
+                                    put("permissions", permsJson)
+                                    put("isBuiltIn",  role.name in Permissions.ALL_ROLES)
+                                }.toString()
+                            )
+                        }
+                    } catch (e: Exception) {
+                        Log.w("RoleManagementVM", "role_definitions update failed (non-fatal): ${e.message}")
+                    }
                 }
 
                 // Update all users in this role so their tokens reflect new permissions

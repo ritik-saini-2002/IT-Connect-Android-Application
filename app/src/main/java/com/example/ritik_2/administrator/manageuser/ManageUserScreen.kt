@@ -79,7 +79,7 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
     }
     LaunchedEffect(state.error) {
         state.error?.let {
-            snack.showSnackbar("⚠ $it", duration = SnackbarDuration.Short)
+            snack.showSnackbar(it, duration = SnackbarDuration.Short)
             vm.clearMessages()
         }
     }
@@ -294,7 +294,7 @@ fun ManageUserScreen(vm: ManageUserViewModel) {
                 Column {
                     Text("Permanently delete:")
                     Spacer(Modifier.height(6.dp))
-                    Text("👤  ${user.name}", fontWeight = FontWeight.SemiBold)
+                    Text(user.name, fontWeight = FontWeight.SemiBold)
                     Text(user.email, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (state.isDbAdmin) {

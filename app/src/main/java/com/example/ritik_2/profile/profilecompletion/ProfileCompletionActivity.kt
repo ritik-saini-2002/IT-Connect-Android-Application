@@ -88,10 +88,12 @@ class ProfileCompletionActivity : ComponentActivity() {
             isDbAdmin  = isDbAdmin
         )
 
-        // Permission-based: isAdmin means editor can write all fields,
-        // determined by PermissionGuard not a hardcoded role string.
-        val isAdmin   = PermissionGuard.isSystemAdmin(editorRole) || isDbAdmin ||
-                (editorRole == com.example.ritik_2.data.model.Permissions.ROLE_ADMIN)
+        // Permission-based: isAdmin means editor can write all fields.
+        val editorPermissions = session?.permissions ?: emptyList()
+        val isAdmin   = PermissionGuard.isSystemAdmin(editorRole)
+                || isDbAdmin
+                || "access_all_data" in editorPermissions
+                || editorRole == com.example.ritik_2.data.model.Permissions.ROLE_ADMIN
         val isManager = PermissionGuard.canEditProfile(
             editorRole = editorRole, targetRole = targetRole,
             editorId   = sessionId,  targetId   = userId, isDbAdmin = false

@@ -1,18 +1,26 @@
 package com.example.ritik_2.windowscontrol
 
 import android.content.pm.ActivityInfo
-import android.content.res.Configuration
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class PcControlActivity : ComponentActivity() {
+
+    @Inject lateinit var authRepository: AuthRepository
 
     private val viewModel: PcControlViewModel by viewModels {
         PcControlViewModelFactory(applicationContext)
@@ -20,6 +28,9 @@ class PcControlActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        applyFullscreen()
+        applyRotationPolicy()
         PcControlCrashHandler.install(this)
 
         if (intent.getBooleanExtra("crash_restart", false)) {
@@ -28,28 +39,38 @@ class PcControlActivity : ComponentActivity() {
             PcControlCrashHandler.clearCrash(this)
         }
 
-        applyRotationPolicy()
         viewModel.startRealTimeRefresh(3000L)
 
-        setContent { ITConnectTheme { PcControlEntry() } }
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        applyRotationPolicy()
+        setContent {
+            ITConnectTheme {
+                PcControlEntry(isLoggedIn = authRepository.isLoggedIn)
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        applyRotationPolicy()
+        applyFullscreen()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreen()
+    }
+
+    private fun applyFullscreen() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val controller = WindowInsetsControllerCompat(window, window.decorView)
+        if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     private fun applyRotationPolicy() {
-        val autoRotate = try {
-            Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
-        } catch (_: Exception) { false }
-        requestedOrientation = if (autoRotate) ActivityInfo.SCREEN_ORIENTATION_SENSOR
-        else ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
     }
 
     override fun onStop() { super.onStop(); viewModel.stopRealTimeRefresh() }

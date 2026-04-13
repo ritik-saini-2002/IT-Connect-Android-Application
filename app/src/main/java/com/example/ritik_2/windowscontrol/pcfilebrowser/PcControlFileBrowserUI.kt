@@ -44,21 +44,22 @@ import kotlinx.coroutines.launch
 // ── UI State ──────────────────────────────────────────────────────────────────
 
 data class FileBrowserUiState(
-    val drives           : List<PcDrive>       = emptyList(),
-    val currentPath      : String              = "",
-    val dirItems         : List<PcFileItem>    = emptyList(),
-    val isLoading        : Boolean             = false,
-    val recentPaths      : List<PcRecentPath>  = emptyList(),
-    val specialFolders   : List<PcRecentPath>  = emptyList(),
-    val browserMode      : FileBrowserMode     = FileBrowserMode.EXECUTE,
-    val transferProgress : PcTransferProgress? = null,
-    val connectionStatus : PcConnectionStatus  = PcConnectionStatus.UNKNOWN,
-    val openingFileName  : String?             = null,
-    val selectedFilter   : PcFileFilter        = PcFileFilter.ALL,
-    val level            : BrowserLevel        = BrowserLevel.Root,
-    val openWithDialog   : PcOpenWithDialog?   = null,
-    val searchQuery      : String              = "",
-    val isRefreshing     : Boolean             = false,
+    val drives           : List<PcDrive>              = emptyList(),
+    val currentPath      : String                     = "",
+    val dirItems         : List<PcFileItem>           = emptyList(),
+    val isLoading        : Boolean                    = false,
+    val recentPaths      : List<PcRecentPath>         = emptyList(),
+    val specialFolders   : List<PcRecentPath>         = emptyList(),
+    val browserMode      : FileBrowserMode            = FileBrowserMode.EXECUTE,
+    val transferProgress : PcTransferProgress?        = null,
+    val connectionStatus : PcConnectionStatus         = PcConnectionStatus.UNKNOWN,
+    val openingFileName  : String?                    = null,
+    val selectedFilter   : PcFileFilter               = PcFileFilter.ALL,
+    val level            : BrowserLevel               = BrowserLevel.Root,
+    val openWithDialog   : PcOpenWithDialog?          = null,
+    val searchQuery      : String                     = "",
+    val isRefreshing     : Boolean                    = false,
+    val savedServers     : List<SavedServerCredential> = emptyList(),
 )
 
 // ── Nav level ─────────────────────────────────────────────────────────────────
@@ -101,6 +102,13 @@ data class FileBrowserCallbacks(
     val onDismissOpenWith    : () -> Unit,
     val onSearchChange       : (String) -> Unit,
     val onNavigateBack       : () -> Unit,
+    // Server section
+    val onAddServer          : () -> Unit                              = {},
+    val onEditServer         : (SavedServerCredential) -> Unit         = {},
+    val onDeleteServer       : (SavedServerCredential) -> Unit         = {},
+    val onConnectServer      : (SavedServerCredential) -> Unit         = {},
+    // Add-to-plan (null = hide option)
+    val onAddFileToPlan      : ((PcFileItem) -> Unit)?                 = null,
 )
 
 // ── Root composable ───────────────────────────────────────────────────────────
@@ -581,8 +589,9 @@ fun PcControlFileBrowserUI(
         // ── Context menu ──────────────────────────────────────────────────────
         contextItem?.let { item ->
             ItemContextMenu(
-                item     = item,
-                anchor   = contextMenuOffset,
+                item         = item,
+                anchor       = contextMenuOffset,
+                onAddToPlan  = if (!item.isDir) callbacks.onAddFileToPlan else null,
                 onAction = { action ->
                     contextItem = null
                     when (action) {
@@ -690,7 +699,7 @@ fun PcControlFileBrowserUI(
     propertiesItem?.let { item ->
         AlertDialog(
             onDismissRequest = { propertiesItem = null },
-            icon  = { Text(if (item.isDir) "📁" else fileIcon(item.extension), fontSize = 28.sp) },
+            icon  = { Icon(if (item.isDir) Icons.Default.Folder else fileIconVector(item.extension), null, modifier = Modifier.size(28.dp)) },
             title = { Text(item.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text  = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -778,7 +787,12 @@ private fun ContentArea(
                 listState            = listState,
                 onDriveClick         = callbacks.onDriveClick,
                 onRecentClick        = callbacks.onRecentClick,
-                onSpecialFolderClick = callbacks.onSpecialFolderClick
+                onSpecialFolderClick = callbacks.onSpecialFolderClick,
+                servers              = state.savedServers,
+                onConnectServer      = callbacks.onConnectServer,
+                onAddServer          = callbacks.onAddServer,
+                onEditServer         = callbacks.onEditServer,
+                onDeleteServer       = callbacks.onDeleteServer,
             )
             else -> FileListView(
                 dirItems          = state.dirItems,
@@ -1282,7 +1296,7 @@ fun FileListView(
                         pair.forEach { file ->
                             CompactFileCard(
                                 file        = file,
-                                icon        = fileIcon(file.extension),
+                                icon        = fileIconVector(file.extension),
                                 browserMode = browserMode,
                                 onOpen      = { onFileOpen(file) },
                                 onDownload  = { onFileDownload(file) },
@@ -1379,7 +1393,7 @@ fun SearchResultsView(
                         pair.forEach { f ->
                             CompactFileCard(
                                 file        = f,
-                                icon        = fileIcon(f.extension),
+                                icon        = fileIconVector(f.extension),
                                 browserMode = browserMode,
                                 onOpen      = { onFileOpen(f) },
                                 onDownload  = { onFileDownload(f) },
@@ -1518,7 +1532,7 @@ fun CompactFolderCard(
 @Composable
 fun CompactFileCard(
     file       : PcFileItem,
-    icon       : String,
+    icon       : ImageVector,
     browserMode: FileBrowserMode,
     onOpen     : () -> Unit,
     onDownload : () -> Unit,
@@ -1550,7 +1564,7 @@ fun CompactFileCard(
             verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(icon, fontSize = 17.sp)
+            Icon(icon, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Column(Modifier.weight(1f)) {
                 Text(file.name, fontSize = 11.sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
@@ -1580,10 +1594,11 @@ fun CompactFileCard(
 
 @Composable
 fun ItemContextMenu(
-    item     : PcFileItem,
-    anchor   : Offset,
-    onAction : (ItemAction) -> Unit,
-    onDismiss: () -> Unit
+    item        : PcFileItem,
+    anchor      : Offset,
+    onAction    : (ItemAction) -> Unit,
+    onDismiss   : () -> Unit,
+    onAddToPlan : ((PcFileItem) -> Unit)? = null,
 ) {
     data class ActionItem(
         val action        : ItemAction,
@@ -1620,7 +1635,7 @@ fun ItemContextMenu(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon  = { Text(if (item.isDir) "📁" else fileIcon(item.extension), fontSize = 26.sp) },
+        icon  = { Icon(if (item.isDir) Icons.Default.Folder else fileIconVector(item.extension), null, modifier = Modifier.size(26.dp)) },
         title = {
             Text(item.name, fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1632,6 +1647,28 @@ fun ItemContextMenu(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Add to Plan (files only, when callback provided)
+                if (onAddToPlan != null) {
+                    Surface(
+                        onClick  = { onAddToPlan(item); onDismiss() },
+                        shape    = RoundedCornerShape(10.dp),
+                        color    = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            Modifier.padding(12.dp),
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.PlaylistAdd, null,
+                                tint     = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp))
+                            Text("Add to Plan", fontWeight = FontWeight.SemiBold,
+                                color    = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
                 actions.forEach { a ->
                     Surface(
                         onClick  = { onAction(a.action) },
@@ -1815,7 +1852,7 @@ fun PcOpenWithDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon  = { Text("🖥️", fontSize = 22.sp) },
+        icon  = { Icon(Icons.Default.Apps, null) },
         title = {
             Column {
                 Text("Open With", fontWeight = FontWeight.Bold)
@@ -1835,7 +1872,7 @@ fun PcOpenWithDialog(
                         Row(Modifier.padding(10.dp),
                             verticalAlignment     = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            Text(c.icon, fontSize = 18.sp)
+                            Icon(Icons.Default.Apps, null, modifier = Modifier.size(18.dp))
                             Text(c.appName, fontWeight = FontWeight.Medium,
                                 modifier = Modifier.weight(1f))
                             Icon(Icons.Default.ChevronRight, null, Modifier.size(14.dp))
@@ -1914,19 +1951,19 @@ private fun PropRow(label: String, value: String) {
     }
 }
 
-fun fileIcon(ext: String): String = when (ext.lowercase()) {
-    "mp4","mkv","avi","mov","wmv"        -> "🎬"
-    "mp3","wav","flac","aac","m4a"       -> "🎵"
-    "jpg","jpeg","png","gif","bmp","webp"-> "🖼️"
-    "pdf"                                -> "📕"
-    "doc","docx","rtf"                   -> "📘"
-    "xls","xlsx","csv"                   -> "📗"
-    "ppt","pptx"                         -> "📊"
-    "txt","log","md"                     -> "📄"
-    "zip","rar","7z","tar","gz"          -> "🗜️"
-    "py","bat","ps1","sh","cmd"          -> "⚙️"
-    "exe","msi"                          -> "🖥️"
-    else                                 -> "📄"
+fun fileIconVector(ext: String): ImageVector = when (ext.lowercase()) {
+    "mp4","mkv","avi","mov","wmv"        -> Icons.Default.Movie
+    "mp3","wav","flac","aac","m4a"       -> Icons.Default.MusicNote
+    "jpg","jpeg","png","gif","bmp","webp"-> Icons.Default.Image
+    "pdf"                                -> Icons.Default.PictureAsPdf
+    "doc","docx","rtf"                   -> Icons.Default.Description
+    "xls","xlsx","csv"                   -> Icons.Default.GridOn
+    "ppt","pptx"                         -> Icons.Default.Slideshow
+    "txt","log","md"                     -> Icons.Default.Article
+    "zip","rar","7z","tar","gz"          -> Icons.Default.FolderZip
+    "py","bat","ps1","sh","cmd"          -> Icons.Default.Code
+    "exe","msi"                          -> Icons.Default.Computer
+    else                                 -> Icons.Default.Description
 }
 
 fun formatSize(kb: Long): String = when {

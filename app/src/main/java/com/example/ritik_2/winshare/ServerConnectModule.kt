@@ -267,6 +267,9 @@ class ServerConnectModule : ViewModel() {
     private var activeTransferJob: Job? = null
     private var unfilteredFileList: List<SMBFileItem> = emptyList()
 
+    /** Set by Activity after creation to gate file-browsing features */
+    @Volatile var isLoggedIn: Boolean = false
+
     // High-speed HTTP transfer client — optional.
     // If IT Connect Server is running on the same host, transfers use HTTP.
     // Otherwise transfers fall back to SMB automatically.
@@ -470,6 +473,10 @@ class ServerConnectModule : ViewModel() {
     // ─── Connection ─────────────────────────────────────────────────────────
 
     suspend fun connectToServer(context: Context? = null, savedServer: SavedServer? = null) {
+        if (!isLoggedIn) {
+            _errorMessages.emit("Please log in to browse files")
+            return
+        }
         viewModelScope.launch {
             val rawAddress = _uiState.value.serverAddress.trim()
             val username   = _uiState.value.username
@@ -881,25 +888,53 @@ class ServerConnectModule : ViewModel() {
         var success = false
         val job = viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                try {
-                    val cr = context.contentResolver
-                    val cursor = cr.query(uri, null, null, null, null)
-                    val fileName = cursor?.use {
-                        if (it.moveToFirst()) {
-                            val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                            if (idx != -1) it.getString(idx) else "uploaded_file"
-                        } else "uploaded_file"
-                    } ?: "uploaded_file"
-                    val fileSize = try { cr.openFileDescriptor(uri, "r")?.statSize ?: 0L } catch (_: Exception) { 0L }
+                val cr = context.contentResolver
 
-                    val server      = _uiState.value.currentServer
-                    val share       = _uiState.value.currentShare
-                    val currentPath = _uiState.value.currentPath
-                    val username    = _uiState.value.username
-                    val password    = _uiState.value.password
-                    // SMB paths use backslash
-                    val smbjPath = (if (currentPath.isEmpty()) fileName else "$currentPath\\$fileName")
-                        .replace('/', '\\')
+                // Resolve file metadata
+                val cursor = cr.query(uri, null, null, null, null)
+                val fileName = cursor?.use {
+                    if (it.moveToFirst()) {
+                        val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (idx != -1) it.getString(idx) else "uploaded_file"
+                    } else "uploaded_file"
+                } ?: "uploaded_file"
+                val fileSize = try { cr.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L } catch (_: Exception) { 0L }
+
+                // Open the source stream BEFORE connecting to SMB.
+                // If the URI is unreadable we fail here — no empty file is created on the server.
+                val rawInput = cr.openInputStream(uri)
+                if (rawInput == null) {
+                    _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                    viewModelScope.launch { _errorMessages.emit("Cannot open file for upload — check file permissions") }
+                    return@withContext
+                }
+
+                try {
+                    val server   = _uiState.value.currentServer
+                    val username = _uiState.value.username
+                    val password = _uiState.value.password
+
+                    // When the user connected to the server root (no share entered),
+                    // jcifs-ng stores the share name as the first path segment.
+                    // SMBJ requires the share name and the path within the share separately.
+                    val rawShare = _uiState.value.currentShare
+                    val rawPath  = _uiState.value.currentPath
+                    val share: String
+                    val relPath: String
+                    if (rawShare.isNotEmpty()) {
+                        share   = rawShare
+                        relPath = rawPath
+                    } else {
+                        val segments = rawPath.replace('\\', '/').trimStart('/').split("/").filter { it.isNotEmpty() }
+                        if (segments.isEmpty()) {
+                            _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                            viewModelScope.launch { _errorMessages.emit("Navigate into a share folder before uploading") }
+                            return@withContext
+                        }
+                        share   = segments[0]
+                        relPath = segments.drop(1).joinToString("\\")
+                    }
+                    val smbjPath = (if (relPath.isEmpty()) fileName else "$relPath\\$fileName").replace('/', '\\')
 
                     _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, isUpload = true)) }
                     val startTime = System.currentTimeMillis()
@@ -924,26 +959,25 @@ class ServerConnectModule : ViewModel() {
                                         SMB2CreateDisposition.FILE_OVERWRITE_IF,
                                         null
                                     ).use { smbFile ->
-                                        cr.openInputStream(uri)?.use { rawInput ->
-                                            smbFile.outputStream.use { out ->
-                                                val buf = ByteArray(SMBJ_BUFFER_SIZE)
-                                                var read = rawInput.read(buf)
-                                                while (read != -1 && isActive) {
-                                                    out.write(buf, 0, read)
-                                                    transferred += read
-                                                    val now = System.currentTimeMillis(); val elapsed = now - lastTime
-                                                    speedWindow.addLast(now to transferred)
-                                                    while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
-                                                    if (elapsed >= 300) {
-                                                        val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
-                                                        val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                                        val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                                        if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
-                                                        _uiState.update { it.copy(transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = true)) }
-                                                    }
-                                                    read = rawInput.read(buf)
+                                        smbFile.outputStream.use { out ->
+                                            val buf = ByteArray(SMBJ_BUFFER_SIZE)
+                                            var read = rawInput.read(buf)
+                                            while (read != -1 && isActive) {
+                                                out.write(buf, 0, read)
+                                                transferred += read
+                                                val now = System.currentTimeMillis(); val elapsed = now - lastTime
+                                                speedWindow.addLast(now to transferred)
+                                                while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
+                                                if (elapsed >= 300) {
+                                                    val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
+                                                    val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
+                                                    val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                                    if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
+                                                    _uiState.update { it.copy(transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = true)) }
                                                 }
+                                                read = rawInput.read(buf)
                                             }
+                                            if (isActive) out.flush()
                                         }
                                     }
                                 }
@@ -967,6 +1001,8 @@ class ServerConnectModule : ViewModel() {
                         _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
                         viewModelScope.launch { _errorMessages.emit("Upload failed: ${e.message}") }
                     }
+                } finally {
+                    rawInput.close()
                 }
             }
         }
@@ -978,16 +1014,32 @@ class ServerConnectModule : ViewModel() {
         val job = viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val server      = _uiState.value.currentServer
-                    val share       = _uiState.value.currentShare
-                    val currentPath = _uiState.value.currentPath
-                    val username    = _uiState.value.username
-                    val password    = _uiState.value.password
+                    val server   = _uiState.value.currentServer
+                    val username = _uiState.value.username
+                    val password = _uiState.value.password
                     // fileItem.size already populated from directory listing
-                    val fileSize    = fileItem.size
-                    // SMB paths use backslash
-                    val smbjPath = (if (currentPath.isEmpty()) fileItem.name else "$currentPath\\${fileItem.name}")
-                        .replace('/', '\\')
+                    val fileSize = fileItem.size
+
+                    // Same share-extraction logic as upload:
+                    // when user connected to server root, share name is the first path segment.
+                    val rawShare = _uiState.value.currentShare
+                    val rawPath  = _uiState.value.currentPath
+                    val share: String
+                    val relPath: String
+                    if (rawShare.isNotEmpty()) {
+                        share   = rawShare
+                        relPath = rawPath
+                    } else {
+                        val segments = rawPath.replace('\\', '/').trimStart('/').split("/").filter { it.isNotEmpty() }
+                        if (segments.isEmpty()) {
+                            _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                            viewModelScope.launch { _errorMessages.emit("Navigate into a share folder before downloading") }
+                            return@withContext
+                        }
+                        share   = segments[0]
+                        relPath = segments.drop(1).joinToString("\\")
+                    }
+                    val smbjPath = (if (relPath.isEmpty()) fileItem.name else "$relPath\\${fileItem.name}").replace('/', '\\')
 
                     _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, isUpload = false)) }
                     val startTime = System.currentTimeMillis()

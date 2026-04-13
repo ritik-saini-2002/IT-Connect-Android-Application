@@ -1,13 +1,12 @@
 package com.example.ritik_2.windowscontrol.ui.screens
 
 import android.app.Activity
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -15,7 +14,6 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -28,7 +26,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ritik_2.windowscontrol.data.PcPlan
+import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.windowscontrol.data.PcStep
 import com.example.ritik_2.windowscontrol.pccontrolappdirectory.PcControlAppDirectoryUI
 import com.example.ritik_2.windowscontrol.pcfilebrowser.PcFileBrowserCompat
@@ -39,19 +37,20 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PcControlMainScreen(viewModel: PcControlViewModel) {
-    val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
-    val editingPlan   by viewModel.editingPlan.collectAsStateWithLifecycle()
-    val drawerState   = rememberDrawerState(DrawerValue.Closed)
-    val scope         = rememberCoroutineScope()
-    val cfg           = LocalConfiguration.current
-    val isLandscape   = cfg.screenWidthDp > cfg.screenHeightDp
+fun PcControlMainScreen(viewModel: PcControlViewModel, isLoggedIn: Boolean = true) {
+    val currentScreen     by viewModel.currentScreen.collectAsStateWithLifecycle()
+    val editingPlan       by viewModel.editingPlan.collectAsStateWithLifecycle()
+    val showLoginRequired by viewModel.showLoginRequired.collectAsStateWithLifecycle()
+    val drawerState       = rememberDrawerState(DrawerValue.Closed)
+    val scope             = rememberCoroutineScope()
+    val cfg               = LocalConfiguration.current
+    val isLandscape       = cfg.screenWidthDp > cfg.screenHeightDp
+    val context           = LocalContext.current
 
     // ── Windows Project popup state ──
     var showProjectPopup by remember { mutableStateOf(false) }
 
     // ── System bars: hide in landscape touchpad for full immersive mode ──
-    val context = LocalContext.current
     LaunchedEffect(currentScreen, isLandscape) {
         val activity = context as? Activity ?: return@LaunchedEffect
         val window = activity.window
@@ -77,20 +76,40 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
     if (showProjectPopup) {
         WindowsProjectPopup(
             onDismiss = { showProjectPopup = false },
-            onSelect  = { projectKey ->
-                viewModel.sendKey(projectKey)
+            onSelect  = { step ->
+                viewModel.executeQuickStep(step)
                 showProjectPopup = false
             }
         )
     }
 
     fun navigateTo(screen: PcScreen) {
-        viewModel.navigateTo(screen)
-        when (screen) {
-            PcScreen.APP_DIRECTORY -> viewModel.loadInstalledApps()
-            PcScreen.FILE_BROWSER  -> viewModel.loadDrives()
-            else                   -> {}
+        viewModel.navigateTo(screen, isLoggedIn)
+        if (isLoggedIn || screen in viewModel.guestScreens) {
+            when (screen) {
+                PcScreen.APP_DIRECTORY -> viewModel.loadInstalledApps()
+                PcScreen.FILE_BROWSER  -> viewModel.loadDrives()
+                else                   -> {}
+            }
         }
+    }
+
+    // ── Login required dialog ──
+    if (showLoginRequired) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissLoginRequired() },
+            title   = { Text("Login Required") },
+            text    = { Text("Please log in to use this feature.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dismissLoginRequired()
+                    context.startActivity(Intent(context, LoginActivity::class.java))
+                }) { Text("Log In") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissLoginRequired() }) { Text("Cancel") }
+            }
+        )
     }
 
     ModalNavigationDrawer(
@@ -103,7 +122,8 @@ fun PcControlMainScreen(viewModel: PcControlViewModel) {
                     navigateTo(screen)
                     scope.launch { drawerState.close() }
                 },
-                onClose = { scope.launch { drawerState.close() } }
+                onClose    = { scope.launch { drawerState.close() } },
+                isLoggedIn = isLoggedIn
             )
         }
     ) {
@@ -199,41 +219,37 @@ private fun ScreenContent(screen: PcScreen, viewModel: PcControlViewModel) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  WINDOWS PROJECT POPUP — Duplicate / Extend / Second Screen
+//  WINDOWS PROJECT POPUP — display projection via displayswitch
 // ─────────────────────────────────────────────────────────────
 
 @Composable
 private fun WindowsProjectPopup(
     onDismiss: () -> Unit,
-    onSelect: (String) -> Unit
+    onSelect: (PcStep) -> Unit
 ) {
+    val options = listOf(
+        Triple("PC Screen Only",   "", PcStep("SYSTEM_CMD", "DISPLAY_INTERNAL")),
+        Triple("Duplicate",        "", PcStep("SYSTEM_CMD", "DISPLAY_CLONE")),
+        Triple("Extend",           "", PcStep("SYSTEM_CMD", "DISPLAY_EXTEND")),
+        Triple("Second Screen Only","", PcStep("SYSTEM_CMD", "DISPLAY_EXTERNAL")),
+    )
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.CastConnected, null, tint = MaterialTheme.colorScheme.primary) },
-        title = { Text("Windows Project", fontWeight = FontWeight.Bold) },
-        text = {
+        icon  = { Icon(Icons.Default.CastConnected, null, tint = MaterialTheme.colorScheme.primary) },
+        title = { Text("Display Projection", fontWeight = FontWeight.Bold) },
+        text  = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Choose display mode. This sends Win+P and selects the option.",
+                    "Select display mode (uses displayswitch.exe on the PC).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                val options = listOf(
-                    Triple("PC screen only", "🖥", "WIN+P"),
-                    Triple("Duplicate",      "📺", "WIN+P"),
-                    Triple("Extend",         "🖥📺", "WIN+P"),
-                    Triple("Second screen",  "📺", "WIN+P"),
-                )
-
-                options.forEachIndexed { index, (label, icon, _) ->
+                options.forEach { (label, emoji, step) ->
                     Surface(
-                        onClick = {
-                            // WIN+P opens the project panel, then arrow keys to select
-                            onSelect("WIN+P")
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        onClick  = { onSelect(step) },
+                        shape    = RoundedCornerShape(12.dp),
+                        color    = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -241,13 +257,13 @@ private fun WindowsProjectPopup(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text(icon, fontSize = 24.sp)
-                            Column(Modifier.weight(1f)) {
-                                Text(label, fontWeight = FontWeight.SemiBold)
-                            }
-                            Icon(Icons.Default.ChevronRight, null,
+                            Text(emoji, fontSize = 24.sp)
+                            Text(label, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            Icon(
+                                Icons.Default.ChevronRight, null,
                                 modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                tint     = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -276,7 +292,8 @@ fun NavigationPanel(
     viewModel    : PcControlViewModel,
     currentScreen: PcScreen,
     onNavigate   : (PcScreen) -> Unit,
-    onClose      : () -> Unit
+    onClose      : () -> Unit,
+    isLoggedIn   : Boolean = true
 ) {
     ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
         Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -310,9 +327,10 @@ fun NavigationPanel(
                 Triple(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder),
                 Triple(PcScreen.SETTINGS,      "Settings", Icons.Default.Settings),
             ).forEach { (screen, label, icon) ->
+                val isLocked = !isLoggedIn && screen !in viewModel.guestScreens
                 NavigationDrawerItem(
                     label    = { Text(label, fontWeight = if (currentScreen == screen) FontWeight.Bold else FontWeight.Normal) },
-                    icon     = { Icon(icon, null) },
+                    icon     = { Icon(if (isLocked) Icons.Default.Lock else icon, null) },
                     selected = currentScreen == screen,
                     onClick  = { onNavigate(screen) },
                     modifier = Modifier.padding(horizontal = 8.dp)

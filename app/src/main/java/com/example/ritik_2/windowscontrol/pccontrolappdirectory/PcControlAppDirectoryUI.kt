@@ -104,7 +104,7 @@ fun AppListContent(
     if (apps.isEmpty() && !isLoading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("📭", fontSize = 48.sp)
+                Icon(Icons.Default.Inbox, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(if (searchQuery.isNotEmpty()) "No apps match \"$searchQuery\"" else "No apps found.\nMake sure agent is running.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 if (searchQuery.isEmpty()) Button(onClick = onRetry) { Text("Retry") }
@@ -126,7 +126,7 @@ fun AppListContent(
         ) {
             if (running.isNotEmpty() && searchQuery.isEmpty()) {
                 item(span = { GridItemSpan(2) }) {
-                    Text("● RUNNING (${running.size})", style = MaterialTheme.typography.labelSmall,
+                    Text("RUNNING (${running.size})", style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF4ADE80), modifier = Modifier.padding(vertical = 2.dp))
                 }
                 items(running, key = { "run_${it.exePath}" }) { app ->
@@ -134,7 +134,7 @@ fun AppListContent(
                         onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) }, compact = true)
                 }
                 item(span = { GridItemSpan(2) }) {
-                    Text("📦 ALL (${notRunning.size})", style = MaterialTheme.typography.labelSmall,
+                    Text("ALL (${notRunning.size})", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
                 }
             }
@@ -148,7 +148,7 @@ fun AppListContent(
         LazyColumn(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val recentApps = recentPaths.filter { it.isApp }
             if (recentApps.isNotEmpty() && searchQuery.isEmpty()) {
-                item { Text("🕐 RECENTLY USED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 4.dp)) }
+                item { Text("RECENTLY USED", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 4.dp)) }
                 item { LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(recentApps) { recent -> PcRecentChip(recent = recent, onClick = { onRecentClick?.invoke(recent) }) } } }
                 item { Spacer(Modifier.height(4.dp)) }
             }
@@ -158,7 +158,7 @@ fun AppListContent(
                     PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = { onKill(app) },
                         onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) })
                 }
-                item { Text("📦 ALL APPS (${notRunning.size})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) }
+                item { Text("ALL APPS (${notRunning.size})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) }
             }
             items(notRunning, key = { it.exePath }) { app ->
                 PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = null, onToggleMinMax = null, onForceMaximize = null)
@@ -190,7 +190,7 @@ fun PcAppItemCard(
             // App icon
             Box(Modifier.size(if (compact) 38.dp else 48.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center) {
-                Text(app.icon, fontSize = if (compact) 18.sp else 22.sp)
+                Icon(Icons.Default.Apps, null, modifier = Modifier.size(if (compact) 18.dp else 22.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
                 if (app.isRunning) Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF4ADE80)).align(Alignment.TopEnd))
             }
             // App info
@@ -254,7 +254,7 @@ fun PcAppItemCard(
 fun PcRecentChip(recent: PcRecentPath, onClick: () -> Unit) {
     Surface(onClick = onClick, shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(recent.icon, fontSize = 14.sp); Text(recent.label, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+            Icon(if (recent.isApp) Icons.Default.Apps else Icons.Default.FolderOpen, null, modifier = Modifier.size(14.dp)); Text(recent.label, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
         }
     }
 }
