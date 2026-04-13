@@ -11,6 +11,13 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.hierynomus.msdtyp.AccessMask
+import com.hierynomus.mssmb2.SMB2CreateDisposition
+import com.hierynomus.mssmb2.SMB2ShareAccess
+import com.hierynomus.smbj.SMBClient
+import com.hierynomus.smbj.SmbConfig
+import com.hierynomus.smbj.auth.AuthenticationContext
+import com.hierynomus.smbj.share.DiskShare
 import jcifs.CIFSContext
 import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
@@ -229,6 +236,10 @@ private const val SMB_WRITE_CHUNK = 60 * 1024          // 60 KB
 
 // Local file write buffer (downloading FROM smb TO local disk)
 private const val LOCAL_WRITE_BUFFER = 4 * 1024 * 1024 // 4 MB
+
+// smbj transfer buffer — smbj handles SMB2 credit splitting internally,
+// so 1 MB chunks keep the pipeline saturated at full WiFi speed.
+private const val SMBJ_BUFFER_SIZE = 1 * 1024 * 1024   // 1 MB
 
 // ─── ViewModel ──────────────────────────────────────────────────────────────
 
@@ -652,39 +663,66 @@ class ServerConnectModule : ViewModel() {
                         if (it.moveToFirst()) { val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (idx != -1) it.getString(idx) else "uploaded_file" } else "uploaded_file"
                     } ?: "uploaded_file"
                     val fileSize = try { cr.openFileDescriptor(uri, "r")?.statSize ?: 0L } catch (_: Exception) { 0L }
-                    val targetPath = if (_uiState.value.currentPath.isEmpty()) fileName else "${_uiState.value.currentPath}/$fileName"
-                    val smbFile = SmbFile("smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/$targetPath", cifsContext)
+
+                    val server      = _uiState.value.currentServer
+                    val share       = _uiState.value.currentShare
+                    val currentPath = _uiState.value.currentPath
+                    val username    = _uiState.value.username
+                    val password    = _uiState.value.password
+                    // SMB paths use backslash
+                    val smbjPath = (if (currentPath.isEmpty()) fileName else "$currentPath\\$fileName")
+                        .replace('/', '\\')
+
                     _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, isUpload = true)) }
                     val startTime = System.currentTimeMillis()
                     var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
                     val speedWindow = ArrayDeque<Pair<Long, Long>>()
-                    cr.openInputStream(uri)?.let { rawInput ->
-                        BufferedInputStream(rawInput, READ_BUFFER).use { input ->
-                            smbFile.outputStream.use { smbOut ->
-                                val readBuf = ByteArray(READ_BUFFER)
-                                var readBytes = input.read(readBuf)
-                                while (readBytes != -1 && isActive) {
-                                    var writeOffset = 0
-                                    while (writeOffset < readBytes && isActive) {
-                                        val writeLen = minOf(SMB_WRITE_CHUNK, readBytes - writeOffset)
-                                        smbOut.write(readBuf, writeOffset, writeLen); writeOffset += writeLen; transferred += writeLen
-                                        val now = System.currentTimeMillis(); val elapsed = now - lastTime
-                                        speedWindow.addLast(now to transferred)
-                                        while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
-                                        if (elapsed >= 300) {
-                                            val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
-                                            val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                            val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                            if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
-                                            _uiState.update { it.copy(transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = true)) }
+
+                    val smbjConfig = SmbConfig.builder()
+                        .withWriteBufferSize(SMBJ_BUFFER_SIZE)
+                        .withReadBufferSize(SMBJ_BUFFER_SIZE)
+                        .build()
+
+                    SMBClient(smbjConfig).use { client ->
+                        client.connect(server).use { conn ->
+                            val authCtx = AuthenticationContext(username, password.toCharArray(), "")
+                            conn.authenticate(authCtx).use { session ->
+                                (session.connectShare(share) as DiskShare).use { diskShare ->
+                                    diskShare.openFile(
+                                        smbjPath,
+                                        setOf(AccessMask.GENERIC_WRITE),
+                                        null,
+                                        setOf(SMB2ShareAccess.FILE_SHARE_READ),
+                                        SMB2CreateDisposition.FILE_OVERWRITE_IF,
+                                        null
+                                    ).use { smbFile ->
+                                        cr.openInputStream(uri)?.use { rawInput ->
+                                            smbFile.outputStream.use { out ->
+                                                val buf = ByteArray(SMBJ_BUFFER_SIZE)
+                                                var read = rawInput.read(buf)
+                                                while (read != -1 && isActive) {
+                                                    out.write(buf, 0, read)
+                                                    transferred += read
+                                                    val now = System.currentTimeMillis(); val elapsed = now - lastTime
+                                                    speedWindow.addLast(now to transferred)
+                                                    while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
+                                                    if (elapsed >= 300) {
+                                                        val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
+                                                        val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
+                                                        val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                                        if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
+                                                        _uiState.update { it.copy(transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = true)) }
+                                                    }
+                                                    read = rawInput.read(buf)
+                                                }
+                                            }
                                         }
                                     }
-                                    readBytes = input.read(readBuf)
                                 }
-                                smbOut.flush()
                             }
                         }
                     }
+
                     if (isActive) {
                         success = true; val totalMs = System.currentTimeMillis() - startTime; val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
                         _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
@@ -704,46 +742,86 @@ class ServerConnectModule : ViewModel() {
         val job = viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val url = "smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/${_uiState.value.currentPath}/${fileItem.name}"
-                    val smbFile = SmbFile(url, cifsContext)
-                    val fileSize = try { smbFile.length() } catch (_: Exception) { 0L }
+                    val server      = _uiState.value.currentServer
+                    val share       = _uiState.value.currentShare
+                    val currentPath = _uiState.value.currentPath
+                    val username    = _uiState.value.username
+                    val password    = _uiState.value.password
+                    // fileItem.size already populated from directory listing
+                    val fileSize    = fileItem.size
+                    // SMB paths use backslash
+                    val smbjPath = (if (currentPath.isEmpty()) fileItem.name else "$currentPath\\${fileItem.name}")
+                        .replace('/', '\\')
+
                     _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, isUpload = false)) }
+                    val startTime = System.currentTimeMillis()
+                    var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
+                    val speedWindow = ArrayDeque<Pair<Long, Long>>()
+
                     val outputStream = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         val values = ContentValues().apply {
                             put(MediaStore.Downloads.DISPLAY_NAME, fileItem.name)
                             put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/WinShare")
                             put(MediaStore.Downloads.IS_PENDING, 1)
                         }
-                        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values); resultUri = uri
-                        uri?.let { context.contentResolver.openOutputStream(it) }
+                        val contentUri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        resultUri = contentUri
+                        contentUri?.let { context.contentResolver.openOutputStream(it) }
                     } else {
                         @Suppress("DEPRECATION") val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "WinShare")
-                        if (!dir.exists()) dir.mkdirs(); val localFile = File(dir, fileItem.name); resultUri = Uri.fromFile(localFile); FileOutputStream(localFile)
+                        if (!dir.exists()) dir.mkdirs()
+                        val localFile = File(dir, fileItem.name); resultUri = Uri.fromFile(localFile); FileOutputStream(localFile)
                     }
-                    if (outputStream == null) { _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }; _errorMessages.emit("Could not create output file"); return@withContext }
-                    val startTime = System.currentTimeMillis()
-                    var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
-                    val speedWindow = ArrayDeque<Pair<Long, Long>>()
-                    BufferedInputStream(smbFile.inputStream, SMB_READ_BUFFER).use { input ->
-                        BufferedOutputStream(outputStream, LOCAL_WRITE_BUFFER).use { output ->
-                            val buf = ByteArray(SMB_READ_BUFFER); var bytes = input.read(buf)
-                            while (bytes != -1 && isActive) {
-                                output.write(buf, 0, bytes); transferred += bytes
-                                val now = System.currentTimeMillis(); val elapsed = now - lastTime
-                                speedWindow.addLast(now to transferred)
-                                while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
-                                if (elapsed >= 300) {
-                                    val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
-                                    val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                    val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                    if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
-                                    _uiState.update { it.copy(transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = false)) }
+                    if (outputStream == null) {
+                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                        _errorMessages.emit("Could not create output file"); return@withContext
+                    }
+
+                    val smbjConfig = SmbConfig.builder()
+                        .withWriteBufferSize(SMBJ_BUFFER_SIZE)
+                        .withReadBufferSize(SMBJ_BUFFER_SIZE)
+                        .build()
+
+                    SMBClient(smbjConfig).use { client ->
+                        client.connect(server).use { conn ->
+                            val authCtx = AuthenticationContext(username, password.toCharArray(), "")
+                            conn.authenticate(authCtx).use { session ->
+                                (session.connectShare(share) as DiskShare).use { diskShare ->
+                                    diskShare.openFile(
+                                        smbjPath,
+                                        setOf(AccessMask.GENERIC_READ),
+                                        null,
+                                        setOf(SMB2ShareAccess.FILE_SHARE_READ),
+                                        SMB2CreateDisposition.FILE_OPEN,
+                                        null
+                                    ).use { smbFile ->
+                                        smbFile.inputStream.use { input ->
+                                            BufferedOutputStream(outputStream, SMBJ_BUFFER_SIZE).use { out ->
+                                                val buf = ByteArray(SMBJ_BUFFER_SIZE)
+                                                var bytes = input.read(buf)
+                                                while (bytes != -1 && isActive) {
+                                                    out.write(buf, 0, bytes); transferred += bytes
+                                                    val now = System.currentTimeMillis(); val elapsed = now - lastTime
+                                                    speedWindow.addLast(now to transferred)
+                                                    while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
+                                                    if (elapsed >= 300) {
+                                                        val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
+                                                        val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
+                                                        val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                                        if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
+                                                        _uiState.update { it.copy(transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = false)) }
+                                                    }
+                                                    bytes = input.read(buf)
+                                                }
+                                                out.flush()
+                                            }
+                                        }
+                                    }
                                 }
-                                bytes = input.read(buf)
                             }
-                            output.flush()
                         }
                     }
+
                     if (isActive) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && resultUri != null) {
                             context.contentResolver.update(resultUri!!, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)

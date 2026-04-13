@@ -48,6 +48,7 @@ ktorSerializationJson        = "2.3.12"
 
 # ── SMB ───────────────────────────────────────────────────────
 jcifsNg                      = "2.1.10"
+smbj                         = "0.13.0"
 
 # ── Testing ───────────────────────────────────────────────────
 junit                        = "4.13.2"
@@ -120,6 +121,7 @@ ktor-serialization-kotlinx-json      = { group = "io.ktor",                     
 
 # ── SMB ───────────────────────────────────────────────────────
 jcifs-ng                             = { group = "eu.agno3.jcifs",                name = "jcifs-ng",                     version.ref = "jcifsNg" }
+smbj                                 = { group = "com.hierynomus",                name = "smbj",                         version.ref = "smbj" }
 
 # ── Testing ───────────────────────────────────────────────────
 junit                                = { group = "junit",                         name = "junit",                        version.ref = "junit" }

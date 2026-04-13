@@ -73,6 +73,12 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/NOTICE.md"
             excludes += "/META-INF/LICENSE.md"
+            excludes += "/META-INF/LICENSE"
+            excludes += "/META-INF/NOTICE"
+            // smbj / BouncyCastle JAR signature files must be stripped
+            excludes += "/META-INF/*.SF"
+            excludes += "/META-INF/*.DSA"
+            excludes += "/META-INF/*.RSA"
         }
     }
 }
@@ -140,8 +146,9 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
 
-    // SMB
+    // SMB — jcifs-ng for browsing/metadata, smbj for high-speed transfers
     implementation(libs.jcifs.ng)
+    implementation(libs.smbj)
 
     // Debug
     debugImplementation(libs.androidx.ui.tooling)
