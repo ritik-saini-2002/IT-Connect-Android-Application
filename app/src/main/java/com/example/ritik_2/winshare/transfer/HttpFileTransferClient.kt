@@ -8,6 +8,7 @@ import android.os.Environment
 import android.provider.OpenableColumns
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
@@ -298,7 +299,7 @@ class HttpFileTransferClient(
         var windowBytes = 0L
         var currentSpeed = 0L
 
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             val read = input.read(buffer)
             if (read == -1) break
 
