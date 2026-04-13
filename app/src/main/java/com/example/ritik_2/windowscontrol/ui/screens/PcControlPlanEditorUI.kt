@@ -129,7 +129,7 @@ fun PcStepCard(index: Int, step: PcStep, onMoveUp: (()->Unit)?, onMoveDown: (()-
             Surface(shape = RoundedCornerShape(8.dp), color = cs.primaryContainer, modifier = Modifier.size(if (compact) 28.dp else 36.dp)) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("${index+1}", fontWeight = FontWeight.Bold, fontSize = if (compact) 10.sp else 13.sp) }
             }
-            Text(type?.icon ?: "•", fontSize = if (compact) 16.sp else 20.sp)
+            Icon(Icons.Default.Bolt, null, modifier = Modifier.size(if (compact) 16.dp else 20.dp), tint = MaterialTheme.colorScheme.primary)
             Column(Modifier.weight(1f)) {
                 Text(type?.display ?: step.type, style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                 val detail = buildStepDetail(step)
@@ -184,7 +184,7 @@ fun PcAddStepSheet(key: String = "sheet", installedApps: List<PcInstalledApp>, i
             Text("STEP TYPE", style = MaterialTheme.typography.labelSmall, color = cs.primary, letterSpacing = 0.5.sp)
             PcStepType.entries.chunked(chipCols).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    row.forEach { type -> FilterChip(selected = selectedType == type, onClick = { selectedType = type; pickedApp = null; manualPath = ""; appSearch = "" }, label = { Text("${type.icon} ${type.display}", style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.weight(1f)) }
+                    row.forEach { type -> FilterChip(selected = selectedType == type, onClick = { selectedType = type; pickedApp = null; manualPath = ""; appSearch = "" }, label = { Text(type.display, style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.weight(1f)) }
                     repeat(chipCols - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
