@@ -69,7 +69,7 @@ class CreateUserActivity : ComponentActivity() {
             val profile = dataSource.getUserProfile(session.userId).getOrNull() ?: run {
                 errorMsg.value = "Could not load admin profile"; return
             }
-            if (profile.role !in setOf("Administrator", "Manager", "HR")) {
+            if (profile.role !in setOf("System_Administrator", "Administrator", "Manager", "HR")) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@CreateUserActivity, "Access denied", Toast.LENGTH_SHORT).show()
                     finish()
