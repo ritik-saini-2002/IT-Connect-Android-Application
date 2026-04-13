@@ -1311,7 +1311,7 @@ fun FileListView(
                 items(files, key = { "f_${it.path}" }) { file ->
                     CompactFileCard(
                         file        = file,
-                        icon        = fileIcon(file.extension),
+                        icon        = fileIconVector(file.extension),
                         browserMode = browserMode,
                         onOpen      = { onFileOpen(file) },
                         onDownload  = { onFileDownload(file) },
@@ -1408,7 +1408,7 @@ fun SearchResultsView(
                 items(files, key = { "sr_f_${it.path}" }) { f ->
                     CompactFileCard(
                         file        = f,
-                        icon        = fileIcon(f.extension),
+                        icon        = fileIconVector(f.extension),
                         browserMode = browserMode,
                         onOpen      = { onFileOpen(f) },
                         onDownload  = { onFileDownload(f) },

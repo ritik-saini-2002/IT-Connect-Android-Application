@@ -46,13 +46,29 @@ import androidx.compose.ui.unit.sp
 class PcControlFileBrowserActivity : ComponentActivity() {
     private lateinit var viewModel: PcControlViewModel
 
+    companion object {
+        const val EXTRA_PICK_MODE    = "pick_mode"
+        const val EXTRA_SELECTED_PATH = "selected_path"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         applyFullscreen()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
         viewModel = ViewModelProvider(this)[PcControlViewModel::class.java]
-        setContent { ITConnectTheme { FileBrowserScreen(viewModel) } }
+        val isPickMode = intent.getBooleanExtra(EXTRA_PICK_MODE, false)
+        setContent {
+            ITConnectTheme {
+                FileBrowserScreen(
+                    vm          = viewModel,
+                    onFilePicked = if (isPickMode) { path ->
+                        setResult(RESULT_OK, Intent().putExtra(EXTRA_SELECTED_PATH, path))
+                        finish()
+                    } else null
+                )
+            }
+        }
     }
 
     override fun onResume() {
@@ -83,7 +99,7 @@ fun PcFileBrowserCompat(viewModel: PcControlViewModel) = FileBrowserScreen(viewM
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 @Composable
-fun FileBrowserScreen(vm: PcControlViewModel) {
+fun FileBrowserScreen(vm: PcControlViewModel, onFilePicked: ((String) -> Unit)? = null) {
 
     val drives           by vm.drives.collectAsStateWithLifecycle()
     val currentPath      by vm.currentPath.collectAsStateWithLifecycle()
@@ -411,7 +427,9 @@ fun FileBrowserScreen(vm: PcControlViewModel) {
             persistLevel(BrowserLevel.Directory(path = recent.path, label = recent.label))
             vm.browseDir(recent.path)
         },
-        onFileOpen     = { file -> executeFileOnPc(file) },
+        onFileOpen     = { file ->
+            if (onFilePicked != null) onFilePicked(file.path) else executeFileOnPc(file)
+        },
         onFileDownload = { file ->
             downloadItem = file
             downloadLauncher.launch(file.name)
