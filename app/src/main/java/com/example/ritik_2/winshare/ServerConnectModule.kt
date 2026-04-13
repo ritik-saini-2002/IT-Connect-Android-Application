@@ -17,6 +17,7 @@ import com.example.ritik_2.winshare.transfer.TransferResult
 import jcifs.CIFSContext
 import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
+import jcifs.netbios.NbtAddress
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbAuthException
 import jcifs.smb.SmbException
@@ -36,6 +37,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.net.InetAddress
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -217,23 +219,22 @@ sealed class ServerConnectEvent {
 private const val PREFS_NAME        = "winshare_prefs"
 private const val KEY_SAVED_SERVERS = "saved_servers"
 
-// LOCAL read buffer: large chunks from ContentResolver / local disk (fast)
-private const val READ_BUFFER = 8 * 1024 * 1024       // 8 MB
+// LOCAL read buffer
+private const val READ_BUFFER = 8 * 1024 * 1024        // 8 MB
 
-// SMB read buffer: must stay within the server's negotiated MaxReadSize.
-// Most SMB2/3 servers cap at 64KB–1MB. Using 60KB is safe for ALL servers
-// (including older ones with 64KB limit). jCIFS wraps this into SMB2_READ
-// commands — if the buffer exceeds MaxReadSize the server returns
-// "The parameter is incorrect" (STATUS_INVALID_PARAMETER).
-private const val SMB_READ_BUFFER = 60 * 1024          // 60 KB — safe for all SMB servers
-
-// SMB write chunk: same constraint as reads — stay within MaxWriteSize.
-private const val SMB_WRITE_CHUNK = 60 * 1024          // 60 KB
+// SMB2/3 with useLargeReadWrite=true negotiates MaxReadSize/MaxWriteSize
+// with the server (up to 8 MB on Windows 10/11, 1 MB on most NAS).
+// jcifs-ng handles splitting internally if our chunk exceeds MaxWriteSize,
+// so 1 MB is safe for ALL SMB2/3 servers and gives ~10× better throughput
+// than the old 60 KB limit.
+private const val SMB_READ_BUFFER  = 1024 * 1024        // 1 MB
+private const val SMB_WRITE_CHUNK  = 1024 * 1024        // 1 MB
 
 // Local file write buffer (downloading FROM smb TO local disk)
 private const val LOCAL_WRITE_BUFFER = 4 * 1024 * 1024 // 4 MB
 
-// HTTP transfer server port — must match the Windows server (default 8765)
+// HTTP transfer server port (optional — only used if IT Connect Server is
+// running on the same host; otherwise transfers fall back to SMB).
 private const val HTTP_TRANSFER_PORT = 8765
 
 // ─── ViewModel ──────────────────────────────────────────────────────────────
@@ -254,9 +255,55 @@ class ServerConnectModule : ViewModel() {
     private var activeTransferJob: Job? = null
     private var unfilteredFileList: List<SMBFileItem> = emptyList()
 
-    // High-speed HTTP transfer client — created after SMB connects (same server IP).
-    // Upload/Download uses HTTP (100–300 Mbps); browsing still uses SMB.
+    // High-speed HTTP transfer client — optional.
+    // If IT Connect Server is running on the same host, transfers use HTTP.
+    // Otherwise transfers fall back to SMB automatically.
     private var httpClient: HttpFileTransferClient? = null
+
+    // ─── Hostname Resolution ─────────────────────────────────────────────────
+
+    /**
+     * Resolves a hostname to an IP address string.
+     *
+     * Resolution order:
+     *  1. If already an IPv4/IPv6 address → returned as-is.
+     *  2. Standard DNS / mDNS (.local names work on Android natively).
+     *  3. NetBIOS broadcast via jcifs-ng (Windows computer names like DESKTOP-XYZ).
+     *
+     * Returns null if all methods fail.
+     *
+     * Usage:
+     *   val ip = resolveHostname("DESKTOP-RITIK") ?: "DESKTOP-RITIK"
+     *   connectWithAddress(ip)
+     */
+    suspend fun resolveHostname(hostname: String): String? = withContext(Dispatchers.IO) {
+        val trimmed = hostname.trim()
+
+        // Already an IP address — skip resolution
+        if (trimmed.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$"""))) return@withContext trimmed
+
+        // 1. Standard DNS / mDNS (.local, DNS names, FQDN)
+        try {
+            val addr = InetAddress.getByName(trimmed)
+            Log.d("ServerConnectModule", "DNS resolved '$trimmed' → ${addr.hostAddress}")
+            return@withContext addr.hostAddress
+        } catch (e: Exception) {
+            Log.d("ServerConnectModule", "DNS failed for '$trimmed': ${e.message}")
+        }
+
+        // 2. NetBIOS name resolution (Windows hostnames on LAN, e.g. DESKTOP-ABC)
+        try {
+            val nbt = NbtAddress.getByName(trimmed)
+            val ip = nbt.inetAddress.hostAddress
+            Log.d("ServerConnectModule", "NetBIOS resolved '$trimmed' → $ip")
+            return@withContext ip
+        } catch (e: Exception) {
+            Log.d("ServerConnectModule", "NetBIOS failed for '$trimmed': ${e.message}")
+        }
+
+        Log.w("ServerConnectModule", "Could not resolve hostname: $trimmed")
+        null
+    }
 
     // ─── SharedPreferences ──────────────────────────────────────────────────
 
@@ -409,12 +456,22 @@ class ServerConnectModule : ViewModel() {
 
     suspend fun connectToServer(context: Context? = null, savedServer: SavedServer? = null) {
         viewModelScope.launch {
-            val server   = _uiState.value.serverAddress
-            val username = _uiState.value.username
-            val password = _uiState.value.password
-            val share    = _uiState.value.shareName
+            val rawAddress = _uiState.value.serverAddress.trim()
+            val username   = _uiState.value.username
+            val password   = _uiState.value.password
+            val share      = _uiState.value.shareName
             try {
                 _uiState.update { it.copy(isLoading = true, showConnectionDialog = false) }
+
+                // Resolve hostname → IP before connecting.
+                // Supports: IP addresses, DNS names, .local mDNS, Windows NetBIOS names.
+                val server = withContext(Dispatchers.IO) {
+                    resolveHostname(rawAddress) ?: rawAddress
+                }
+                if (server != rawAddress) {
+                    Log.d("ServerConnectModule", "Resolved '$rawAddress' → '$server'")
+                    _uiState.update { it.copy(serverAddress = server) }
+                }
                 withContext(Dispatchers.IO) {
                     val props = Properties().apply {
                         setProperty("jcifs.smb.client.responseTimeout", "30000")
@@ -657,15 +714,13 @@ class ServerConnectModule : ViewModel() {
         activeTransferJob?.cancel()
         var success = false
 
+        // Use HTTP if IT Connect Server is running on the host (optional, faster).
+        // Automatically falls back to SMB if HTTP is not available.
         val http = httpClient
-        if (http == null) {
-            viewModelScope.launch {
-                _errorMessages.emit(
-                    "HTTP transfer server not reachable. " +
-                    "Start IT Connect Server on your PC: java -jar itconnect-file-server.jar"
-                )
-            }
-            return false
+        val useHttp = http != null && withContext(Dispatchers.IO) { http.ping() }
+        if (!useHttp) {
+            Log.d("ServerConnectModule", "HTTP server not available — using SMB for upload")
+            return uploadViaSMB(uri, context)
         }
 
         val remotePath = "/" + _uiState.value.currentPath.replace("\\", "/").trimStart('/')
@@ -734,15 +789,13 @@ class ServerConnectModule : ViewModel() {
         activeTransferJob?.cancel()
         var resultUri: Uri? = null
 
+        // Use HTTP if IT Connect Server is running on the host (optional, faster).
+        // Automatically falls back to SMB if HTTP is not available.
         val http = httpClient
-        if (http == null) {
-            viewModelScope.launch {
-                _errorMessages.emit(
-                    "HTTP transfer server not reachable. " +
-                    "Start IT Connect Server on your PC: java -jar itconnect-file-server.jar"
-                )
-            }
-            return null
+        val useHttp = http != null && withContext(Dispatchers.IO) { http.ping() }
+        if (!useHttp) {
+            Log.d("ServerConnectModule", "HTTP server not available — using SMB for download")
+            return downloadViaSMB(fileItem, context)
         }
 
         val currentPath = _uiState.value.currentPath
@@ -805,6 +858,174 @@ class ServerConnectModule : ViewModel() {
         activeTransferJob = job
         job.join()
         return resultUri
+    }
+
+    // ─── SMB fallback transfer (used when HTTP server is not running) ────────
+
+    private suspend fun uploadViaSMB(uri: Uri, context: Context): Boolean {
+        var success = false
+        val job = viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val cr = context.contentResolver
+                    val cursor = cr.query(uri, null, null, null, null)
+                    val fileName = cursor?.use {
+                        if (it.moveToFirst()) {
+                            val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (idx != -1) it.getString(idx) else "uploaded_file"
+                        } else "uploaded_file"
+                    } ?: "uploaded_file"
+                    val fileSize = try { cr.openFileDescriptor(uri, "r")?.statSize ?: 0L } catch (_: Exception) { 0L }
+                    val targetPath = if (_uiState.value.currentPath.isEmpty()) fileName
+                                     else "${_uiState.value.currentPath}/$fileName"
+                    val smbFile = SmbFile(
+                        "smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/$targetPath",
+                        cifsContext
+                    )
+                    _uiState.update { it.copy(isTransferring = true,
+                        transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, isUpload = true)) }
+                    val startTime = System.currentTimeMillis()
+                    var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
+                    val speedWindow = ArrayDeque<Pair<Long, Long>>()
+                    cr.openInputStream(uri)?.let { rawInput ->
+                        BufferedInputStream(rawInput, READ_BUFFER).use { input ->
+                            smbFile.outputStream.use { smbOut ->
+                                val readBuf = ByteArray(READ_BUFFER)
+                                var readBytes = input.read(readBuf)
+                                while (readBytes != -1 && isActive) {
+                                    var writeOffset = 0
+                                    while (writeOffset < readBytes && isActive) {
+                                        val writeLen = minOf(SMB_WRITE_CHUNK, readBytes - writeOffset)
+                                        smbOut.write(readBuf, writeOffset, writeLen)
+                                        writeOffset += writeLen; transferred += writeLen
+                                        val now = System.currentTimeMillis(); val elapsed = now - lastTime
+                                        speedWindow.addLast(now to transferred)
+                                        while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
+                                        if (elapsed >= 300) {
+                                            val winSpeed = if (speedWindow.size >= 2) {
+                                                val d = speedWindow.last().first - speedWindow.first().first
+                                                if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L
+                                            } else 0L
+                                            val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
+                                            val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                            if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
+                                            _uiState.update { it.copy(transferStats = TransferStats(
+                                                fileName = fileName, totalBytes = fileSize, transferredBytes = transferred,
+                                                currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur),
+                                                peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg,
+                                                elapsedMs = tot, isUpload = true)) }
+                                        }
+                                    }
+                                    readBytes = input.read(readBuf)
+                                }
+                                smbOut.flush()
+                            }
+                        }
+                    }
+                    if (isActive) {
+                        success = true
+                        val totalMs = System.currentTimeMillis() - startTime
+                        val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
+                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                        viewModelScope.launch {
+                            refreshFiles()
+                            _successMessages.emit("'$fileName' uploaded (SMB) @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (isActive) {
+                        Log.e("ServerConnectModule", "SMB upload error", e)
+                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                        viewModelScope.launch { _errorMessages.emit("Upload failed: ${e.message}") }
+                    }
+                }
+            }
+        }
+        activeTransferJob = job; job.join(); return success
+    }
+
+    private suspend fun downloadViaSMB(fileItem: SMBFileItem, context: Context): Uri? {
+        var resultUri: Uri? = null
+        val job = viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val url = "smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/" +
+                              (if (_uiState.value.currentPath.isEmpty()) "" else "${_uiState.value.currentPath}/") +
+                              fileItem.name
+                    val smbFile = SmbFile(url, cifsContext)
+                    val fileSize = try { smbFile.length() } catch (_: Exception) { 0L }
+                    _uiState.update { it.copy(isTransferring = true,
+                        transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, isUpload = false)) }
+                    val outputStream = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val values = ContentValues().apply {
+                            put(MediaStore.Downloads.DISPLAY_NAME, fileItem.name)
+                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/WinShare")
+                            put(MediaStore.Downloads.IS_PENDING, 1)
+                        }
+                        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        resultUri = uri
+                        uri?.let { context.contentResolver.openOutputStream(it) }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "WinShare")
+                        if (!dir.exists()) dir.mkdirs()
+                        val localFile = File(dir, fileItem.name); resultUri = Uri.fromFile(localFile); FileOutputStream(localFile)
+                    }
+                    if (outputStream == null) {
+                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                        _errorMessages.emit("Could not create output file"); return@withContext
+                    }
+                    val startTime = System.currentTimeMillis()
+                    var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
+                    val speedWindow = ArrayDeque<Pair<Long, Long>>()
+                    BufferedInputStream(smbFile.inputStream, SMB_READ_BUFFER).use { input ->
+                        BufferedOutputStream(outputStream, LOCAL_WRITE_BUFFER).use { output ->
+                            val buf = ByteArray(SMB_READ_BUFFER); var bytes = input.read(buf)
+                            while (bytes != -1 && isActive) {
+                                output.write(buf, 0, bytes); transferred += bytes
+                                val now = System.currentTimeMillis(); val elapsed = now - lastTime
+                                speedWindow.addLast(now to transferred)
+                                while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
+                                if (elapsed >= 300) {
+                                    val winSpeed = if (speedWindow.size >= 2) {
+                                        val d = speedWindow.last().first - speedWindow.first().first
+                                        if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L
+                                    } else 0L
+                                    val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
+                                    val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
+                                    if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
+                                    _uiState.update { it.copy(transferStats = TransferStats(
+                                        fileName = fileItem.name, totalBytes = fileSize, transferredBytes = transferred,
+                                        currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur),
+                                        peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg,
+                                        elapsedMs = tot, isUpload = false)) }
+                                }
+                                bytes = input.read(buf)
+                            }
+                            output.flush()
+                        }
+                    }
+                    if (isActive) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && resultUri != null) {
+                            context.contentResolver.update(resultUri!!, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                        }
+                        val totalMs = System.currentTimeMillis() - startTime
+                        val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
+                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                        viewModelScope.launch {
+                            _successMessages.emit("'${fileItem.name}' → Downloads/WinShare (SMB) @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (isActive) {
+                        Log.e("ServerConnectModule", "SMB download error", e)
+                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                        viewModelScope.launch { _errorMessages.emit("Download failed: ${e.message}") }
+                    }
+                }
+            }
+        }
+        activeTransferJob = job; job.join(); return resultUri
     }
 
     fun deleteSelectedFiles() {
