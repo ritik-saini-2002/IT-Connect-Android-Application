@@ -17,7 +17,6 @@ import com.example.ritik_2.winshare.transfer.TransferResult
 import jcifs.CIFSContext
 import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
-import jcifs.netbios.NbtAddress
 import jcifs.smb.NtlmPasswordAuthenticator
 import jcifs.smb.SmbAuthException
 import jcifs.smb.SmbException
@@ -291,10 +290,13 @@ class ServerConnectModule : ViewModel() {
             Log.d("ServerConnectModule", "DNS failed for '$trimmed': ${e.message}")
         }
 
-        // 2. NetBIOS name resolution (Windows hostnames on LAN, e.g. DESKTOP-ABC)
+        // 2. NetBIOS name resolution via jcifs-ng CIFSContext (Windows hostnames on LAN)
+        // In jcifs-ng v2.x, resolution goes through CIFSContext.nameServiceClient,
+        // not via the static NbtAddress.getByName() from old jcifs.
         try {
-            val nbt = NbtAddress.getByName(trimmed)
-            val ip = nbt.inetAddress.hostAddress
+            val ctx = BaseContext(PropertyConfiguration(Properties()))
+            val nbt = ctx.nameServiceClient.getByName(trimmed)
+            val ip  = nbt.inetAddress.hostAddress
             Log.d("ServerConnectModule", "NetBIOS resolved '$trimmed' → $ip")
             return@withContext ip
         } catch (e: Exception) {
