@@ -11,6 +11,9 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ritik_2.winshare.transfer.HttpFileTransferClient
+import com.example.ritik_2.winshare.transfer.TransferProgress
+import com.example.ritik_2.winshare.transfer.TransferResult
 import jcifs.CIFSContext
 import jcifs.config.PropertyConfiguration
 import jcifs.context.BaseContext
@@ -230,6 +233,9 @@ private const val SMB_WRITE_CHUNK = 60 * 1024          // 60 KB
 // Local file write buffer (downloading FROM smb TO local disk)
 private const val LOCAL_WRITE_BUFFER = 4 * 1024 * 1024 // 4 MB
 
+// HTTP transfer server port — must match the Windows server (default 8765)
+private const val HTTP_TRANSFER_PORT = 8765
+
 // ─── ViewModel ──────────────────────────────────────────────────────────────
 
 class ServerConnectModule : ViewModel() {
@@ -247,6 +253,10 @@ class ServerConnectModule : ViewModel() {
     private val pathStack = mutableListOf<String>()
     private var activeTransferJob: Job? = null
     private var unfilteredFileList: List<SMBFileItem> = emptyList()
+
+    // High-speed HTTP transfer client — created after SMB connects (same server IP).
+    // Upload/Download uses HTTP (100–300 Mbps); browsing still uses SMB.
+    private var httpClient: HttpFileTransferClient? = null
 
     // ─── SharedPreferences ──────────────────────────────────────────────────
 
@@ -436,6 +446,9 @@ class ServerConnectModule : ViewModel() {
                     } else listFiles(server, share, "")
                     unfilteredFileList = fileList
                     val breadcrumbs = if (share.isEmpty()) emptyList() else listOf(share)
+                    // Prepare the HTTP transfer client for high-speed upload/download.
+                    httpClient = HttpFileTransferClient(server, HTTP_TRANSFER_PORT)
+
                     _uiState.update {
                         it.copy(isConnected = true, isLoading = false, currentServer = server,
                             currentShare = share, currentPath = "",
@@ -643,121 +656,155 @@ class ServerConnectModule : ViewModel() {
     suspend fun uploadFile(uri: Uri, context: Context): Boolean {
         activeTransferJob?.cancel()
         var success = false
+
+        val http = httpClient
+        if (http == null) {
+            viewModelScope.launch {
+                _errorMessages.emit(
+                    "HTTP transfer server not reachable. " +
+                    "Start IT Connect Server on your PC: java -jar itconnect-file-server.jar"
+                )
+            }
+            return false
+        }
+
+        val remotePath = "/" + _uiState.value.currentPath.replace("\\", "/").trimStart('/')
+        val startTime = System.currentTimeMillis()
+        var lastTransferred = 0L
+        var peakSpeed = 0L
+
         val job = viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    val cr = context.contentResolver
-                    val cursor = cr.query(uri, null, null, null, null)
-                    val fileName = cursor?.use {
-                        if (it.moveToFirst()) { val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME); if (idx != -1) it.getString(idx) else "uploaded_file" } else "uploaded_file"
-                    } ?: "uploaded_file"
-                    val fileSize = try { cr.openFileDescriptor(uri, "r")?.statSize ?: 0L } catch (_: Exception) { 0L }
-                    val targetPath = if (_uiState.value.currentPath.isEmpty()) fileName else "${_uiState.value.currentPath}/$fileName"
-                    val smbFile = SmbFile("smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/$targetPath", cifsContext)
-                    _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, isUpload = true)) }
-                    val startTime = System.currentTimeMillis()
-                    var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
-                    val speedWindow = ArrayDeque<Pair<Long, Long>>()
-                    cr.openInputStream(uri)?.let { rawInput ->
-                        BufferedInputStream(rawInput, READ_BUFFER).use { input ->
-                            smbFile.outputStream.use { smbOut ->
-                                val readBuf = ByteArray(READ_BUFFER)
-                                var readBytes = input.read(readBuf)
-                                while (readBytes != -1 && isActive) {
-                                    var writeOffset = 0
-                                    while (writeOffset < readBytes && isActive) {
-                                        val writeLen = minOf(SMB_WRITE_CHUNK, readBytes - writeOffset)
-                                        smbOut.write(readBuf, writeOffset, writeLen); writeOffset += writeLen; transferred += writeLen
-                                        val now = System.currentTimeMillis(); val elapsed = now - lastTime
-                                        speedWindow.addLast(now to transferred)
-                                        while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
-                                        if (elapsed >= 300) {
-                                            val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
-                                            val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                            val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                            if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
-                                            _uiState.update { it.copy(transferStats = TransferStats(fileName = fileName, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = true)) }
-                                        }
-                                    }
-                                    readBytes = input.read(readBuf)
-                                }
-                                smbOut.flush()
-                            }
+            try {
+                val result = http.uploadFile(
+                    uri = uri,
+                    remotePath = remotePath,
+                    context = context,
+                    onProgress = { p: TransferProgress ->
+                        lastTransferred = p.transferredBytes
+                        val elapsed = System.currentTimeMillis() - startTime
+                        val avg = if (elapsed > 0) p.transferredBytes * 1000L / elapsed else 0L
+                        if (p.speedBytesPerSec > peakSpeed) peakSpeed = p.speedBytesPerSec
+                        _uiState.update {
+                            it.copy(
+                                isTransferring = true,
+                                transferStats = TransferStats(
+                                    fileName = p.fileName,
+                                    totalBytes = p.totalBytes,
+                                    transferredBytes = p.transferredBytes,
+                                    currentSpeedBytesPerSec = p.speedBytesPerSec,
+                                    peakSpeedBytesPerSec = peakSpeed,
+                                    avgSpeedBytesPerSec = avg,
+                                    elapsedMs = elapsed,
+                                    isUpload = true
+                                )
+                            )
                         }
                     }
-                    if (isActive) {
-                        success = true; val totalMs = System.currentTimeMillis() - startTime; val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
-                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
-                        viewModelScope.launch { refreshFiles(); _successMessages.emit("'$fileName' uploaded @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}") }
+                )
+
+                _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+
+                when (result) {
+                    is TransferResult.Success -> {
+                        success = true
+                        val totalMs = System.currentTimeMillis() - startTime
+                        val avgFinal = if (totalMs > 0) lastTransferred * 1000L / totalMs else 0L
+                        refreshFiles()
+                        _successMessages.emit(
+                            "'${result.filePath.substringAfterLast("/")}' uploaded " +
+                            "@ ${TransferStats(avgSpeedBytesPerSec = avgFinal).formattedAvgSpeed}"
+                        )
                     }
-                } catch (e: Exception) {
-                    if (isActive) { Log.e("ServerConnectModule", "Upload error", e); _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }; viewModelScope.launch { _errorMessages.emit("Upload failed: ${e.message}") } }
+                    is TransferResult.Failure -> _errorMessages.emit("Upload failed: ${result.error}")
+                    is TransferResult.Cancelled -> { /* user cancelled */ }
                 }
+            } catch (e: Exception) {
+                Log.e("ServerConnectModule", "Upload error", e)
+                _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                _errorMessages.emit("Upload error: ${e.message}")
             }
         }
-        activeTransferJob = job; job.join(); return success
+
+        activeTransferJob = job
+        job.join()
+        return success
     }
 
     suspend fun downloadFile(fileItem: SMBFileItem, context: Context): Uri? {
         activeTransferJob?.cancel()
         var resultUri: Uri? = null
+
+        val http = httpClient
+        if (http == null) {
+            viewModelScope.launch {
+                _errorMessages.emit(
+                    "HTTP transfer server not reachable. " +
+                    "Start IT Connect Server on your PC: java -jar itconnect-file-server.jar"
+                )
+            }
+            return null
+        }
+
+        val currentPath = _uiState.value.currentPath
+        val remotePath = if (currentPath.isEmpty()) "/${fileItem.name}"
+                         else "/${currentPath.replace("\\", "/")}/${fileItem.name}"
+        val startTime = System.currentTimeMillis()
+        var lastTransferred = 0L
+        var peakSpeed = 0L
+
         val job = viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    val url = "smb://${_uiState.value.currentServer}/${_uiState.value.currentShare}/${_uiState.value.currentPath}/${fileItem.name}"
-                    val smbFile = SmbFile(url, cifsContext)
-                    val fileSize = try { smbFile.length() } catch (_: Exception) { 0L }
-                    _uiState.update { it.copy(isTransferring = true, transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, isUpload = false)) }
-                    val outputStream = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        val values = ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, fileItem.name)
-                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/WinShare")
-                            put(MediaStore.Downloads.IS_PENDING, 1)
-                        }
-                        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values); resultUri = uri
-                        uri?.let { context.contentResolver.openOutputStream(it) }
-                    } else {
-                        @Suppress("DEPRECATION") val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "WinShare")
-                        if (!dir.exists()) dir.mkdirs(); val localFile = File(dir, fileItem.name); resultUri = Uri.fromFile(localFile); FileOutputStream(localFile)
-                    }
-                    if (outputStream == null) { _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }; _errorMessages.emit("Could not create output file"); return@withContext }
-                    val startTime = System.currentTimeMillis()
-                    var transferred = 0L; var lastTime = startTime; var lastBytes = 0L; var peakSpeed = 0L
-                    val speedWindow = ArrayDeque<Pair<Long, Long>>()
-                    BufferedInputStream(smbFile.inputStream, SMB_READ_BUFFER).use { input ->
-                        BufferedOutputStream(outputStream, LOCAL_WRITE_BUFFER).use { output ->
-                            val buf = ByteArray(SMB_READ_BUFFER); var bytes = input.read(buf)
-                            while (bytes != -1 && isActive) {
-                                output.write(buf, 0, bytes); transferred += bytes
-                                val now = System.currentTimeMillis(); val elapsed = now - lastTime
-                                speedWindow.addLast(now to transferred)
-                                while (speedWindow.size > 1 && now - speedWindow.first().first > 3000) speedWindow.removeFirst()
-                                if (elapsed >= 300) {
-                                    val winSpeed = if (speedWindow.size >= 2) { val d = speedWindow.last().first - speedWindow.first().first; if (d > 0) ((speedWindow.last().second - speedWindow.first().second) * 1000L) / d else 0L } else 0L
-                                    val cur = if (elapsed > 0) ((transferred - lastBytes) * 1000L) / elapsed else 0L
-                                    val tot = now - startTime; val avg = if (tot > 0) (transferred * 1000L) / tot else 0L
-                                    if (cur > peakSpeed) peakSpeed = cur; lastTime = now; lastBytes = transferred
-                                    _uiState.update { it.copy(transferStats = TransferStats(fileName = fileItem.name, totalBytes = fileSize, transferredBytes = transferred, currentSpeedBytesPerSec = winSpeed.coerceAtLeast(cur), peakSpeedBytesPerSec = peakSpeed, avgSpeedBytesPerSec = avg, elapsedMs = tot, isUpload = false)) }
-                                }
-                                bytes = input.read(buf)
-                            }
-                            output.flush()
+            try {
+                val result = http.downloadFile(
+                    remotePath = remotePath,
+                    context = context,
+                    onProgress = { p: TransferProgress ->
+                        lastTransferred = p.transferredBytes
+                        val elapsed = System.currentTimeMillis() - startTime
+                        val avg = if (elapsed > 0) p.transferredBytes * 1000L / elapsed else 0L
+                        if (p.speedBytesPerSec > peakSpeed) peakSpeed = p.speedBytesPerSec
+                        _uiState.update {
+                            it.copy(
+                                isTransferring = true,
+                                transferStats = TransferStats(
+                                    fileName = p.fileName,
+                                    totalBytes = p.totalBytes,
+                                    transferredBytes = p.transferredBytes,
+                                    currentSpeedBytesPerSec = p.speedBytesPerSec,
+                                    peakSpeedBytesPerSec = peakSpeed,
+                                    avgSpeedBytesPerSec = avg,
+                                    elapsedMs = elapsed,
+                                    isUpload = false
+                                )
+                            )
                         }
                     }
-                    if (isActive) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && resultUri != null) {
-                            context.contentResolver.update(resultUri!!, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
-                        }
-                        val totalMs = System.currentTimeMillis() - startTime; val avg = if (totalMs > 0) (transferred * 1000L) / totalMs else 0L
-                        _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
-                        viewModelScope.launch { _successMessages.emit("'${fileItem.name}' → Downloads/WinShare @ ${TransferStats(avgSpeedBytesPerSec = avg).formattedAvgSpeed}") }
+                )
+
+                _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+
+                when (result) {
+                    is TransferResult.Success -> {
+                        val totalMs = System.currentTimeMillis() - startTime
+                        val avgFinal = if (totalMs > 0) lastTransferred * 1000L / totalMs else 0L
+                        resultUri = Uri.fromFile(File(result.filePath))
+                        _successMessages.emit(
+                            "'${fileItem.name}' → Downloads " +
+                            "@ ${TransferStats(avgSpeedBytesPerSec = avgFinal).formattedAvgSpeed}"
+                        )
                     }
-                } catch (e: Exception) {
-                    if (isActive) { Log.e("ServerConnectModule", "Download error", e); _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }; viewModelScope.launch { _errorMessages.emit("Download failed: ${e.message}") } }
+                    is TransferResult.Failure -> _errorMessages.emit("Download failed: ${result.error}")
+                    is TransferResult.Cancelled -> { /* user cancelled */ }
                 }
+            } catch (e: Exception) {
+                Log.e("ServerConnectModule", "Download error", e)
+                _uiState.update { it.copy(isTransferring = false, transferStats = TransferStats()) }
+                _errorMessages.emit("Download error: ${e.message}")
             }
         }
-        activeTransferJob = job; job.join(); return resultUri
+
+        activeTransferJob = job
+        job.join()
+        return resultUri
     }
 
     fun deleteSelectedFiles() {
@@ -804,7 +851,11 @@ class ServerConnectModule : ViewModel() {
     fun disconnect() {
         viewModelScope.launch {
             try {
-                activeTransferJob?.cancel(); cifsContext = null; pathStack.clear(); unfilteredFileList = emptyList()
+                activeTransferJob?.cancel()
+                cifsContext = null
+                httpClient = null
+                pathStack.clear()
+                unfilteredFileList = emptyList()
                 _uiState.update { ServerConnectionState(serverAddress = it.serverAddress, username = it.username, password = it.password, shareName = it.shareName, savedServers = it.savedServers) }
                 _successMessages.emit("Disconnected")
             } catch (e: Exception) { _errorMessages.emit("Disconnect error: ${e.message}") }
