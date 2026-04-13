@@ -388,8 +388,15 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    // ── App minimize / restore ─────────────────────────────
-    // NEW: Calls agent v10 /app/minimize and /app/restore endpoints
+    // ── App minimize / restore — ViewModel-backed state ───────
+    // isMinimized state per exePath so it persists across scroll/recomposition
+
+    private val _appMinimizeState = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val appMinimizeState: StateFlow<Map<String, Boolean>> = _appMinimizeState.asStateFlow()
+
+    fun setAppMinimized(exePath: String, minimized: Boolean) {
+        _appMinimizeState.value = _appMinimizeState.value + (exePath to minimized)
+    }
 
     fun minimizeApp(exePath: String) {
         viewModelScope.launch {

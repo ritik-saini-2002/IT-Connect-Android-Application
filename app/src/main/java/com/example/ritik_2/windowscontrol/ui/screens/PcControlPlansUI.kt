@@ -1,5 +1,9 @@
 package com.example.ritik_2.windowscontrol.ui.screens
 
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -33,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.windowscontrol.data.*
+import com.example.ritik_2.windowscontrol.pcfilebrowser.PcControlFileBrowserActivity
 import com.example.ritik_2.windowscontrol.viewmodel.PcConnectionStatus
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcUiState
@@ -46,9 +51,6 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
     val plans            by viewModel.plans.observeAsState(emptyList())
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
     val uiState          by viewModel.uiState.collectAsStateWithLifecycle()
-    val drives           by viewModel.drives.collectAsStateWithLifecycle()
-    val dirItems         by viewModel.dirItems.collectAsStateWithLifecycle()
-    val currentPath      by viewModel.currentPath.collectAsStateWithLifecycle()
     val context           = LocalContext.current
     val cfg = LocalConfiguration.current
     val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
@@ -61,20 +63,49 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
         }
     }
 
-    var pickFileForPlan    by remember { mutableStateOf<PcPlan?>(null) }
-    var pickFileAndExecute by remember { mutableStateOf<PcPlan?>(null) }
-    // pickerOpen tracks whether user has explicitly opened the picker
-    val pickerOpen = pickFileForPlan != null || pickFileAndExecute != null
+    // Pending plan for file-pick: "add" = save file step, "execute" = save + run
+    var pendingPickPlan by remember { mutableStateOf<PcPlan?>(null) }
+    var pendingPickMode by remember { mutableStateOf("") }
 
-    // Load drives when picker is opened
-    LaunchedEffect(pickerOpen) {
-        if (pickerOpen && drives.isEmpty()) {
-            viewModel.loadDrives()
+    val fileBrowserLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val path = result.data?.getStringExtra(PcControlFileBrowserActivity.EXTRA_SELECTED_PATH)
+            val plan = pendingPickPlan
+            if (!path.isNullOrBlank() && plan != null) {
+                val step        = PcStep("OPEN_FILE", path)
+                val updatedPlan = plan.copy(stepsJson = PcStepSerializer.toJson(plan.steps + step))
+                viewModel.savePlanDirectly(updatedPlan)
+                if (pendingPickMode == "execute") viewModel.executePlan(updatedPlan)
+            }
         }
+        pendingPickPlan = null
+        pendingPickMode = ""
+    }
+
+    fun launchFilePicker(plan: PcPlan, mode: String) {
+        pendingPickPlan = plan
+        pendingPickMode = mode
+        val intent = Intent(context, PcControlFileBrowserActivity::class.java).apply {
+            putExtra(PcControlFileBrowserActivity.EXTRA_PICK_MODE, true)
+        }
+        fileBrowserLauncher.launch(intent)
     }
 
     Scaffold(
-        topBar = { PcScreenTopBar(title = "Plans", connectionStatus = connectionStatus, onPing = { viewModel.pingPc() }) },
+        topBar = {
+            PcScreenTopBar(
+                title            = "Plans",
+                connectionStatus = connectionStatus,
+                onPing           = { viewModel.pingPc() },
+                extraActions     = {
+                    IconButton(onClick = { viewModel.executeQuickStep(PcStep("KEY_PRESS", "WIN+UP")) }) {
+                        Icon(Icons.Default.OpenInFull, "Maximize active window")
+                    }
+                }
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = { viewModel.startNewPlan() }, containerColor = MaterialTheme.colorScheme.primary,
                 shape = RoundedCornerShape(16.dp), modifier = if (isLandscape) Modifier.size(48.dp) else Modifier) {
@@ -109,8 +140,8 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
                             onExecute = { viewModel.executePlan(plan) },
                             onEdit = { viewModel.startEditPlan(plan) },
                             onDelete = { viewModel.deletePlan(plan) },
-                            onAddFileAndExecute = { p -> pickFileAndExecute = p },
-                            onAddFileToPlan = { p -> pickFileForPlan = p },
+                            onAddFileAndExecute = { p -> launchFilePicker(p, "execute") },
+                            onAddFileToPlan = { p -> launchFilePicker(p, "add") },
                             onExecuteFileStep = { step -> viewModel.executeQuickStep(step) },
                             compact = true
                         )
@@ -130,8 +161,8 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
                             onExecute = { viewModel.executePlan(plan) },
                             onEdit = { viewModel.startEditPlan(plan) },
                             onDelete = { viewModel.deletePlan(plan) },
-                            onAddFileAndExecute = { p -> pickFileAndExecute = p },
-                            onAddFileToPlan = { p -> pickFileForPlan = p },
+                            onAddFileAndExecute = { p -> launchFilePicker(p, "execute") },
+                            onAddFileToPlan = { p -> launchFilePicker(p, "add") },
                             onExecuteFileStep = { step -> viewModel.executeQuickStep(step) }
                         )
                     }
@@ -141,35 +172,6 @@ fun PcControlPlansUI(viewModel: PcControlViewModel) {
         }
     }
 
-    // ── File picker dialog for plans ─────────────────────────────────────────
-    if (pickerOpen) {
-        PcFilePickerDialog(
-            drives      = drives,
-            dirItems    = dirItems,
-            currentPath = currentPath,
-            filter      = PcFileFilter.ALL,
-            onBrowseDir = { path -> viewModel.browseDir(path, PcFileFilter.ALL) },
-            onNavigateUp = { viewModel.navigateUp() },
-            onPick      = { path ->
-                val step = PcStep("OPEN_FILE", path)
-                pickFileForPlan?.let { plan ->
-                    viewModel.savePlanDirectly(
-                        plan.copy(stepsJson = PcStepSerializer.toJson(plan.steps + step))
-                    )
-                    pickFileForPlan = null
-                }
-                pickFileAndExecute?.let { plan ->
-                    val updatedPlan = plan.copy(
-                        stepsJson = PcStepSerializer.toJson(plan.steps + step)
-                    )
-                    viewModel.savePlanDirectly(updatedPlan)
-                    viewModel.executePlan(updatedPlan)
-                    pickFileAndExecute = null
-                }
-            },
-            onDismiss   = { pickFileForPlan = null; pickFileAndExecute = null }
-        )
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

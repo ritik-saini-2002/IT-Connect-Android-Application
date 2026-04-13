@@ -31,10 +31,11 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
-    val apps        by viewModel.filteredApps.collectAsStateWithLifecycle()
-    val recentPaths by viewModel.recentPaths.collectAsStateWithLifecycle()
-    val isLoading   by viewModel.browseLoading.collectAsStateWithLifecycle()
-    val searchQuery by viewModel.appSearchQuery.collectAsStateWithLifecycle()
+    val apps             by viewModel.filteredApps.collectAsStateWithLifecycle()
+    val recentPaths      by viewModel.recentPaths.collectAsStateWithLifecycle()
+    val isLoading        by viewModel.browseLoading.collectAsStateWithLifecycle()
+    val searchQuery      by viewModel.appSearchQuery.collectAsStateWithLifecycle()
+    val minimizeStateMap by viewModel.appMinimizeState.collectAsStateWithLifecycle()
     var showRunning by remember { mutableStateOf(false) }
     val cfg = LocalConfiguration.current
     val isLandscape = cfg.screenWidthDp > cfg.screenHeightDp
@@ -82,14 +83,28 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                 shape = RoundedCornerShape(10.dp), singleLine = true)
             if (isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
 
-            AppListContent(apps = apps, isLoading = isLoading, searchQuery = searchQuery, showRunning = showRunning, isLandscape = isLandscape,
-                onLaunch = { app -> viewModel.executeQuickStep(PcStep("LAUNCH_APP", app.exePath)) },
-                onKill = { app -> viewModel.executeQuickStep(PcStep("KILL_APP", if (showRunning) app.exePath else app.name)) },
-                onToggleMinMax = { app -> viewModel.minimizeApp(app.exePath) },
-                onForceMaximize = { app -> viewModel.restoreApp(app.exePath) },
-                onRetry = { viewModel.loadInstalledApps() },
-                recentPaths = recentPaths,
-                onRecentClick = { recent -> viewModel.executeQuickStep(PcStep("LAUNCH_APP", recent.path)) })
+            AppListContent(
+                apps             = apps,
+                isLoading        = isLoading,
+                searchQuery      = searchQuery,
+                showRunning      = showRunning,
+                isLandscape      = isLandscape,
+                minimizeStateMap = minimizeStateMap,
+                onLaunch         = { app -> viewModel.executeQuickStep(PcStep("LAUNCH_APP", app.exePath)) },
+                onKill           = { app -> viewModel.executeQuickStep(PcStep("KILL_APP", if (showRunning) app.exePath else app.name)) },
+                onToggleMinMax   = { app ->
+                    val newState = !(minimizeStateMap[app.exePath] ?: false)
+                    viewModel.setAppMinimized(app.exePath, newState)
+                    if (newState) viewModel.minimizeApp(app.exePath) else viewModel.restoreApp(app.exePath)
+                },
+                onForceMaximize  = { app ->
+                    viewModel.setAppMinimized(app.exePath, false)
+                    viewModel.restoreApp(app.exePath)
+                },
+                onRetry          = { viewModel.loadInstalledApps() },
+                recentPaths      = recentPaths,
+                onRecentClick    = { recent -> viewModel.executeQuickStep(PcStep("LAUNCH_APP", recent.path)) }
+            )
         }
     }
 }
@@ -97,6 +112,7 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
 @Composable
 fun AppListContent(
     apps: List<PcInstalledApp>, isLoading: Boolean, searchQuery: String, showRunning: Boolean, isLandscape: Boolean,
+    minimizeStateMap: Map<String, Boolean> = emptyMap(),
     onLaunch: (PcInstalledApp) -> Unit, onKill: (PcInstalledApp) -> Unit,
     onToggleMinMax: (PcInstalledApp) -> Unit, onForceMaximize: (PcInstalledApp) -> Unit,
     onRetry: () -> Unit, recentPaths: List<PcRecentPath> = emptyList(), onRecentClick: ((PcRecentPath) -> Unit)? = null
@@ -131,7 +147,8 @@ fun AppListContent(
                 }
                 items(running, key = { "run_${it.exePath}" }) { app ->
                     PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = { onKill(app) },
-                        onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) }, compact = true)
+                        onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) },
+                        isMinimized = minimizeStateMap[app.exePath] ?: false, compact = true)
                 }
                 item(span = { GridItemSpan(2) }) {
                     Text("ALL (${notRunning.size})", style = MaterialTheme.typography.labelSmall,
@@ -156,7 +173,8 @@ fun AppListContent(
                 item { Text("● RUNNING (${running.size})", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4ADE80), modifier = Modifier.padding(vertical = 4.dp)) }
                 items(running, key = { "run_${it.exePath}" }) { app ->
                     PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = { onKill(app) },
-                        onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) })
+                        onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) },
+                        isMinimized = minimizeStateMap[app.exePath] ?: false)
                 }
                 item { Text("ALL APPS (${notRunning.size})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) }
             }
@@ -178,10 +196,10 @@ fun AppListContent(
 fun PcAppItemCard(
     app: PcInstalledApp, onLaunch: () -> Unit, onKill: (() -> Unit)?,
     onToggleMinMax: (() -> Unit)?, onForceMaximize: (() -> Unit)?,
+    isMinimized: Boolean = false,
     compact: Boolean = false
 ) {
     val haptic = LocalHapticFeedback.current
-    var isMinimized by remember { mutableStateOf(false) }
     var lastToggleTap by remember { mutableLongStateOf(0L) }
 
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
@@ -223,9 +241,11 @@ fun PcAppItemCard(
                         onClick = {
                             val now = System.currentTimeMillis()
                             if (now - lastToggleTap < 350L && onForceMaximize != null) {
-                                onForceMaximize(); haptic.performHapticFeedback(HapticFeedbackType.LongPress); isMinimized = false
+                                onForceMaximize()
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             } else {
-                                onToggleMinMax(); haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); isMinimized = !isMinimized
+                                onToggleMinMax()
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             }
                             lastToggleTap = now
                         },
