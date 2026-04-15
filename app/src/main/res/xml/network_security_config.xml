@@ -1,20 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <!--
-        Default: DENY cleartext for public internet.
-        Allow HTTP only on private LAN ranges where PC agents
-        and PocketBase run.
+        Allow cleartext HTTP — the app connects to LAN services
+        (PocketBase, PC agent) via raw IP addresses, which Android's
+        domain-config cannot match. PrivateNetworkInterceptor blocks
+        cleartext to public IPs at the OkHttp layer instead.
     -->
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-
-    <!-- Allow cleartext to localhost (emulator / dev) -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">10.0.2.2</domain>
-    </domain-config>
 </network-security-config>
