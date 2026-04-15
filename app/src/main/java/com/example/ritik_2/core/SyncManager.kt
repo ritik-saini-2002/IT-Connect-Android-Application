@@ -26,7 +26,8 @@ import javax.inject.Singleton
 class SyncManager @Inject constructor(
     private val db     : AppDatabase,
     private val http   : OkHttpClient,
-    private val monitor: ConnectivityMonitor
+    private val monitor: ConnectivityMonitor,
+    private val adminTokenProvider: AdminTokenProvider
 ) {
     private val tag        = "SyncManager"
     private val scope      = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -223,50 +224,7 @@ class SyncManager @Inject constructor(
 
     // ── Admin token (writes + DatabaseManager only) ───────────────────────────
 
-    suspend fun getAdminToken(): String = tokenMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val now = System.currentTimeMillis()
-            if (adminToken.isNotBlank() && (now - tokenFetchedAt) < tokenTtl)
-                return@withContext adminToken
-
-            if (AppConfig.ADMIN_EMAIL.isBlank() || AppConfig.ADMIN_PASS.isBlank()) {
-                error("Admin credentials not configured in local.properties " +
-                        "(pb.admin.email / pb.admin.password)")
-            }
-
-            listOf(
-                "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
-                "${AppConfig.BASE_URL}/api/admins/auth-with-password"
-            ).forEach { url ->
-                try {
-                    val body = JSONObject().apply {
-                        put("identity", AppConfig.ADMIN_EMAIL)
-                        put("password", AppConfig.ADMIN_PASS)
-                    }.toString().toRequestBody("application/json".toMediaType())
-
-                    val res     = http.newCall(
-                        Request.Builder().url(url).post(body).build()
-                    ).execute()
-                    val resBody = res.body?.string() ?: ""
-                    val ok      = res.isSuccessful
-                    res.close()
-
-                    if (ok) {
-                        val t = JSONObject(resBody).optString("token")
-                        if (t.isNotEmpty()) {
-                            adminToken     = t
-                            tokenFetchedAt = now
-                            Log.d(tag, "getAdminToken ✅ cached")
-                            return@withContext t
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(tag, "getAdminToken: $url failed — ${e.message}")
-                }
-            }
-            error("No admin token available — check pb.admin.email / pb.admin.password in local.properties")
-        }
-    }
+    suspend fun getAdminToken(): String = adminTokenProvider.getAdminToken()
 
     // ── Private refresh helpers ───────────────────────────────────────────────
 

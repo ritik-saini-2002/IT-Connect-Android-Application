@@ -16,10 +16,10 @@ import com.example.ritik_2.windowscontrol.ui.screens.PcControlMainScreen
 data class PcControlSettings(
     val pcIpAddress : String = "",
     val port        : Int    = 5000,
-    val secretKey   : String = "Ritik@2002"
+    val secretKey   : String = ""
 ) {
     val baseUrl      get() = "http://$pcIpAddress:$port"
-    val isConfigured get() = pcIpAddress.isNotEmpty()
+    val isConfigured get() = pcIpAddress.isNotEmpty() && secretKey.isNotEmpty()
 }
 
 @SuppressLint("StaticFieldLeak")
@@ -34,7 +34,9 @@ object PcControlMain {
     val isInitialized get() = _context != null
 
     @SuppressLint("StaticFieldLeak")
-    fun init(context: Context, pcIp: String = "", port: Int = 5000, secretKey: String = "Ritik@2002") {
+    private const val LEGACY_DEFAULT_KEY = "Ritik@2002"
+
+    fun init(context: Context, pcIp: String = "", port: Int = 5000, secretKey: String = "") {
         _context = context.applicationContext
         val prefs = context.getSharedPreferences("pccontrol_prefs", Context.MODE_PRIVATE)
 
@@ -44,7 +46,9 @@ object PcControlMain {
         } catch (e: ClassCastException) {
             prefs.getString("pc_port", port.toString())?.toIntOrNull() ?: port
         }
-        val savedKey = prefs.getString("pc_key", secretKey)?.ifBlank { secretKey } ?: secretKey
+        val rawKey = prefs.getString("pc_key", secretKey) ?: secretKey
+        // Treat legacy hardcoded key as empty — force user to set a new one
+        val savedKey = if (rawKey == LEGACY_DEFAULT_KEY) "" else rawKey
 
         val resolvedIp   = if (pcIp.isNotEmpty()) pcIp else savedIp
         val resolvedPort = savedPort
@@ -56,11 +60,9 @@ object PcControlMain {
 
         val db       = PcControlDatabase.getDatabase(context)
         repository   = PcControlRepository(db.planDao())
-
-        android.util.Log.d("PcControlMain", "Init — IP:$resolvedIp Port:$resolvedPort Key:${resolvedKey.take(4)}***")
     }
 
-    fun updateConnection(pcIp: String, port: Int = 5000, secretKey: String = "Ritik@2002") {
+    fun updateConnection(pcIp: String, port: Int = 5000, secretKey: String = "") {
         val ctx = _context ?: return
         val s = PcControlSettings(pcIp, port, secretKey)
         _settings    = s
@@ -68,7 +70,6 @@ object PcControlMain {
         browseClient = PcControlBrowseClient(s)
         ctx.getSharedPreferences("pccontrol_prefs", Context.MODE_PRIVATE).edit()
             .putString("pc_ip", pcIp).putInt("pc_port", port).putString("pc_key", secretKey).apply()
-        android.util.Log.d("PcControlMain", "Updated — IP:$pcIp Port:$port Key:${secretKey.take(4)}***")
     }
 
     fun getSettings(): PcControlSettings = _settings ?: PcControlSettings()

@@ -25,20 +25,19 @@ android {
 
         buildConfigField("String", "PB_HOST",             "\"${props.getProperty("pb.host",             "192.168.7.28")}\"")
         buildConfigField("String", "PB_PORT",             "\"${props.getProperty("pb.port",             "5005")}\"")
-        buildConfigField("String", "PB_ADMIN_EMAIL",      "\"${props.getProperty("pb.admin.email",      "")}\"")
-        buildConfigField("String", "PB_ADMIN_PASSWORD",   "\"${props.getProperty("pb.admin.password",   "")}\"")
+        // Admin credentials removed from BuildConfig — they must not ship in the APK.
+        // Admin token is obtained server-side or via authenticated System_Administrator login.
     }
 
-    // ── Consistent signing key ──────────────────────────────────────────────
-    // itconnect.jks is committed to the repo so every machine that clones
-    // this project signs with the same key.  Android will update the installed
-    // app rather than forcing an uninstall when you switch machines.
+    // ── Signing key (credentials in local.properties or env vars) ──────────
     signingConfigs {
         create("itconnect") {
-            storeFile     = file("itconnect.jks")
-            storePassword = "ITConnect@2024"
-            keyAlias      = "itconnect"
-            keyPassword   = "ITConnect@2024"
+            val props = com.android.build.gradle.internal.cxx.configure
+                .gradleLocalProperties(rootDir, providers)
+            storeFile     = file(props.getProperty("signing.storeFile", System.getenv("SIGNING_STORE_FILE") ?: "itconnect.jks"))
+            storePassword = props.getProperty("signing.storePassword", System.getenv("SIGNING_STORE_PASSWORD") ?: "")
+            keyAlias      = props.getProperty("signing.keyAlias", System.getenv("SIGNING_KEY_ALIAS") ?: "itconnect")
+            keyPassword   = props.getProperty("signing.keyPassword", System.getenv("SIGNING_KEY_PASSWORD") ?: "")
         }
     }
 
@@ -136,6 +135,7 @@ dependencies {
 
     // Network
     implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
     implementation(libs.gson)
 
     // Coroutines
@@ -158,12 +158,24 @@ dependencies {
     implementation(libs.jcifs.ng)
     implementation(libs.smbj)
 
+    // Logging
+    implementation(libs.timber)
+
+    // Nagios — Retrofit, WorkManager, DataStore
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.datastore.preferences)
+
     // Debug
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
     // Testing
     testImplementation(libs.junit)
+    testImplementation(libs.mockito.kotlin)
+    testImplementation(libs.turbine)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)

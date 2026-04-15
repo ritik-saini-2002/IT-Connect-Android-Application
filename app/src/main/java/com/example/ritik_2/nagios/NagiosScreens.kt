@@ -1,4 +1,4 @@
-package com.example.nagiosmonitor
+package com.example.ritik_2.nagios
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

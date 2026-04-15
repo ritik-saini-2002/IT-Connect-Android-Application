@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- SMB / Windows share downloads (existing) -->
+    <!-- SMB / Windows share downloads -->
     <cache-path name="smb_downloads" path="smb_downloads/" />
 
-    <!-- Camera photo temp files + cropped avatars (root of cache) -->
-    <cache-path name="cache" path="." />
+    <!-- Camera photo temp files + cropped avatars -->
+    <cache-path name="images" path="images/" />
 
-    <!-- Exported reports on API < 29 -->
-    <external-path name="external" path="." />
+    <!-- Exported reports -->
+    <external-files-path name="downloads" path="Download/" />
+    <external-files-path name="reports" path="Reports/" />
 
-    <!-- Additional OEM safety -->
+    <!-- External cache safety -->
     <external-cache-path name="external_cache" path="." />
 
 </paths>

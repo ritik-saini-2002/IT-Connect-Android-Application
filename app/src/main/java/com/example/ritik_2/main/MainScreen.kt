@@ -147,7 +147,8 @@ fun MainScreen(
                             FeatureItem(5, "Knowledge Base",      Icons.Outlined.MenuBook,           Color(0xFF00796B)),
                             FeatureItem(6, "Windows Control",     Icons.Outlined.Computer,           Color(0xFFC51162)),
                             FeatureItem(7, "Chats",               Icons.Outlined.Chat,               MaterialTheme.colorScheme.tertiary),
-                            FeatureItem(8, "Help & Support",      Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary)
+                            FeatureItem(8, "Help & Support",      Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary),
+                            FeatureItem(9, "Nagios Monitor",      Icons.Outlined.MonitorHeart,       Color(0xFF2E7D32))
                         )
 
                         LazyVerticalGrid(
@@ -390,7 +391,8 @@ fun AppSidebar(
         FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,           Color(0xFF00796B)),
         FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,           Color(0xFFC51162)),
         FeatureItem(7, "Settings",           Icons.Outlined.Settings,           Color(0xFF546E7A)),
-        FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       Color(0xFF1976D2))
+        FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       Color(0xFF1976D2)),
+        FeatureItem(9, "Nagios Monitor",     Icons.Outlined.MonitorHeart,       Color(0xFF2E7D32))
     )
 
     Column(Modifier.fillMaxHeight().width(300.dp).background(MaterialTheme.colorScheme.surface)) {

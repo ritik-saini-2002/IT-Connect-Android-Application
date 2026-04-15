@@ -35,7 +35,8 @@ private val MANAGER_EDITABLE_TARGET_ROLES = setOf("Employee", "Intern", "Team Le
 @Singleton
 class PocketBaseDataSource @Inject constructor(
     private val http: OkHttpClient,
-    private val db  : AppDatabase
+    private val db  : AppDatabase,
+    private val adminTokenProvider: com.example.ritik_2.core.AdminTokenProvider
 ) : AppDataSource {
 
     private val tag = "PBDataSource"
@@ -789,34 +790,7 @@ class PocketBaseDataSource @Inject constructor(
     }
 
     @Synchronized
-    fun getAdminToken(): String {
-        val now = System.currentTimeMillis()
-        if (cachedAdminToken.isNotBlank() && (now - adminTokenFetchedAt) < adminTokenTtlMs)
-            return cachedAdminToken
-        listOf(
-            "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
-            "${AppConfig.BASE_URL}/api/admins/auth-with-password"
-        ).forEach { url ->
-            try {
-                val body = JSONObject().apply {
-                    put("identity", AppConfig.ADMIN_EMAIL)
-                    put("password", AppConfig.ADMIN_PASS)
-                }.toString().toRequestBody("application/json".toMediaType())
-                val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
-                val resBody = res.body?.string() ?: ""
-                val ok      = res.isSuccessful; res.close()
-                if (ok) {
-                    val t = JSONObject(resBody).optString("token")
-                    if (t.isNotEmpty()) {
-                        cachedAdminToken    = t
-                        adminTokenFetchedAt = now
-                        return t
-                    }
-                }
-            } catch (e: Exception) { Log.w(tag, "Admin auth $url: ${e.message}") }
-        }
-        error("No admin token available")
-    }
+    fun getAdminToken(): String = adminTokenProvider.getAdminTokenSync()
 
     private fun applyFieldsToEntity(entity: UserEntity, fields: Map<String, Any>): UserEntity {
         var e = entity

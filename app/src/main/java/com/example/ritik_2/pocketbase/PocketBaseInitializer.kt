@@ -222,27 +222,20 @@ object PocketBaseInitializer {
         }
     }
 
+    private var _adminTokenProvider: com.example.ritik_2.core.AdminTokenProvider? = null
+
+    fun setAdminTokenProvider(provider: com.example.ritik_2.core.AdminTokenProvider) {
+        _adminTokenProvider = provider
+    }
+
     private fun getAdminToken(): String? {
-        listOf(
-            "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
-            "${AppConfig.BASE_URL}/api/admins/auth-with-password"
-        ).forEach { url ->
-            try {
-                val body = JSONObject().apply {
-                    put("identity", AppConfig.ADMIN_EMAIL)
-                    put("password", AppConfig.ADMIN_PASS)
-                }.toString()
-                val res     = http.newCall(req("POST", url, "", body)).execute()
-                val resBody = res.body?.string() ?: ""
-                val ok      = res.isSuccessful; res.close()
-                Log.d(TAG, "Admin auth $url → ${res.code}")
-                if (ok) {
-                    val t = JSONObject(resBody).optString("token")
-                    if (t.isNotEmpty()) return t
-                }
-            } catch (e: Exception) { Log.w(TAG, "Auth failed $url: ${e.message}") }
+        val provider = _adminTokenProvider ?: return null
+        return try {
+            provider.getAdminTokenSync()
+        } catch (_: Exception) {
+            Log.w(TAG, "Admin token not available — admin credentials not configured")
+            null
         }
-        return null
     }
 
     private fun isServerReachable(): Boolean {

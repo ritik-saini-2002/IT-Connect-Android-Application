@@ -1,0 +1,11 @@
+# ── PocketBase connection ──────────────────────────────
+pb.host=192.168.x.x
+pb.port=5005
+pb.admin.email=
+pb.admin.password=
+
+# ── Signing (for release builds) ──────────────────────
+signing.storeFile=app/itconnect.jks
+signing.storePassword=
+signing.keyAlias=itconnect
+signing.keyPassword=

@@ -30,6 +30,7 @@ import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.macnet.MACNetActivity
+import com.example.ritik_2.nagios.ConnectActivity as NagiosConnectActivity
 import com.example.ritik_2.notifications.NotificationActivity
 import com.example.ritik_2.profile.ProfileActivity
 import com.example.ritik_2.theme.ITConnectTheme
@@ -123,6 +124,7 @@ class MainActivity : ComponentActivity() {
                     putExtra("userId", userId)
                 })
             }
+            9 -> startActivity(Intent(this, NagiosConnectActivity::class.java))
         }
     }
 

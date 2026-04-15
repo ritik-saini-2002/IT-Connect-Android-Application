@@ -2,6 +2,7 @@ package com.example.ritik_2
 
 import android.app.Application
 import android.util.Log
+import com.example.ritik_2.core.AdminTokenProvider
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.pocketbase.PocketBaseInitializer
 import com.example.ritik_2.windowscontrol.PcControlMain
@@ -16,6 +17,7 @@ import javax.inject.Inject
 class MyApplication : Application() {
 
     @Inject lateinit var dataSource: AppDataSource
+    @Inject lateinit var adminTokenProvider: AdminTokenProvider
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -27,6 +29,7 @@ class MyApplication : Application() {
 
         appScope.launch {
             try {
+                PocketBaseInitializer.setAdminTokenProvider(adminTokenProvider)
                 Log.d("MyApplication", "Running PocketBase initializer...")
                 PocketBaseInitializer.initialize()
                 Log.d("MyApplication", "PocketBase initializer complete")

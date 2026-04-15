@@ -50,10 +50,20 @@ ktorSerializationJson        = "2.3.12"
 jcifsNg                      = "2.1.10"
 smbj                         = "0.13.0"
 
+# ── Logging ───────────────────────────────────────────────────
+timber                       = "5.0.1"
+
+# ── Nagios (Retrofit + WorkManager + DataStore) ──────────────
+retrofit                     = "2.9.0"
+workmanager                  = "2.9.1"
+datastore                    = "1.1.1"
+
 # ── Testing ───────────────────────────────────────────────────
 junit                        = "4.13.2"
 junitExt                     = "1.2.1"
 espresso                     = "3.6.1"
+mockitoKotlin                = "5.2.1"
+turbine                      = "1.0.0"
 material                     = "1.12.0"
 
 [libraries]
@@ -101,6 +111,7 @@ androidx-hilt-navigation-compose     = { group = "androidx.hilt",               
 
 # ── Network ───────────────────────────────────────────────────
 okhttp                               = { group = "com.squareup.okhttp3",          name = "okhttp",                       version.ref = "okhttp" }
+okhttp-logging                       = { group = "com.squareup.okhttp3",          name = "logging-interceptor",          version.ref = "okhttp" }
 gson                                 = { group = "com.google.code.gson",          name = "gson",                         version.ref = "gson" }
 
 # ── Coroutines ────────────────────────────────────────────────
@@ -123,10 +134,22 @@ ktor-serialization-kotlinx-json      = { group = "io.ktor",                     
 jcifs-ng                             = { group = "eu.agno3.jcifs",                name = "jcifs-ng",                     version.ref = "jcifsNg" }
 smbj                                 = { group = "com.hierynomus",                name = "smbj",                         version.ref = "smbj" }
 
+# ── Logging ───────────────────────────────────────────────────
+timber                               = { group = "com.jakewharton.timber",        name = "timber",                       version.ref = "timber" }
+
+# ── Nagios (Retrofit + WorkManager + DataStore) ──────────────
+retrofit                             = { group = "com.squareup.retrofit2",        name = "retrofit",                     version.ref = "retrofit" }
+retrofit-converter-gson              = { group = "com.squareup.retrofit2",        name = "converter-gson",               version.ref = "retrofit" }
+androidx-work-runtime-ktx            = { group = "androidx.work",                 name = "work-runtime-ktx",             version.ref = "workmanager" }
+androidx-datastore-preferences       = { group = "androidx.datastore",            name = "datastore-preferences",        version.ref = "datastore" }
+
 # ── Testing ───────────────────────────────────────────────────
 junit                                = { group = "junit",                         name = "junit",                        version.ref = "junit" }
 androidx-junit                       = { group = "androidx.test.ext",             name = "junit",                        version.ref = "junitExt" }
 androidx-espresso-core               = { group = "androidx.test.espresso",        name = "espresso-core",                version.ref = "espresso" }
+mockito-kotlin                       = { group = "org.mockito.kotlin",            name = "mockito-kotlin",               version.ref = "mockitoKotlin" }
+turbine                              = { group = "app.cash.turbine",              name = "turbine",                      version.ref = "turbine" }
+kotlinx-coroutines-test              = { group = "org.jetbrains.kotlinx",         name = "kotlinx-coroutines-test",      version.ref = "coroutines" }
 
 [plugins]
 android-application                  = { id = "com.android.application",                    version.ref = "agp" }

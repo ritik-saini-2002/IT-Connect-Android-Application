@@ -1,4 +1,4 @@
-package com.example.nagiosmonitor
+package com.example.ritik_2.nagios
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

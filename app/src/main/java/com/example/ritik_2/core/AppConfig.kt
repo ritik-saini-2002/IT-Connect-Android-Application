@@ -8,8 +8,10 @@ object AppConfig {
     val PB_HOST    : String = BuildConfig.PB_HOST
     val PB_PORT    : Int    = BuildConfig.PB_PORT.toIntOrNull() ?: 5005
     val BASE_URL   : String = "http://$PB_HOST:$PB_PORT"
-    val ADMIN_EMAIL: String = BuildConfig.PB_ADMIN_EMAIL
-    val ADMIN_PASS : String = BuildConfig.PB_ADMIN_PASSWORD   // matches build.gradle field name
+
+    // Admin credentials are no longer shipped in the APK.
+    // Admin token is obtained via authenticated System_Administrator login
+    // and cached in SessionManager.
 
     // ── Avatar URL ────────────────────────────────────────────
     /**

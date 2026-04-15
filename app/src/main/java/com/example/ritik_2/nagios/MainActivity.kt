@@ -1,4 +1,4 @@
-package com.example.nagiosmonitor
+package com.example.ritik_2.nagios
 
 import android.content.Intent
 import android.os.Bundle

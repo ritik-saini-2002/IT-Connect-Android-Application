@@ -2,7 +2,9 @@ package com.example.ritik_2.di
 
 import android.content.Context
 import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.AdminTokenProvider
 import com.example.ritik_2.core.ConnectivityMonitor
+import com.example.ritik_2.core.PrivateNetworkInterceptor
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.localdatabase.AppDatabase
@@ -32,6 +34,7 @@ object AppModule {
     @Provides @Singleton
     fun provideOkHttpClient(): OkHttpClient =
         OkHttpClient.Builder()
+            .addInterceptor(PrivateNetworkInterceptor())
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
@@ -42,18 +45,23 @@ object AppModule {
         ConnectivityMonitor(ctx)
 
     @Provides @Singleton
+    fun provideAdminTokenProvider(@ApplicationContext ctx: Context): AdminTokenProvider =
+        AdminTokenProvider(ctx)
+
+    @Provides @Singleton
     fun provideSyncManager(
         db     : AppDatabase,
         http   : OkHttpClient,
-        monitor: ConnectivityMonitor
-    ): SyncManager = SyncManager(db, http, monitor)
+        monitor: ConnectivityMonitor,
+        adminTokenProvider: AdminTokenProvider
+    ): SyncManager = SyncManager(db, http, monitor, adminTokenProvider)
 
-    // PocketBaseDataSource now receives AppDatabase for offline caching
     @Provides @Singleton
     fun providePocketBaseDataSource(
         http: OkHttpClient,
-        db  : AppDatabase
-    ): PocketBaseDataSource = PocketBaseDataSource(http, db)
+        db  : AppDatabase,
+        adminTokenProvider: AdminTokenProvider
+    ): PocketBaseDataSource = PocketBaseDataSource(http, db, adminTokenProvider)
 
     @Provides @Singleton
     fun provideAuthRepository(

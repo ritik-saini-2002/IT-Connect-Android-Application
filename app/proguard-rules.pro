@@ -7,9 +7,7 @@
 -dontwarn eu.agno3.jcifs.**
 -dontwarn sun.misc.**
 -dontwarn androidx.room.**
--dontwarn androidx.compose.**
 -dontwarn androidx.security.crypto.**
--dontwarn coil.**
 -dontwarn io.github.agrevster.pocketbasekotlin.**
 -dontwarn kotlin.reflect.jvm.internal.**
 
@@ -22,12 +20,12 @@
 
 -renamesourcefileattribute SourceFile
 
+# ── Kotlin ────────────────────────────────────────────────────
 -keep class kotlin.Metadata { *; }
--keep class kotlin.reflect.** { *; }
 
+# ── Serialization ─────────────────────────────────────────────
 -keep class kotlinx.serialization.** { *; }
 -keepclassmembers class kotlinx.serialization.** { *; }
-
 -keep @kotlinx.serialization.Serializable class com.example.ritik_2.** { *; }
 -keep class com.example.ritik_2.data.model.** { *; }
 -keep class com.example.ritik_2.data.source.dto.** { *; }
@@ -40,50 +38,67 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
--keep class com.example.ritik_2.BuildConfig { *; }
-
+# ── Hilt / DI ─────────────────────────────────────────────────
 -keep class dagger.hilt.** { *; }
 -keep class javax.inject.** { *; }
 -keepclasseswithmembers class * {
     @javax.inject.Inject <init>(...);
 }
 
+# ── OkHttp (keep public API only) ────────────────────────────
 -keep class okhttp3.** { *; }
 -keep interface okhttp3.** { *; }
 -keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
 
+# ── Ktor ──────────────────────────────────────────────────────
 -keep class io.ktor.** { *; }
 -keepclassmembers class io.ktor.** { *; }
--keep class kotlinx.coroutines.** { *; }
 
+# ── PocketBase SDK ────────────────────────────────────────────
 -keep class io.github.agrevster.pocketbasekotlin.** { *; }
 -keepclassmembers class io.github.agrevster.pocketbasekotlin.** { *; }
 
+# ── DTO classes ───────────────────────────────────────────────
 -keep class com.example.ritik_2.data.source.dto.UserRecord { *; }
 -keep class com.example.ritik_2.data.source.dto.AccessControlRecord { *; }
 -keep class com.example.ritik_2.data.source.dto.CompanyRecord { *; }
 -keep class com.example.ritik_2.data.source.dto.SearchIndexRecord { *; }
 
+# ── SMB / Logging ─────────────────────────────────────────────
 -keep class eu.agno3.jcifs.** { *; }
 -keepclassmembers class eu.agno3.jcifs.** { *; }
 -keep class org.slf4j.** { *; }
 
+# ── Gson ──────────────────────────────────────────────────────
 -keep class com.google.gson.** { *; }
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
 -keep class * implements com.google.gson.JsonDeserializer
 
+# ── Coil ──────────────────────────────────────────────────────
 -keep class coil.** { *; }
 
+# ── Room ──────────────────────────────────────────────────────
 -keep class * extends androidx.room.RoomDatabase
 -keep @androidx.room.Entity class *
 -keep @androidx.room.Dao interface *
 
--keep class androidx.compose.** { *; }
+# ── Security Crypto ───────────────────────────────────────────
 -keep class androidx.security.crypto.** { *; }
 
+# ── Timber ────────────────────────────────────────────────────
+-keep class timber.log.Timber { *; }
+
+# ── Retrofit (Nagios) ────────────────────────────────────────
+-keep class retrofit2.** { *; }
+-keepclasseswithmembers class * {
+    @retrofit2.http.* <methods>;
+}
+
+# ── Exception classes ─────────────────────────────────────────
 -keep public class * extends java.lang.Exception
 
+# ── WebView JS bridge ────────────────────────────────────────
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }

@@ -34,6 +34,7 @@ class CreateUserActivity : ComponentActivity() {
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var http          : OkHttpClient
     @Inject lateinit var db            : AppDatabase
+    @Inject lateinit var adminTokenProvider: com.example.ritik_2.core.AdminTokenProvider
 
     private val isCreating     = mutableStateOf(false)
     private val adminCompany   = mutableStateOf("")
@@ -253,25 +254,7 @@ class CreateUserActivity : ComponentActivity() {
         }
     }
 
-    private fun getAdminToken(): String {
-        listOf(
-            "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
-            "${AppConfig.BASE_URL}/api/admins/auth-with-password"
-        ).forEach { url ->
-            try {
-                val body = JSONObject().apply {
-                    put("identity", AppConfig.ADMIN_EMAIL); put("password", AppConfig.ADMIN_PASS)
-                }.toString().toRequestBody("application/json".toMediaType())
-                val res = http.newCall(Request.Builder().url(url).post(body).build()).execute()
-                val resBody = res.body?.string() ?: ""; val ok = res.isSuccessful; res.close()
-                if (ok) {
-                    val t = JSONObject(resBody).optString("token")
-                    if (t.isNotEmpty()) return t
-                }
-            } catch (e: Exception) { Log.w(TAG, "Admin auth $url: ${e.message}") }
-        }
-        error("Could not obtain admin token")
-    }
+    private fun getAdminToken(): String = adminTokenProvider.getAdminTokenSync()
 
     private fun pbPost(url: String, token: String, body: String) {
         val res = http.newCall(Request.Builder().url(url)

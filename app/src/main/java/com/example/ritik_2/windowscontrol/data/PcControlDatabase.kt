@@ -2,6 +2,8 @@ package com.example.ritik_2.windowscontrol.data
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 // ─────────────────────────────────────────────────────────────
@@ -86,8 +88,8 @@ interface PcConnectionLogDao {
 
 @Database(
     entities = [PcPlan::class, PcConnectionLog::class],
-    version = 3,
-    exportSchema = false
+    version = 4,
+    exportSchema = true
 )
 abstract class PcControlDatabase : RoomDatabase() {
     abstract fun planDao(): PcPlanDao
@@ -96,6 +98,13 @@ abstract class PcControlDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: PcControlDatabase? = null
 
+        /** Migration v3 -> v4: establishes migration infrastructure (no schema changes). */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // No schema changes — version bump to establish migration path
+            }
+        }
+
         fun getDatabase(context: Context): PcControlDatabase {
             return INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -103,7 +112,7 @@ abstract class PcControlDatabase : RoomDatabase() {
                     PcControlDatabase::class.java,
                     "pccontrol_database"
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_3_4)
                     .build()
                     .also { INSTANCE = it }
             }

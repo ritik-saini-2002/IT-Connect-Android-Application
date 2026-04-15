@@ -30,17 +30,24 @@ class SessionManager @Inject constructor(
 
     private val prefs: SharedPreferences by lazy { createPrefs() }
 
-    private fun createPrefs(): SharedPreferences = try {
+    private fun createPrefs(): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        EncryptedSharedPreferences.create(
-            context, PREFS, masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (e: Exception) {
-        Log.w(TAG, "EncryptedSharedPreferences failed, using plain: ${e.message}")
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return try {
+            EncryptedSharedPreferences.create(
+                context, PREFS, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // Corrupted key store — delete prefs and retry once (user will need to re-login)
+            context.deleteSharedPreferences(PREFS)
+            EncryptedSharedPreferences.create(
+                context, PREFS, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
     }
 
     fun save(session: AuthSession) {
@@ -53,7 +60,7 @@ class SessionManager @Inject constructor(
             putString(KEY_PATH,        session.documentPath)
             putString(KEY_PERMISSIONS, Json.encodeToString(session.permissions))
         }.apply()
-        Log.d(TAG, "Session saved for ${session.email} role=${session.role} perms=${session.permissions.size}")
+        Log.d(TAG, "Session saved")
     }
 
     fun get(): AuthSession? {
