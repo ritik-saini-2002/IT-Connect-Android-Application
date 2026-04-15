@@ -34,7 +34,7 @@ android {
         create("itconnect") {
             val props = com.android.build.gradle.internal.cxx.configure
                 .gradleLocalProperties(rootDir, providers)
-            storeFile     = file(props.getProperty("signing.storeFile", System.getenv("SIGNING_STORE_FILE") ?: "Keystoreforsignedapk"))
+            storeFile     = file(props.getProperty("signing.storeFile", System.getenv("SIGNING_STORE_FILE") ?: "Keystoreforsignedapk").removePrefix("app/"))
             storePassword = props.getProperty("signing.storePassword", System.getenv("SIGNING_STORE_PASSWORD") ?: "")
             keyAlias      = props.getProperty("signing.keyAlias", System.getenv("SIGNING_KEY_ALIAS") ?: "key0")
             keyPassword   = props.getProperty("signing.keyPassword", System.getenv("SIGNING_KEY_PASSWORD") ?: "")

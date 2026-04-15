@@ -5,7 +5,7 @@ pb.admin.email=
 pb.admin.password=
 
 # ── Signing (for release builds) ──────────────────────
-signing.storeFile=app/Keystoreforsignedapk
+signing.storeFile=Keystoreforsignedapk
 signing.storePassword=
 signing.keyAlias=key0
 signing.keyPassword=
