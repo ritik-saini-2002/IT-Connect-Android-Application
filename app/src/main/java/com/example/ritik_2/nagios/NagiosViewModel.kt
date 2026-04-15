@@ -1,12 +1,5 @@
 package com.example.ritik_2.nagios
 
-import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -22,17 +15,6 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
-
-// ─── DataStore ───────────────────────────────────────────────────────────────
-
-val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "nagios_prefs")
-
-object PrefKeys {
-    val BASE_URL    = stringPreferencesKey("base_url")
-    val USERNAME    = stringPreferencesKey("username")
-    val PASSWORD    = stringPreferencesKey("password")
-    val KNOWN_ALERTS = stringSetPreferencesKey("known_alerts")
-}
 
 // ─── Data Models ─────────────────────────────────────────────────────────────
 

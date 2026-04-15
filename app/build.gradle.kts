@@ -165,7 +165,6 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
     implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.androidx.datastore.preferences)
 
     // Debug
     debugImplementation(libs.androidx.ui.tooling)

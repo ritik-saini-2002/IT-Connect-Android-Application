@@ -25,11 +25,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.edit
-import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.theme.Ritik_2Theme
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,42 +33,41 @@ import java.util.concurrent.TimeUnit
 
 class ConnectActivity : ComponentActivity() {
 
+    private val prefs by lazy {
+        getSharedPreferences("nagios_connect", MODE_PRIVATE)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // If already configured, skip straight to MainActivity
-        lifecycleScope.launch {
-            val prefs = dataStore.data.first()
-            val savedUrl  = prefs[PrefKeys.BASE_URL]
-            val savedUser = prefs[PrefKeys.USERNAME]
-            val savedPass = prefs[PrefKeys.PASSWORD]
-            if (!savedUrl.isNullOrBlank() && !savedUser.isNullOrBlank() && !savedPass.isNullOrBlank()) {
-                launchMain(savedUrl, savedUser, savedPass)
-                return@launch
-            }
+        val savedUrl  = prefs.getString("base_url", null)
+        val savedUser = prefs.getString("username", null)
+        val savedPass = prefs.getString("password", null)
+        if (!savedUrl.isNullOrBlank() && !savedUser.isNullOrBlank() && !savedPass.isNullOrBlank()) {
+            launchMain(savedUrl, savedUser, savedPass)
+            return
+        }
 
-            // Otherwise show login UI
-            setContent {
-                Ritik_2Theme {
-                    ConnectScreen(
-                        onConnect = { url, user, pass ->
-                            lifecycleScope.launch {
-                                saveCredentials(url, user, pass)
-                                launchMain(url, user, pass)
-                            }
-                        }
-                    )
-                }
+        // Otherwise show login UI
+        setContent {
+            Ritik_2Theme {
+                ConnectScreen(
+                    onConnect = { url, user, pass ->
+                        saveCredentials(url, user, pass)
+                        launchMain(url, user, pass)
+                    }
+                )
             }
         }
     }
 
-    private suspend fun saveCredentials(url: String, user: String, pass: String) {
-        dataStore.edit { prefs ->
-            prefs[PrefKeys.BASE_URL]  = url
-            prefs[PrefKeys.USERNAME]  = user
-            prefs[PrefKeys.PASSWORD]  = pass
-        }
+    private fun saveCredentials(url: String, user: String, pass: String) {
+        prefs.edit()
+            .putString("base_url", url)
+            .putString("username", user)
+            .putString("password", pass)
+            .apply()
     }
 
     private fun launchMain(url: String, user: String, pass: String) {

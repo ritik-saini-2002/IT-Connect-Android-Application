@@ -8,9 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.datastore.preferences.core.edit
 import androidx.work.*
-import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 import android.Manifest
 import android.content.pm.PackageManager
@@ -197,14 +195,14 @@ class NagiosPollWorker(
         val password = inputData.getString(WorkerKeys.PASSWORD)  ?: return Result.failure()
 
         return try {
-            val repo   = NagiosRepository(baseUrl, username, password)
+            val repo     = NagiosRepository(baseUrl, username, password)
             val hosts    = repo.fetchHosts()
             val services = repo.fetchServices()
             val newAlerts = repo.alerts(hosts, services)
 
-            // Load previously known alerts from DataStore
-            val prefs       = context.dataStore.data.first()
-            val knownAlerts = prefs[PrefKeys.KNOWN_ALERTS] ?: emptySet()
+            // Load previously known alerts from SharedPreferences
+            val prefs       = context.getSharedPreferences("nagios_alerts", Context.MODE_PRIVATE)
+            val knownAlerts = prefs.getStringSet("known_alerts", emptySet()) ?: emptySet()
 
             // Find brand-new problems not seen before
             val newProblems = newAlerts.filter { it !in knownAlerts }
@@ -250,7 +248,7 @@ class NagiosPollWorker(
             }
 
             // Save current alert set as the new "known" baseline
-            context.dataStore.edit { it[PrefKeys.KNOWN_ALERTS] = newAlerts.toSet() }
+            prefs.edit().putStringSet("known_alerts", newAlerts.toSet()).apply()
 
             Result.success()
         } catch (e: Exception) {

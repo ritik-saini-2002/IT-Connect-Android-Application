@@ -11,11 +11,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.theme.Ritik_2Theme
-import kotlinx.coroutines.launch
 
 data class NavItem(
     val label: String,
@@ -54,12 +51,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
-        lifecycleScope.launch {
-            dataStore.edit { it.clear() }
-            val intent = Intent(this@MainActivity, ConnectActivity::class.java)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            startActivity(intent)
-        }
+        getSharedPreferences("nagios_connect", MODE_PRIVATE).edit().clear().apply()
+        NagiosNotifications.cancelWorker(this)
+        val intent = Intent(this@MainActivity, ConnectActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        startActivity(intent)
     }
 }
 
