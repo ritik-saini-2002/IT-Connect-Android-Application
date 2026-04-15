@@ -19,8 +19,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ritik_2.theme.Ritik_2Theme
 import com.example.ritik_2.windowscontrol.data.*
-import com.example.ritik_2.windowscontrol.ui.theme.PcControlTheme
 
 class PcAddStepActivity : ComponentActivity() {
 
@@ -31,7 +31,7 @@ class PcAddStepActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            PcControlTheme {
+            Ritik_2Theme() {
                 AddStepScreen(onStepCreated = { step ->
                     val json = PcStepSerializer.stepToJson(step)
                     setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_STEP_JSON, json))
