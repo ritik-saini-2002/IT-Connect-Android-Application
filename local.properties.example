@@ -5,7 +5,7 @@ pb.admin.email=
 pb.admin.password=
 
 # ── Signing (for release builds) ──────────────────────
-signing.storeFile=app/itconnect.jks
+signing.storeFile=app/Keystoreforsignedapk
 signing.storePassword=
-signing.keyAlias=itconnect
+signing.keyAlias=key0
 signing.keyPassword=
