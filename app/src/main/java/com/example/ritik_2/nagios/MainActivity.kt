@@ -86,20 +86,23 @@ fun MainShell(
     )
 
     var currentRoute     by remember { mutableStateOf("dashboard") }
-    var selectedHostName by remember { mutableStateOf<String?>(null) }
+    var selectedHost     by remember { mutableStateOf<NagiosHost?>(null) }
+    var troubleshootHost by remember { mutableStateOf<NagiosHost?>(null) }
     val alerts           by viewModel.alerts.collectAsState()
 
     // ── System back navigation ────────────────────────────────────────────────
-    // Priority: ServiceScreen → HostList → Dashboard → exit activity
-    val isAtRoot = currentRoute == "dashboard" && selectedHostName == null
+    // Priority: TroubleshootScreen → ServiceScreen → HostList → Dashboard → exit
+    val isAtRoot = currentRoute == "dashboard" && selectedHost == null && troubleshootHost == null
     BackHandler(enabled = !isAtRoot) {
         when {
-            // Viewing a host's services → go back to host list
-            selectedHostName != null -> {
-                selectedHostName = null
+            troubleshootHost != null -> {
+                troubleshootHost = null
+                viewModel.clearToolResults()
+            }
+            selectedHost != null -> {
+                selectedHost = null
                 viewModel.selectHost(null)
             }
-            // On any tab other than dashboard → go to dashboard
             else -> {
                 currentRoute = "dashboard"
             }
@@ -116,7 +119,8 @@ fun MainShell(
                         selected = currentRoute == item.route,
                         onClick  = {
                             currentRoute     = item.route
-                            selectedHostName = null
+                            selectedHost     = null
+                            troubleshootHost = null
                         },
                         icon = {
                             BadgedBox(
@@ -147,19 +151,25 @@ fun MainShell(
                 }
             )
             "hosts" -> {
-                if (selectedHostName != null) {
-                    ServiceScreen(
+                when {
+                    troubleshootHost != null -> TroubleshootScreen(
                         viewModel = viewModel,
-                        hostName  = selectedHostName!!,
+                        host      = troubleshootHost!!,
                         modifier  = Modifier.padding(paddingValues),
-                        onBack    = { selectedHostName = null; viewModel.selectHost(null) }
+                        onBack    = { troubleshootHost = null; viewModel.clearToolResults() }
                     )
-                } else {
-                    HostListScreen(
+                    selectedHost != null -> ServiceScreen(
+                        viewModel      = viewModel,
+                        host           = selectedHost!!,
+                        modifier       = Modifier.padding(paddingValues),
+                        onBack         = { selectedHost = null; viewModel.selectHost(null) },
+                        onTroubleshoot = { troubleshootHost = selectedHost }
+                    )
+                    else -> HostListScreen(
                         viewModel   = viewModel,
                         modifier    = Modifier.padding(paddingValues),
                         onHostClick = { host ->
-                            selectedHostName = host.name
+                            selectedHost = host
                             viewModel.selectHost(host.name)
                         }
                     )

@@ -3,7 +3,7 @@ package com.example.ritik_2.chat
 import android.net.Uri
 
 enum class MessageType { TEXT, IMAGE, DOCUMENT, AUDIO, VIDEO }
-enum class RoomType    { DIRECT, GROUP }
+enum class RoomType    { DIRECT, GROUP, BROADCAST }
 
 data class ChatRoom(
     val id           : String,

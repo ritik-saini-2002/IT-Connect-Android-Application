@@ -365,8 +365,11 @@ private fun GlassTopBar(
                     overflow   = TextOverflow.Ellipsis
                 )
                 Text(
-                    if (room.type == RoomType.GROUP) "${room.members.size} members"
-                    else "Tap to view profile",
+                    when (room.type) {
+                        RoomType.BROADCAST -> "Company channel \u00B7 visible to all"
+                        RoomType.GROUP     -> "${room.members.size} members"
+                        else               -> "Tap to view profile"
+                    },
                     fontSize = 12.sp,
                     color    = Color.White.copy(0.6f)
                 )

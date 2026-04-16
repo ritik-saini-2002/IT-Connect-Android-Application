@@ -40,7 +40,16 @@ class ChatListViewModel @Inject constructor(
                 sanitizedCompany  = profile.sanitizedCompany
                 currentUserAvatar = profile.imageUrl
 
-                val rooms = repo.getRooms(currentUserId)
+                // Ensure a company-wide broadcast room exists so all users can see messages
+                repo.getOrCreateBroadcastRoom(
+                    companyName      = profile.companyName,
+                    sanitizedCompany = sanitizedCompany,
+                    creatorId        = currentUserId,
+                    creatorName      = currentUserName
+                )
+
+                // Fetch rooms including broadcast rooms for the company
+                val rooms = repo.getRooms(currentUserId, sanitizedCompany)
                 _state.update {
                     it.copy(
                         isLoading       = false,

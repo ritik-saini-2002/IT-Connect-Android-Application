@@ -40,12 +40,16 @@ fun ChatListScreen(
     var fabExpand by remember { mutableStateOf(false) }
 
     val filtered = remember(state.rooms, search) {
-        if (search.isBlank()) state.rooms
+        val rooms = if (search.isBlank()) state.rooms
         else state.rooms.filter {
             it.name.contains(search, true) ||
                     it.lastMessage.contains(search, true) ||
                     it.memberNames.any { n -> n.contains(search, true) }
         }
+        // Pin broadcast rooms at the top
+        val broadcast = rooms.filter { it.type == RoomType.BROADCAST }
+        val rest      = rooms.filter { it.type != RoomType.BROADCAST }
+        broadcast + rest
     }
 
     Scaffold(
@@ -169,7 +173,7 @@ fun ChatListScreen(
 @Composable
 private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) {
     // FIX: For DMs, show the OTHER user's name (not "UserA & UserB")
-    // For groups, show group name with member count
+    // For groups/broadcast, show room name
     val displayName = when (room.type) {
         RoomType.DIRECT -> {
             // Find the other member's name
@@ -179,7 +183,7 @@ private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) 
                 room.name.replace("&", "·").trim()
             }
         }
-        RoomType.GROUP -> room.name
+        RoomType.GROUP, RoomType.BROADCAST -> room.name
     }
 
     // FIX: For DMs, show the other user's avatar; for groups, show group avatar or icon
@@ -189,13 +193,14 @@ private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) 
             val otherIdx = if (myIdx == 0) 1 else 0
             room.memberAvatars.getOrElse(otherIdx) { room.avatarUrl }
         }
-        RoomType.GROUP -> room.avatarUrl
+        RoomType.GROUP, RoomType.BROADCAST -> room.avatarUrl
     }
 
-    // Subtitle: for groups show member count
+    // Subtitle: for groups/broadcast show member info
     val subtitle = when (room.type) {
-        RoomType.GROUP  -> "${room.members.size} members"
-        RoomType.DIRECT -> ""
+        RoomType.BROADCAST -> "Company channel \u00B7 visible to all"
+        RoomType.GROUP     -> "${room.members.size} members"
+        RoomType.DIRECT    -> ""
     }
 
     Row(
@@ -209,8 +214,11 @@ private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) 
             Box(
                 Modifier.fillMaxSize().clip(CircleShape)
                     .background(
-                        if (room.type == RoomType.GROUP) Color(0xFF1976D2).copy(0.15f)
-                        else MaterialTheme.colorScheme.primaryContainer
+                        when (room.type) {
+                            RoomType.BROADCAST -> Color(0xFFF57C00).copy(0.15f)
+                            RoomType.GROUP     -> Color(0xFF1976D2).copy(0.15f)
+                            else               -> MaterialTheme.colorScheme.primaryContainer
+                        }
                     ),
                 Alignment.Center
             ) {
@@ -223,8 +231,11 @@ private fun RoomListItem(room: ChatRoom, myUserId: String, onClick: () -> Unit) 
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    // FIX: Show initials of the OTHER user for DMs, group icon for groups
-                    if (room.type == RoomType.GROUP) {
+                    // FIX: Show initials of the OTHER user for DMs, group/broadcast icon for others
+                    if (room.type == RoomType.BROADCAST) {
+                        Icon(Icons.Default.Notifications, null,
+                            tint = Color(0xFFF57C00), modifier = Modifier.size(28.dp))
+                    } else if (room.type == RoomType.GROUP) {
                         Icon(Icons.Default.Group, null,
                             tint = Color(0xFF1976D2), modifier = Modifier.size(28.dp))
                     } else {

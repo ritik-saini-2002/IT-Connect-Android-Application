@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -466,11 +467,13 @@ fun HostCard(host: NagiosHost, onClick: () -> Unit) {
 
 @Composable
 fun ServiceScreen(
-    viewModel: NagiosViewModel,
-    hostName:  String,
-    modifier:  Modifier = Modifier,
-    onBack:    () -> Unit
+    viewModel:      NagiosViewModel,
+    host:           NagiosHost,
+    modifier:       Modifier = Modifier,
+    onBack:         () -> Unit,
+    onTroubleshoot: () -> Unit
 ) {
+    val hostName = host.name
     val services            by viewModel.filteredServicesForSelectedHost.collectAsStateWithLifecycle()
     val allServices         by viewModel.servicesForSelectedHost.collectAsStateWithLifecycle()
     val serviceStatusFilter by viewModel.serviceStatusFilter.collectAsStateWithLifecycle()
@@ -486,17 +489,25 @@ fun ServiceScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back")
             }
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text       = hostName,
                     fontSize   = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text     = "${services.size} of ${allServices.size} services",
+                    text     = "${host.address}  ·  ${services.size} of ${allServices.size} services",
                     fontSize = 12.sp,
                     color    = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+            FilledTonalButton(
+                onClick = onTroubleshoot,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Troubleshoot", fontSize = 12.sp)
             }
         }
 
@@ -765,7 +776,260 @@ fun AlertCard(service: NagiosService) {
     }
 }
 
-// ─── SCREEN 5: Settings ───────────────────────────────────────────────────────
+// ─── SCREEN 5: Troubleshoot ──────────────────────────────────────────────────
+
+@Composable
+fun TroubleshootScreen(
+    viewModel: NagiosViewModel,
+    host:      NagiosHost,
+    modifier:  Modifier = Modifier,
+    onBack:    () -> Unit
+) {
+    val results by viewModel.toolResults.collectAsStateWithLifecycle()
+    var customPort by remember { mutableStateOf("") }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        // Header
+        Row(
+            modifier          = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Network Troubleshoot", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "${host.name}  ·  ${host.address}",
+                    fontSize = 12.sp,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            StatusBadge(host.status, isHost = true)
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        LazyColumn(
+            contentPadding      = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Run All button
+            item {
+                Button(
+                    onClick  = { viewModel.runAllTools(host.address) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape    = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Run All Diagnostics")
+                }
+            }
+
+            // Tool cards grid
+            item {
+                Text(
+                    "Tools",
+                    fontSize   = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier   = Modifier.padding(top = 4.dp)
+                )
+            }
+            item {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ToolCard(
+                        label    = "Ping",
+                        icon     = Icons.Default.Speed,
+                        running  = results["ping"]?.isRunning == true,
+                        modifier = Modifier.weight(1f),
+                        onClick  = { viewModel.runPing(host.address) }
+                    )
+                    ToolCard(
+                        label    = "DNS Lookup",
+                        icon     = Icons.Default.Language,
+                        running  = results["dns"]?.isRunning == true,
+                        modifier = Modifier.weight(1f),
+                        onClick  = { viewModel.runDnsLookup(host.address) }
+                    )
+                }
+            }
+            item {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ToolCard(
+                        label    = "HTTP Check",
+                        icon     = Icons.Default.Public,
+                        running  = results["http"]?.isRunning == true,
+                        modifier = Modifier.weight(1f),
+                        onClick  = { viewModel.runHttpCheck(host.address) }
+                    )
+                    ToolCard(
+                        label    = "Port Scan",
+                        icon     = Icons.Default.SettingsEthernet,
+                        running  = false,
+                        modifier = Modifier.weight(1f),
+                        onClick  = {
+                            viewModel.runPortCheck(host.address, 22)
+                            viewModel.runPortCheck(host.address, 80)
+                            viewModel.runPortCheck(host.address, 443)
+                            viewModel.runPortCheck(host.address, 3389)
+                        }
+                    )
+                }
+            }
+
+            // Custom port check
+            item {
+                Row(
+                    modifier              = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value         = customPort,
+                        onValueChange = { customPort = it.filter { c -> c.isDigit() }.take(5) },
+                        placeholder   = { Text("Custom port") },
+                        singleLine    = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier      = Modifier.weight(1f),
+                        shape         = RoundedCornerShape(12.dp)
+                    )
+                    FilledTonalButton(
+                        onClick = {
+                            val port = customPort.toIntOrNull()
+                            if (port != null && port in 1..65535) {
+                                viewModel.runPortCheck(host.address, port)
+                            }
+                        },
+                        enabled = customPort.toIntOrNull()?.let { it in 1..65535 } == true
+                    ) {
+                        Text("Check")
+                    }
+                }
+            }
+
+            // Results section
+            if (results.isNotEmpty()) {
+                item {
+                    Text(
+                        "Results",
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier   = Modifier.padding(top = 8.dp)
+                    )
+                }
+                results.toSortedMap().forEach { (key, result) ->
+                    item(key = key) {
+                        ToolResultCard(result = result)
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun ToolCard(
+    label:    String,
+    icon:     ImageVector,
+    running:  Boolean,
+    modifier: Modifier = Modifier,
+    onClick:  () -> Unit
+) {
+    Card(
+        modifier = modifier.clickable(enabled = !running) { onClick() },
+        shape    = RoundedCornerShape(12.dp),
+        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border   = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(
+            modifier            = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (running) {
+                CircularProgressIndicator(
+                    modifier    = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                    color       = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint     = MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun ToolResultCard(result: ToolResult) {
+    val borderColor = when {
+        result.isRunning    -> MaterialTheme.colorScheme.primary
+        result.success == true  -> AppColors.success
+        result.success == false -> MaterialTheme.colorScheme.error
+        else                -> MaterialTheme.colorScheme.outlineVariant
+    }
+
+    Card(
+        shape    = RoundedCornerShape(12.dp),
+        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border   = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier          = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    result.tool,
+                    fontWeight = FontWeight.Medium,
+                    fontSize   = 13.sp
+                )
+                if (result.isRunning) {
+                    CircularProgressIndicator(
+                        modifier    = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color       = MaterialTheme.colorScheme.primary
+                    )
+                } else if (result.success != null) {
+                    StatusBadge(
+                        if (result.success) "OK" else "CRITICAL",
+                        isHost = false
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                result.output,
+                fontSize   = 11.sp,
+                color      = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                lineHeight = 16.sp
+            )
+        }
+    }
+}
+
+// ─── SCREEN 6: Settings ───────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

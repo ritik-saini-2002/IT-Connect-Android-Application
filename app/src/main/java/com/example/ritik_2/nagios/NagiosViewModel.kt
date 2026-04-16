@@ -45,6 +45,13 @@ data class NagiosSummary(
     val servicesUnknown: Int
 )
 
+data class ToolResult(
+    val tool: String,
+    val output: String,
+    val isRunning: Boolean = false,
+    val success: Boolean? = null
+)
+
 sealed class UiState<out T> {
     object Loading : UiState<Nothing>()
     data class Success<T>(val data: T) : UiState<T>()
@@ -337,6 +344,126 @@ class NagiosViewModel(
     fun selectHost(hostName: String?) {
         _selectedHost.value = hostName
         _serviceStatusFilter.value = "ALL"  // Reset service filter on host change
+    }
+
+    // ── Network Troubleshooting ──────────────────────────────────────────────────
+
+    private val _toolResults = MutableStateFlow<Map<String, ToolResult>>(emptyMap())
+    val toolResults: StateFlow<Map<String, ToolResult>> = _toolResults.asStateFlow()
+
+    fun clearToolResults() { _toolResults.value = emptyMap() }
+
+    fun runPing(address: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _toolResults.update { it + ("ping" to ToolResult("Ping", "Running ping $address ...", isRunning = true)) }
+            try {
+                val process = Runtime.getRuntime().exec(arrayOf("/system/bin/ping", "-c", "4", "-W", "5", address))
+                val output = process.inputStream.bufferedReader().readText()
+                val errors = process.errorStream.bufferedReader().readText()
+                val exitCode = process.waitFor()
+                _toolResults.update { it + ("ping" to ToolResult(
+                    "Ping",
+                    output.ifBlank { errors.ifBlank { "No response" } },
+                    isRunning = false,
+                    success = exitCode == 0
+                )) }
+            } catch (e: Exception) {
+                _toolResults.update { it + ("ping" to ToolResult(
+                    "Ping", "Failed: ${e.message}", isRunning = false, success = false
+                )) }
+            }
+        }
+    }
+
+    fun runDnsLookup(address: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _toolResults.update { it + ("dns" to ToolResult("DNS Lookup", "Resolving $address ...", isRunning = true)) }
+            try {
+                val addresses = java.net.InetAddress.getAllByName(address)
+                val sb = StringBuilder()
+                sb.appendLine("Hostname: $address")
+                sb.appendLine("Resolved addresses:")
+                addresses.forEach { addr ->
+                    sb.appendLine("  ${addr.hostAddress}  (${addr.canonicalHostName})")
+                }
+                _toolResults.update { it + ("dns" to ToolResult(
+                    "DNS Lookup", sb.toString().trim(), isRunning = false, success = true
+                )) }
+            } catch (e: java.net.UnknownHostException) {
+                _toolResults.update { it + ("dns" to ToolResult(
+                    "DNS Lookup", "Could not resolve hostname: $address", isRunning = false, success = false
+                )) }
+            } catch (e: Exception) {
+                _toolResults.update { it + ("dns" to ToolResult(
+                    "DNS Lookup", "Failed: ${e.message}", isRunning = false, success = false
+                )) }
+            }
+        }
+    }
+
+    fun runPortCheck(address: String, port: Int) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val key = "port_$port"
+            _toolResults.update { it + (key to ToolResult("Port $port", "Checking $address:$port ...", isRunning = true)) }
+            try {
+                val socket = java.net.Socket()
+                socket.connect(java.net.InetSocketAddress(address, port), 5000)
+                socket.close()
+                _toolResults.update { it + (key to ToolResult(
+                    "Port $port", "Port $port is OPEN on $address", isRunning = false, success = true
+                )) }
+            } catch (e: java.net.ConnectException) {
+                _toolResults.update { it + (key to ToolResult(
+                    "Port $port", "Port $port is CLOSED on $address", isRunning = false, success = false
+                )) }
+            } catch (e: java.net.SocketTimeoutException) {
+                _toolResults.update { it + (key to ToolResult(
+                    "Port $port", "Port $port TIMEOUT on $address (filtered or unreachable)", isRunning = false, success = false
+                )) }
+            } catch (e: Exception) {
+                _toolResults.update { it + (key to ToolResult(
+                    "Port $port", "Port $port check failed: ${e.message}", isRunning = false, success = false
+                )) }
+            }
+        }
+    }
+
+    fun runHttpCheck(address: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _toolResults.update { it + ("http" to ToolResult("HTTP Check", "Connecting to $address ...", isRunning = true)) }
+            try {
+                val url = if (address.startsWith("http")) address else "http://$address"
+                val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                conn.requestMethod = "HEAD"
+                conn.instanceFollowRedirects = false
+                val code = conn.responseCode
+                val msg = conn.responseMessage
+                val server = conn.getHeaderField("Server") ?: "unknown"
+                conn.disconnect()
+                _toolResults.update { it + ("http" to ToolResult(
+                    "HTTP Check",
+                    "HTTP $code $msg\nServer: $server",
+                    isRunning = false,
+                    success = code in 200..399
+                )) }
+            } catch (e: Exception) {
+                _toolResults.update { it + ("http" to ToolResult(
+                    "HTTP Check", "Failed: ${e.message}", isRunning = false, success = false
+                )) }
+            }
+        }
+    }
+
+    fun runAllTools(address: String) {
+        clearToolResults()
+        runPing(address)
+        runDnsLookup(address)
+        runPortCheck(address, 22)
+        runPortCheck(address, 80)
+        runPortCheck(address, 443)
+        runHttpCheck(address)
     }
 
     class Factory(

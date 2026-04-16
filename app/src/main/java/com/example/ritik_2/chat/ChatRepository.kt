@@ -43,12 +43,17 @@ class ChatRepository @Inject constructor(
 
     // ── Rooms ─────────────────────────────────────────────────────────────────
 
-    suspend fun getRooms(userId: String): List<ChatRoom> = withContext(Dispatchers.IO) {
+    suspend fun getRooms(userId: String, sanitizedCompany: String = ""): List<ChatRoom> = withContext(Dispatchers.IO) {
         try {
             val token = syncManager.getAdminToken()
+            // Include rooms where user is a member, plus company-wide broadcast rooms
+            val filter = if (sanitizedCompany.isNotBlank())
+                "(members~'$userId'||type='broadcast'%26%26companyName='$sanitizedCompany')"
+            else
+                "(members~'$userId')"
             val res   = syncManager.pbGet(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records" +
-                        "?filter=(members~'$userId')&sort=-lastMessageAt&perPage=100", token)
+                        "?filter=$filter&sort=-lastMessageAt&perPage=100", token)
             val items = JSONObject(res).optJSONArray("items") ?: return@withContext emptyList()
             (0 until items.length()).map { items.getJSONObject(it).toRoom(userId) }
         } catch (e: Exception) { Log.e(TAG, "getRooms: ${e.message}"); emptyList() }
@@ -186,6 +191,46 @@ class ChatRepository @Inject constructor(
                 }.toString())
             true
         } catch (e: Exception) { false }
+    }
+
+    // ── Broadcast (company-wide) room ────────────────────────────────────────
+
+    suspend fun getOrCreateBroadcastRoom(
+        companyName: String,
+        sanitizedCompany: String,
+        creatorId: String,
+        creatorName: String
+    ): ChatRoom? = withContext(Dispatchers.IO) {
+        try {
+            val token = syncManager.getAdminToken()
+            // Check if a broadcast room already exists for this company
+            val res = syncManager.pbGet(
+                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records" +
+                        "?filter=(type='broadcast'%26%26companyName='$sanitizedCompany')&perPage=1",
+                token)
+            val existing = JSONObject(res).optJSONArray("items")?.optJSONObject(0)
+            if (existing != null) return@withContext existing.toRoom(creatorId)
+
+            // Create company broadcast room
+            val body = JSONObject().apply {
+                put("name",          "$companyName - All")
+                put("type",          "broadcast")
+                put("members",       JSONArray().apply { put(creatorId) }.toString())
+                put("memberNames",   JSONArray().apply { put(creatorName) }.toString())
+                put("memberAvatars", JSONArray().apply { put("") }.toString())
+                put("adminIds",      JSONArray().apply { put(creatorId) }.toString())
+                put("companyName",   sanitizedCompany)
+                put("lastMessage",   "Company channel created")
+                put("lastMessageAt", System.currentTimeMillis())
+            }.toString()
+            val created = JSONObject(syncManager.pbPost(
+                "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records", token, body)
+            ).toRoom(creatorId)
+            created
+        } catch (e: Exception) {
+            Log.e(TAG, "getOrCreateBroadcastRoom: ${e.message}")
+            null
+        }
     }
 
     // ── Messages ──────────────────────────────────────────────────────────────
@@ -692,7 +737,11 @@ class ChatRepository @Inject constructor(
     private fun JSONObject.toRoom(myId: String): ChatRoom {
         val id         = optString("id")
         val members    = parseJsonArray(optString("members", "[]"))
-        val type       = if (optString("type") == "direct") RoomType.DIRECT else RoomType.GROUP
+        val type = when (optString("type")) {
+            "direct"    -> RoomType.DIRECT
+            "broadcast" -> RoomType.BROADCAST
+            else        -> RoomType.GROUP
+        }
         val avatarFile = optString("avatar", "")
         val avatarUrl  = if (avatarFile.isNotBlank())
             "${AppConfig.BASE_URL}/api/files/$COL_ROOMS/$id/$avatarFile"
