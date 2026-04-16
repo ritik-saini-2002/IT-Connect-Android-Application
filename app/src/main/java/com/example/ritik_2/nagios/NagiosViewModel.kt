@@ -215,6 +215,10 @@ class NagiosViewModel(
     private val password: String
 ) : ViewModel() {
 
+    // Expose server info for the Settings screen
+    val serverUrl: String      = baseUrl
+    val serverUsername: String = username
+
     private val repo = NagiosRepository(baseUrl, username, password)
 
     private val _hosts    = MutableStateFlow<UiState<List<NagiosHost>>>(UiState.Loading)
@@ -222,25 +226,40 @@ class NagiosViewModel(
     private val _summary  = MutableStateFlow<UiState<NagiosSummary>>(UiState.Loading)
     private val _filterQuery = MutableStateFlow("")
 
-    val hosts:    StateFlow<UiState<List<NagiosHost>>>    = _hosts.asStateFlow()
-    val services: StateFlow<UiState<List<NagiosService>>> = _services.asStateFlow()
-    val summary:  StateFlow<UiState<NagiosSummary>>       = _summary.asStateFlow()
-    val filterQuery: StateFlow<String>                    = _filterQuery.asStateFlow()
+    // "ALL" | "UP" | "DOWN"  (DOWN covers DOWN + UNREACHABLE for hosts)
+    private val _hostStatusFilter    = MutableStateFlow("ALL")
+    // "ALL" | "UP" | "DOWN"  (UP = OK, DOWN = WARNING / CRITICAL / UNKNOWN)
+    private val _serviceStatusFilter = MutableStateFlow("ALL")
 
-    // Filtered hosts derived from hosts + filterQuery
-    val filteredHosts: StateFlow<UiState<List<NagiosHost>>> = combine(_hosts, _filterQuery) { state, query ->
-        when (state) {
-            is UiState.Success -> {
-                val filtered = if (query.isBlank()) state.data
-                else state.data.filter {
-                    it.name.contains(query, ignoreCase = true) ||
-                    it.address.contains(query, ignoreCase = true)
+    val hosts:               StateFlow<UiState<List<NagiosHost>>>    = _hosts.asStateFlow()
+    val services:            StateFlow<UiState<List<NagiosService>>> = _services.asStateFlow()
+    val summary:             StateFlow<UiState<NagiosSummary>>       = _summary.asStateFlow()
+    val filterQuery:         StateFlow<String>                       = _filterQuery.asStateFlow()
+    val hostStatusFilter:    StateFlow<String>                       = _hostStatusFilter.asStateFlow()
+    val serviceStatusFilter: StateFlow<String>                       = _serviceStatusFilter.asStateFlow()
+
+    // Hosts filtered by search text AND status chip (All / Up / Down)
+    val filteredHosts: StateFlow<UiState<List<NagiosHost>>> =
+        combine(_hosts, _filterQuery, _hostStatusFilter) { state, query, statusFilter ->
+            when (state) {
+                is UiState.Success -> {
+                    var list = state.data
+                    if (query.isNotBlank()) {
+                        list = list.filter {
+                            it.name.contains(query, ignoreCase = true) ||
+                            it.address.contains(query, ignoreCase = true)
+                        }
+                    }
+                    list = when (statusFilter) {
+                        "UP"   -> list.filter { it.status == "UP" }
+                        "DOWN" -> list.filter { it.status == "DOWN" || it.status == "UNREACHABLE" }
+                        else   -> list
+                    }
+                    UiState.Success(list)
                 }
-                UiState.Success(filtered)
+                else -> state
             }
-            else -> state
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UiState.Loading)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UiState.Loading)
 
     val alerts: StateFlow<List<NagiosService>> = _services.map { state ->
         when (state) {
@@ -249,17 +268,36 @@ class NagiosViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Selected host for service drill-down
     private val _selectedHost = MutableStateFlow<String?>(null)
     val selectedHost: StateFlow<String?> = _selectedHost.asStateFlow()
 
-    val servicesForSelectedHost: StateFlow<List<NagiosService>> = combine(_services, _selectedHost) { state, host ->
-        when (state) {
-            is UiState.Success -> if (host == null) emptyList()
-                                  else state.data.filter { it.hostName == host }
-            else -> emptyList()
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // All services for selected host — unfiltered (kept for internal use)
+    val servicesForSelectedHost: StateFlow<List<NagiosService>> =
+        combine(_services, _selectedHost) { state, host ->
+            when (state) {
+                is UiState.Success -> if (host == null) emptyList()
+                                      else state.data.filter { it.hostName == host }
+                else -> emptyList()
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Services filtered by status chip (All / Up=OK / Down=WARNING+CRITICAL+UNKNOWN)
+    val filteredServicesForSelectedHost: StateFlow<List<NagiosService>> =
+        combine(_services, _selectedHost, _serviceStatusFilter) { state, host, statusFilter ->
+            when (state) {
+                is UiState.Success -> {
+                    var list = if (host == null) emptyList()
+                               else state.data.filter { it.hostName == host }
+                    list = when (statusFilter) {
+                        "UP"   -> list.filter { it.status == "OK" }
+                        "DOWN" -> list.filter { it.status != "OK" }
+                        else   -> list
+                    }
+                    list
+                }
+                else -> emptyList()
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         startPolling()
@@ -269,7 +307,7 @@ class NagiosViewModel(
         viewModelScope.launch {
             while (true) {
                 refresh()
-                delay(30_000L) // refresh every 30 seconds
+                delay(30_000L)
             }
         }
     }
@@ -292,15 +330,15 @@ class NagiosViewModel(
         }
     }
 
-    fun setFilter(query: String) {
-        _filterQuery.value = query
-    }
+    fun setFilter(query: String)               { _filterQuery.value = query }
+    fun setHostStatusFilter(filter: String)    { _hostStatusFilter.value = filter }
+    fun setServiceStatusFilter(filter: String) { _serviceStatusFilter.value = filter }
 
     fun selectHost(hostName: String?) {
         _selectedHost.value = hostName
+        _serviceStatusFilter.value = "ALL"  // Reset service filter on host change
     }
 
-    // Factory
     class Factory(
         private val baseUrl: String,
         private val username: String,

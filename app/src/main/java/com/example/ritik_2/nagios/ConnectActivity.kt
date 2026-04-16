@@ -1,6 +1,5 @@
 package com.example.ritik_2.nagios
 
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -16,7 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -25,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ritik_2.BuildConfig
 import com.example.ritik_2.theme.Ritik_2Theme
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
@@ -40,7 +39,18 @@ class ConnectActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // If already configured, skip straight to MainActivity
+        // After "Disconnect & logout" — always show the form pre-filled with the old server
+        val showForm       = intent.getBooleanExtra("SHOW_FORM", false)
+        val prefillUrl     = intent.getStringExtra("PREFILL_URL")
+        val prefillUsername = intent.getStringExtra("PREFILL_USERNAME")
+
+        if (showForm) {
+            // Show the connect screen pre-filled so the user can re-connect or switch server
+            showConnectScreen(prefillUrl, prefillUsername)
+            return
+        }
+
+        // 1. Already configured (saved credentials) → go straight to main
         val savedUrl  = prefs.getString("base_url", null)
         val savedUser = prefs.getString("username", null)
         val savedPass = prefs.getString("password", null)
@@ -49,11 +59,27 @@ class ConnectActivity : ComponentActivity() {
             return
         }
 
-        // Otherwise show login UI
+        // 2. BuildConfig has default credentials → auto-connect silently on first launch
+        val defaultUrl  = BuildConfig.NAGIOS_DEFAULT_URL
+        val defaultUser = BuildConfig.NAGIOS_DEFAULT_USERNAME
+        val defaultPass = BuildConfig.NAGIOS_DEFAULT_PASSWORD
+        if (defaultUrl.isNotBlank() && defaultUser.isNotBlank() && defaultPass.isNotBlank()) {
+            saveCredentials(defaultUrl, defaultUser, defaultPass)
+            launchMain(defaultUrl, defaultUser, defaultPass)
+            return
+        }
+
+        // 3. Nothing saved, no defaults → show blank connect screen
+        showConnectScreen(null, null)
+    }
+
+    private fun showConnectScreen(prefillUrl: String?, prefillUsername: String?) {
         setContent {
             Ritik_2Theme {
                 ConnectScreen(
-                    onConnect = { url, user, pass ->
+                    prefillUrl      = prefillUrl,
+                    prefillUsername = prefillUsername,
+                    onConnect       = { url, user, pass ->
                         saveCredentials(url, user, pass)
                         launchMain(url, user, pass)
                     }
@@ -72,9 +98,9 @@ class ConnectActivity : ComponentActivity() {
 
     private fun launchMain(url: String, user: String, pass: String) {
         val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("BASE_URL",  url)
-            putExtra("USERNAME",  user)
-            putExtra("PASSWORD",  pass)
+            putExtra("BASE_URL", url)
+            putExtra("USERNAME", user)
+            putExtra("PASSWORD", pass)
         }
         startActivity(intent)
         finish()
@@ -83,12 +109,24 @@ class ConnectActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) {
-    val context      = LocalContext.current
+fun ConnectScreen(
+    prefillUrl:      String? = null,
+    prefillUsername: String? = null,
+    onConnect: (url: String, user: String, pass: String) -> Unit
+) {
     val focusManager = LocalFocusManager.current
 
-    var url          by remember { mutableStateOf("http://192.168.1.100") }
-    var username     by remember { mutableStateOf("") }
+    // Pre-fill URL: use what was passed (e.g. after disconnect), then BuildConfig, then placeholder
+    var url      by remember {
+        mutableStateOf(
+            prefillUrl ?: BuildConfig.NAGIOS_DEFAULT_URL.ifBlank { "http://192.168.1.100" }
+        )
+    }
+    // Pre-fill username: use what was passed, then BuildConfig
+    var username by remember {
+        mutableStateOf(prefillUsername ?: BuildConfig.NAGIOS_DEFAULT_USERNAME)
+    }
+    // Password is NEVER pre-filled — user must type it every time after disconnect
     var password     by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var isLoading    by remember { mutableStateOf(false) }
@@ -102,7 +140,6 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
         isLoading = true
         errorMsg  = null
 
-        // Test connection in background thread
         Thread {
             try {
                 val client = OkHttpClient.Builder()
@@ -133,10 +170,7 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
         }.start()
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color    = MaterialTheme.colorScheme.background
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -144,7 +178,6 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Header
             Text(
                 text       = "Nagios Monitor",
                 fontSize   = 28.sp,
@@ -152,7 +185,8 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
                 color      = MaterialTheme.colorScheme.primary
             )
             Text(
-                text     = "Connect to your Nagios server",
+                text     = if (prefillUrl != null) "Reconnect or switch to a different server"
+                           else "Connect to your Nagios server",
                 fontSize = 14.sp,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 6.dp, bottom = 36.dp)
@@ -163,7 +197,7 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
                 value         = url,
                 onValueChange = { url = it; errorMsg = null },
                 label         = { Text("Nagios server URL") },
-                placeholder   = { Text("http://192.168.1.100") },
+                placeholder   = { Text("http://192.168.7.247") },
                 singleLine    = true,
                 modifier      = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(
@@ -196,20 +230,21 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
 
             Spacer(Modifier.height(12.dp))
 
-            // Password
+            // Password — always blank, user must enter it
             OutlinedTextField(
                 value         = password,
                 onValueChange = { password = it; errorMsg = null },
                 label         = { Text("Password") },
+                placeholder   = { Text("Enter password") },
                 singleLine    = true,
                 modifier      = Modifier.fillMaxWidth(),
                 visualTransformation = if (showPassword) VisualTransformation.None
                                        else PasswordVisualTransformation(),
-                trailingIcon  = {
+                trailingIcon = {
                     IconButton(onClick = { showPassword = !showPassword }) {
                         Icon(
-                            imageVector = if (showPassword) Icons.Default.VisibilityOff
-                                          else Icons.Default.Visibility,
+                            imageVector        = if (showPassword) Icons.Default.VisibilityOff
+                                                 else Icons.Default.Visibility,
                             contentDescription = if (showPassword) "Hide" else "Show"
                         )
                     }
@@ -223,11 +258,11 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
                 )
             )
 
-            // Error message
+            // Error card
             if (errorMsg != null) {
                 Spacer(Modifier.height(10.dp))
                 Card(
-                    colors = CardDefaults.cardColors(
+                    colors   = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer
                     ),
                     modifier = Modifier.fillMaxWidth()
@@ -247,14 +282,12 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
             Button(
                 onClick  = { testAndConnect() },
                 enabled  = !isLoading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
+                modifier = Modifier.fillMaxWidth().height(50.dp)
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color    = MaterialTheme.colorScheme.onPrimary,
+                        modifier    = Modifier.size(20.dp),
+                        color       = MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 2.dp
                     )
                     Spacer(Modifier.width(10.dp))
@@ -266,7 +299,6 @@ fun ConnectScreen(onConnect: (url: String, user: String, pass: String) -> Unit) 
 
             Spacer(Modifier.height(16.dp))
 
-            // Helper note
             Text(
                 text     = "Uses your existing Nagios web credentials",
                 fontSize = 12.sp,

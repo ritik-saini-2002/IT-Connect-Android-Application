@@ -3,6 +3,7 @@ package com.example.ritik_2.nagios
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -51,10 +52,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
+        // Capture current server details BEFORE clearing credentials
+        val prefillUrl  = viewModel.serverUrl
+        val prefillUser = viewModel.serverUsername
+
         getSharedPreferences("nagios_connect", MODE_PRIVATE).edit().clear().apply()
         NagiosNotifications.cancelWorker(this)
-        val intent = Intent(this@MainActivity, ConnectActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+
+        // Navigate to ConnectActivity with SHOW_FORM=true so the user always sees
+        // the login form pre-filled with the old server URL + username.
+        // Password is intentionally left blank — user must type it.
+        val intent = Intent(this@MainActivity, ConnectActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("SHOW_FORM",        true)
+            putExtra("PREFILL_URL",      prefillUrl)
+            putExtra("PREFILL_USERNAME", prefillUser)
+        }
         startActivity(intent)
     }
 }
@@ -76,11 +89,28 @@ fun MainShell(
     var selectedHostName by remember { mutableStateOf<String?>(null) }
     val alerts           by viewModel.alerts.collectAsState()
 
+    // ── System back navigation ────────────────────────────────────────────────
+    // Priority: ServiceScreen → HostList → Dashboard → exit activity
+    val isAtRoot = currentRoute == "dashboard" && selectedHostName == null
+    BackHandler(enabled = !isAtRoot) {
+        when {
+            // Viewing a host's services → go back to host list
+            selectedHostName != null -> {
+                selectedHostName = null
+                viewModel.selectHost(null)
+            }
+            // On any tab other than dashboard → go to dashboard
+            else -> {
+                currentRoute = "dashboard"
+            }
+        }
+    }
+    // When isAtRoot == true (on dashboard, no host selected), BackHandler is
+    // disabled so the system handles it and finishes the activity naturally.
+
     Scaffold(
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface
-            ) {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 navItems.forEach { item ->
                     NavigationBarItem(
                         selected = currentRoute == item.route,
@@ -107,23 +137,27 @@ fun MainShell(
     ) { paddingValues ->
         when (currentRoute) {
             "dashboard" -> DashboardScreen(
-                viewModel = viewModel,
-                modifier  = Modifier.padding(paddingValues),
+                viewModel          = viewModel,
+                modifier           = Modifier.padding(paddingValues),
                 onNavigateToAlerts = { currentRoute = "alerts" },
-                onNavigateToHosts  = { currentRoute = "hosts" }
+                // Navigate to Hosts tab with a pre-set status filter
+                onNavigateToHosts  = { filter ->
+                    viewModel.setHostStatusFilter(filter)
+                    currentRoute = "hosts"
+                }
             )
             "hosts" -> {
                 if (selectedHostName != null) {
                     ServiceScreen(
-                        viewModel  = viewModel,
-                        hostName   = selectedHostName!!,
-                        modifier   = Modifier.padding(paddingValues),
-                        onBack     = { selectedHostName = null; viewModel.selectHost(null) }
+                        viewModel = viewModel,
+                        hostName  = selectedHostName!!,
+                        modifier  = Modifier.padding(paddingValues),
+                        onBack    = { selectedHostName = null; viewModel.selectHost(null) }
                     )
                 } else {
                     HostListScreen(
-                        viewModel = viewModel,
-                        modifier  = Modifier.padding(paddingValues),
+                        viewModel   = viewModel,
+                        modifier    = Modifier.padding(paddingValues),
                         onHostClick = { host ->
                             selectedHostName = host.name
                             viewModel.selectHost(host.name)
@@ -131,7 +165,7 @@ fun MainShell(
                     )
                 }
             }
-            "alerts" -> AlertsScreen(
+            "alerts"   -> AlertsScreen(
                 viewModel = viewModel,
                 modifier  = Modifier.padding(paddingValues)
             )

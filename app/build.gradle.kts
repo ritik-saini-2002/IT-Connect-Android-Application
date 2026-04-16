@@ -27,6 +27,12 @@ android {
         buildConfigField("String", "PB_PORT",             "\"${props.getProperty("pb.port",             "5005")}\"")
         // Admin credentials removed from BuildConfig — they must not ship in the APK.
         // Admin token is obtained server-side or via authenticated System_Administrator login.
+
+        // Nagios default credentials — read from local.properties (never hardcoded)
+        buildConfigField("String", "NAGIOS_DEFAULT_URL",      "\"${props.getProperty("nagios.url",      "")}\"")
+        buildConfigField("String", "NAGIOS_DEFAULT_USERNAME", "\"${props.getProperty("nagios.username", "")}\"")
+        buildConfigField("String", "NAGIOS_DEFAULT_PASSWORD", "\"${props.getProperty("nagios.password", "")}\"")
+
     }
 
     // ── Signing key (credentials in local.properties or env vars) ──────────

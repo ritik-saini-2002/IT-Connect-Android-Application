@@ -2,9 +2,11 @@ package com.example.ritik_2.nagios
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -164,7 +166,7 @@ fun DashboardScreen(
     viewModel: NagiosViewModel,
     modifier: Modifier = Modifier,
     onNavigateToAlerts: () -> Unit,
-    onNavigateToHosts:  () -> Unit
+    onNavigateToHosts:  (filter: String) -> Unit   // filter = "ALL" | "UP" | "DOWN"
 ) {
     val summaryState by viewModel.summary.collectAsStateWithLifecycle()
     val alerts       by viewModel.alerts.collectAsStateWithLifecycle()
@@ -217,23 +219,24 @@ fun DashboardScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 StatCard(
-                                    label   = "Up",
-                                    value   = data.hostsUp,
-                                    color   = AppColors.success,
-                                    onClick = onNavigateToHosts,
+                                    label    = "Up",
+                                    value    = data.hostsUp,
+                                    color    = AppColors.success,
+                                    onClick  = { onNavigateToHosts("UP") },
                                     modifier = Modifier.weight(1f)
                                 )
                                 StatCard(
-                                    label   = "Down",
-                                    value   = data.hostsDown,
-                                    color   = MaterialTheme.colorScheme.error,
-                                    onClick = onNavigateToHosts,
+                                    label    = "Down",
+                                    value    = data.hostsDown,
+                                    color    = MaterialTheme.colorScheme.error,
+                                    onClick  = { onNavigateToHosts("DOWN") },
                                     modifier = Modifier.weight(1f)
                                 )
                                 StatCard(
-                                    label   = "Unreachable",
-                                    value   = data.hostsUnreachable,
-                                    color   = AppColors.warning,
+                                    label    = "Unreachable",
+                                    value    = data.hostsUnreachable,
+                                    color    = AppColors.warning,
+                                    onClick  = { onNavigateToHosts("DOWN") },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -318,8 +321,9 @@ fun HostListScreen(
     modifier:    Modifier = Modifier,
     onHostClick: (NagiosHost) -> Unit
 ) {
-    val hostsState   by viewModel.filteredHosts.collectAsStateWithLifecycle()
-    val filterQuery  by viewModel.filterQuery.collectAsStateWithLifecycle()
+    val hostsState       by viewModel.filteredHosts.collectAsStateWithLifecycle()
+    val filterQuery      by viewModel.filterQuery.collectAsStateWithLifecycle()
+    val hostStatusFilter by viewModel.hostStatusFilter.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         // TopBar
@@ -346,6 +350,23 @@ fun HostListScreen(
                 modifier   = Modifier.fillMaxWidth(),
                 shape      = RoundedCornerShape(12.dp)
             )
+            Spacer(Modifier.height(8.dp))
+            // Status filter chips: All / Up / Down
+            Row(
+                modifier              = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf("ALL" to "All", "UP" to "Up", "DOWN" to "Down").forEach { (value, label) ->
+                    FilterChip(
+                        selected = hostStatusFilter == value,
+                        onClick  = { viewModel.setHostStatusFilter(value) },
+                        label    = { Text(label, fontSize = 12.sp) },
+                        leadingIcon = if (hostStatusFilter == value) ({
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                        }) else null
+                    )
+                }
+            }
         }
 
         when (val state = hostsState) {
@@ -450,7 +471,9 @@ fun ServiceScreen(
     modifier:  Modifier = Modifier,
     onBack:    () -> Unit
 ) {
-    val services by viewModel.servicesForSelectedHost.collectAsStateWithLifecycle()
+    val services            by viewModel.filteredServicesForSelectedHost.collectAsStateWithLifecycle()
+    val allServices         by viewModel.servicesForSelectedHost.collectAsStateWithLifecycle()
+    val serviceStatusFilter by viewModel.serviceStatusFilter.collectAsStateWithLifecycle()
 
     Column(modifier = modifier.fillMaxSize()) {
         // Back header
@@ -470,7 +493,7 @@ fun ServiceScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text     = "${services.size} services",
+                    text     = "${services.size} of ${allServices.size} services",
                     fontSize = 12.sp,
                     color    = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -479,11 +502,37 @@ fun ServiceScreen(
 
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        if (services.isEmpty()) {
+        // Status filter chips: All / Up (OK) / Down (non-OK)
+        Row(
+            modifier              = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("ALL" to "All", "UP" to "Up (OK)", "DOWN" to "Down").forEach { (value, label) ->
+                FilterChip(
+                    selected = serviceStatusFilter == value,
+                    onClick  = { viewModel.setServiceStatusFilter(value) },
+                    label    = { Text(label, fontSize = 12.sp) },
+                    leadingIcon = if (serviceStatusFilter == value) ({
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                    }) else null
+                )
+            }
+        }
+
+        if (allServices.isEmpty()) {
             LoadingView()
+        } else if (services.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "No services match this filter",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         } else {
             LazyColumn(
-                contentPadding      = PaddingValues(16.dp),
+                contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(services, key = { it.serviceName }) { svc ->
@@ -756,9 +805,11 @@ fun SettingsScreen(
                     color      = MaterialTheme.colorScheme.primary,
                     modifier   = Modifier.padding(bottom = 12.dp)
                 )
+                // Status
                 Row(
                     modifier              = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
                 ) {
                     Text("Status", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -768,6 +819,34 @@ fun SettingsScreen(
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Server URL
+                Row(
+                    modifier              = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Text("Server", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text     = viewModel.serverUrl,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 12.dp)
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Username
+                Row(
+                    modifier              = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Text("Username", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(viewModel.serverUsername, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                // Polling
                 Row(
                     modifier              = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
