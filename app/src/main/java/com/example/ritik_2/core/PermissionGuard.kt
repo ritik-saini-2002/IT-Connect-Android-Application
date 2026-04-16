@@ -212,6 +212,65 @@ object PermissionGuard {
         Permissions.ROLE_HR
     )
 
+    /**
+     * Master dashboard-tile gate. Called in two places:
+     *   1. MainScreen — to decide whether to SHOW the tile at all.
+     *   2. handleCardClick — as a hard guard before launching an Activity.
+     *
+     * Feature ID → Access rule:
+     *  1  Register Complaint  → everyone with submit_complaints (all roles)
+     *  2  Manage Complaints   → anyone who can view any complaint feed
+     *  3  Admin Panel         → access_admin_panel permission OR qualifying role
+     *  4  Server Connect      → access_server_connect permission
+     *  5  Knowledge Base      → access_knowledge_base permission
+     *  6  Windows Control     → access_windows_control permission
+     *  7  Chats               → all users (no restriction)
+     *  8  Help & Support      → all users (no restriction)
+     *  9  Nagios Monitor      → access_nagios permission
+     */
+    fun canAccessFeature(
+        featureId  : Int,
+        role       : String,
+        permissions: List<String>,
+        isDbAdmin  : Boolean = false
+    ): Boolean {
+        // System_Administrator and DB admin bypass every gate
+        if (isDbAdmin || isSystemAdmin(role)) return true
+
+        return when (featureId) {
+            1 -> "submit_complaints" in permissions
+            2 -> permissions.any { it in listOf(
+                    "view_all_complaints",
+                    "view_department_complaints",
+                    "view_team_complaints"
+                )}
+            3 -> canAccessAdminPanel(role, isDbAdmin) || "access_admin_panel" in permissions
+            4 -> "access_server_connect"  in permissions
+            5 -> "access_knowledge_base"  in permissions
+            6 -> "access_windows_control" in permissions
+            7 -> true   // Chats — all users
+            8 -> true   // Help & Support — all users
+            9 -> "access_nagios" in permissions
+            else -> false
+        }
+    }
+
+    /**
+     * Human-readable name for each feature tile — used in "Access Denied" messages.
+     */
+    fun featureName(featureId: Int): String = when (featureId) {
+        1 -> "Register Complaint"
+        2 -> "Manage Complaints"
+        3 -> "Admin Panel"
+        4 -> "Server Connect"
+        5 -> "Knowledge Base"
+        6 -> "Windows Control"
+        7 -> "Chats"
+        8 -> "Help & Support"
+        9 -> "Nagios Monitor"
+        else -> "this feature"
+    }
+
     // ── Field sets ────────────────────────────────────────────────────────────
 
     val ALL_FIELDS: Set<String> = setOf(

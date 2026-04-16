@@ -110,6 +110,80 @@ class SyncManager @Inject constructor(
     }
 
     /**
+     * Fetches every record from [user_access_control] and updates the matching
+     * user's [permissions] list in Room DB.
+     *
+     * Called in the background after a System_Administrator logs in, so that
+     * every user's local cache reflects the true permissions from the server.
+     * The [permissionsMap] extension property then derives Map<String,Boolean>
+     * on-the-fly from the stored list — no DB migration needed.
+     *
+     * [saToken] — pass the SA session token directly to skip the admin-token
+     * lookup (avoids the chicken-and-egg problem on first SA login).
+     *
+     * Never throws — logs and returns quietly on any error.
+     */
+    suspend fun syncAllUserPermissions(saToken: String? = null) = withContext(Dispatchers.IO) {
+        if (!monitor.serverReachable.value) {
+            Log.d(tag, "syncAllUserPermissions: offline — skipping")
+            return@withContext
+        }
+        try {
+            val token = saToken?.takeIf { it.isNotBlank() } ?: try {
+                getAdminToken()
+            } catch (e: Exception) {
+                Log.w(tag, "syncAllUserPermissions: no admin token — ${e.message}")
+                return@withContext
+            }
+
+            var page   = 1
+            var synced = 0
+            while (true) {
+                val res   = pbGet(
+                    "${AppConfig.BASE_URL}/api/collections/user_access_control/records" +
+                            "?perPage=200&page=$page",
+                    token
+                )
+                val json  = JSONObject(res)
+                val items = json.optJSONArray("items") ?: break
+                if (items.length() == 0) break
+
+                for (i in 0 until items.length()) {
+                    val o   = items.getJSONObject(i)
+                    val uid = o.optString("userId")
+                    if (uid.isBlank()) continue
+
+                    val role     = o.optString("role", "")
+                    val permsStr = o.optString("permissions", "[]")
+                    val perms    = try {
+                        val arr = JSONArray(permsStr)
+                        (0 until arr.length()).map { arr.optString(it) }
+                            .filter { it.isNotBlank() }
+                    } catch (_: Exception) { emptyList<String>() }
+
+                    // System_Administrator always gets the full permission set
+                    val finalPerms = if (role == Permissions.ROLE_SYSTEM_ADMIN)
+                        Permissions.ALL_PERMISSIONS else perms
+
+                    // Only update users already cached locally (don't create ghosts)
+                    val existing = db.userDao().getById(uid)
+                    if (existing != null) {
+                        db.userDao().updatePermissions(uid, finalPerms)
+                        synced++
+                    }
+                }
+
+                val totalPages = json.optInt("totalPages", 1)
+                if (page >= totalPages) break
+                page++
+            }
+            Log.d(tag, "syncAllUserPermissions ✅  updated $synced users' permissions")
+        } catch (e: Exception) {
+            Log.w(tag, "syncAllUserPermissions failed (non-fatal): ${e.message}")
+        }
+    }
+
+    /**
      * Refreshes all PocketBase collection metadata.
      * Requires admin token — only called by DatabaseManagerViewModel.
      */

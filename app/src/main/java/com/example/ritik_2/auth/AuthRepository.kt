@@ -129,6 +129,19 @@ class AuthRepository @Inject constructor(
                 }
             }
 
+            // System_Administrator: sync all users' permissions from user_access_control
+            // so every user's local Room cache has up-to-date Map<String,Boolean> data.
+            // Note: the superuser token was seeded into AdminTokenProvider during login,
+            // so syncAllUserPermissions() will use getAdminToken() to retrieve it.
+            if (PermissionGuard.isSystemAdmin(session.role)) {
+                bgScope.launch {
+                    try { syncManager.syncAllUserPermissions() }
+                    catch (e: Exception) {
+                        Log.w(TAG, "Background syncAllUserPermissions: ${e.message}")
+                    }
+                }
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}")

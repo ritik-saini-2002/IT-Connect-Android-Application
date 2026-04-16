@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import com.example.ritik_2.data.model.Permissions
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
@@ -17,6 +18,23 @@ class Converters {
     @TypeConverter fun toStringMap(v: String): Map<String, String> =
         gson.fromJson(v, object : TypeToken<Map<String, String>>() {}.type) ?: emptyMap()
 }
+
+/**
+ * Extension on UserEntity: returns ALL system permissions as Map<String, Boolean>.
+ * true  = this user has the permission
+ * false = this user does NOT have the permission
+ *
+ * This is computed on-the-fly from the stored permissions List<String>.
+ * No DB migration required — the list is the source of truth.
+ */
+val UserEntity.permissionsMap: Map<String, Boolean>
+    get() = Permissions.ALL_PERMISSIONS.associateWith { it in permissions }
+
+/**
+ * Extension on RoleEntity: same pattern as UserEntity.permissionsMap.
+ */
+val RoleEntity.permissionsMap: Map<String, Boolean>
+    get() = Permissions.ALL_PERMISSIONS.associateWith { it in permissions }
 
 // ── User cache ────────────────────────────────────────────────────────────────
 @Entity(tableName = "users")

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ritik_2.core.PermissionGuard
 import kotlinx.coroutines.launch
 
 
@@ -139,6 +140,10 @@ fun MainScreen(
                         enter   = fadeIn(spring()) + slideInVertically(spring()) { it / 10 },
                         exit    = fadeOut(spring())
                     ) {
+                        // ── Permission-filtered tile list ─────────────────────
+                        val userRole        = uiState.userProfile?.role        ?: ""
+                        val userPermissions = uiState.userProfile?.permissions ?: emptyList()
+
                         val features = listOf(
                             FeatureItem(1, "Register Complaint",  Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
                             FeatureItem(2, "Manage Complaints",   Icons.Outlined.List,               Color(0xFF8E24AA)),
@@ -149,7 +154,9 @@ fun MainScreen(
                             FeatureItem(7, "Chats",               Icons.Outlined.Chat,               MaterialTheme.colorScheme.tertiary),
                             FeatureItem(8, "Help & Support",      Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary),
                             FeatureItem(9, "Nagios Monitor",      Icons.Outlined.MonitorHeart,       Color(0xFF2E7D32))
-                        )
+                        ).filter { feature ->
+                            PermissionGuard.canAccessFeature(feature.id, userRole, userPermissions)
+                        }
 
                         LazyVerticalGrid(
                             columns               = GridCells.Fixed(2),
@@ -383,6 +390,10 @@ fun AppSidebar(
     onLogout      : () -> Unit,
     onClose       : () -> Unit
 ) {
+    // ── Permission-filtered sidebar items ─────────────────────────────────────
+    val sidebarRole        = profile?.role        ?: ""
+    val sidebarPermissions = profile?.permissions ?: emptyList()
+
     val sidebarItems = listOf(
         FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
         FeatureItem(2, "Manage Complaints",  Icons.Outlined.List,               Color(0xFF8E24AA)),
@@ -393,7 +404,9 @@ fun AppSidebar(
         FeatureItem(7, "Settings",           Icons.Outlined.Settings,           Color(0xFF546E7A)),
         FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       Color(0xFF1976D2)),
         FeatureItem(9, "Nagios Monitor",     Icons.Outlined.MonitorHeart,       Color(0xFF2E7D32))
-    )
+    ).filter { item ->
+        PermissionGuard.canAccessFeature(item.id, sidebarRole, sidebarPermissions)
+    }
 
     Column(Modifier.fillMaxHeight().width(300.dp).background(MaterialTheme.colorScheme.surface)) {
         Box(

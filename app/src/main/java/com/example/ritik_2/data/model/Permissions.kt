@@ -23,27 +23,38 @@ object Permissions {
             "create_user", "delete_user", "modify_user", "view_all_users",
             "manage_roles", "view_analytics", "system_settings", "manage_companies",
             "access_all_data", "export_data", "manage_permissions", "access_admin_panel",
-            "submit_complaints", "view_all_complaints", "resolve_complaints"
+            "submit_complaints", "view_all_complaints", "resolve_complaints",
+            // Feature access
+            "access_server_connect", "access_windows_control",
+            "access_nagios", "access_knowledge_base"
         )
         ROLE_MANAGER -> listOf(
             "view_team_users", "modify_team_user", "view_team_analytics",
             "assign_projects", "approve_requests", "view_reports",
             "submit_complaints", "view_department_complaints", "resolve_complaints",
-            "access_admin_panel"
+            "access_admin_panel",
+            // Feature access
+            "access_server_connect", "access_nagios", "access_knowledge_base"
         )
         ROLE_HR -> listOf(
             "view_all_users", "modify_user", "view_hr_analytics",
             "manage_employees", "access_personal_data", "generate_reports",
             "submit_complaints", "view_all_complaints", "resolve_complaints",
-            "access_admin_panel"
+            "access_admin_panel",
+            // Feature access
+            "access_server_connect", "access_knowledge_base"
         )
         ROLE_TEAM_LEAD -> listOf(
             "view_team_users", "assign_tasks", "view_team_performance",
-            "approve_leave", "submit_complaints", "view_team_complaints"
+            "approve_leave", "submit_complaints", "view_team_complaints",
+            // Feature access
+            "access_server_connect", "access_knowledge_base"
         )
         ROLE_EMPLOYEE -> listOf(
             "view_profile", "edit_profile", "view_assigned_projects",
-            "submit_reports", "submit_complaints", "view_own_complaints"
+            "submit_reports", "submit_complaints", "view_own_complaints",
+            // Feature access
+            "access_knowledge_base"
         )
         ROLE_INTERN -> listOf(
             "view_profile", "edit_basic_profile",
@@ -85,7 +96,12 @@ object Permissions {
         // Super-role exclusives
         "view_all_companies", "manage_all_companies",
         "edit_system_administrator", "grant_revoke_any_permission",
-        "manage_system_settings", "view_audit_logs"
+        "manage_system_settings", "view_audit_logs",
+        // Feature-level access gates (dashboard tiles)
+        "access_server_connect",    // Windows SMB file share
+        "access_windows_control",   // PC remote control / touchpad
+        "access_nagios",            // Nagios server monitor
+        "access_knowledge_base"     // MAC / network lookup tool
     )
 
     /**

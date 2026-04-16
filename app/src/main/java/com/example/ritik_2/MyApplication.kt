@@ -3,6 +3,7 @@ package com.example.ritik_2
 import android.app.Application
 import android.util.Log
 import com.example.ritik_2.core.AdminTokenProvider
+import com.example.ritik_2.core.GlobalCrashHandler
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.pocketbase.PocketBaseInitializer
 import com.example.ritik_2.windowscontrol.PcControlMain
@@ -23,6 +24,9 @@ class MyApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Install global crash handler first — catches any subsequent crash
+        GlobalCrashHandler.install(this)
 
         // Initialize PC Control — loads saved IP/port/key from SharedPreferences
         PcControlMain.init(this, "")

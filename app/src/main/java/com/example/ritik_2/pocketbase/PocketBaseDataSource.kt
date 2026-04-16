@@ -79,21 +79,30 @@ class PocketBaseDataSource @Inject constructor(
                 else                                  -> ""
             }
 
-            // ── Step 3: Auto-detect System_Administrator from PocketBase ──────
+            // ── Step 3: Auto-detect System_Administrator / seed admin token ──────
             //
-            // If the user is listed in the PocketBase _superusers collection
-            // (i.e. they are a PocketBase admin), we automatically assign the
-            // System_Administrator role — no hardcoded email comparison needed.
-            // This means ANY PocketBase superuser automatically gets the top role.
-            if (role != Permissions.ROLE_SYSTEM_ADMIN) {
-                val isSuperuser = checkIsPocketBaseSuperuser(email)
-                if (isSuperuser) {
+            // Authenticate against _superusers (+ legacy /api/admins fallback) using
+            // the same credentials the user just entered. On success:
+            //  a) Role is confirmed / assigned to System_Administrator.
+            //  b) The returned SUPERUSER token is seeded into adminTokenProvider so
+            //     admin operations (SyncManager, refreshAllCollections, etc.) work
+            //     for the rest of the session without separate credential setup.
+            //
+            // For non-SA users this always fails gracefully (no extra side-effects).
+            val isSuperuser = checkIsPocketBaseSuperuser(email, password)
+            if (isSuperuser) {
+                if (role != Permissions.ROLE_SYSTEM_ADMIN) {
                     role = Permissions.ROLE_SYSTEM_ADMIN
                     Log.d(tag, "Auto-assigned System_Administrator role to $email (PB superuser)")
                     // Back-fill the role in user_access_control and users record
                     // so subsequent offline sessions also have the right role.
                     backfillSystemAdminRole(uid, isSuperuser = true)
                 }
+                // adminTokenProvider was seeded inside checkIsPocketBaseSuperuser()
+            } else if (role == Permissions.ROLE_SYSTEM_ADMIN) {
+                // DB says SA but PB superuser check failed (network issue or role set manually).
+                // Keep the DB role but note that admin operations may not work until re-login.
+                Log.w(tag, "SA role from DB but PB superuser auth failed for $email — keeping DB role")
             }
 
             val sessionPermissions: List<String> = when {
@@ -211,53 +220,49 @@ class PocketBaseDataSource @Inject constructor(
     // ── Superuser detection ───────────────────────────────────────────────────
 
     /**
-     * Queries the PocketBase _superusers collection to check whether [email]
-     * is a PocketBase admin.  Returns true → assign System_Administrator role.
+     * Verifies whether [email]/[password] belongs to a PocketBase superuser by
+     * authenticating directly against the _superusers (PB ≥ 0.23) or legacy
+     * /api/admins endpoint — no stored admin credentials required.
      *
-     * This uses the admin token (which itself proves we know the admin credentials),
-     * and only requires a single lightweight GET.
+     * On success the obtained SUPERUSER token is seeded into [adminTokenProvider],
+     * enabling all admin operations for the rest of the session without separate
+     * credential setup in Admin Settings.
      *
-     * Fails silently — if the query fails (old PB version, network blip), we
-     * fall back to whatever role is stored in user_access_control.
+     * Fails silently for non-SA users — the failed HTTP request is the only
+     * side-effect (one extra network call per login).
      */
-    private fun checkIsPocketBaseSuperuser(email: String): Boolean {
-        return try {
-            val token = getAdminToken()
-            // PocketBase ≥ 0.23 stores superusers in _superusers collection
-            val url   = "${AppConfig.BASE_URL}/api/collections/_superusers/records" +
-                    "?filter=(email='${email.replace("'", "\\'")}')&perPage=1"
-            val res   = http.newCall(Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer $token")
-                .get().build()).execute()
-            val body  = res.body?.string() ?: ""; res.close()
-            if (!res.isSuccessful) {
-                // Older PocketBase versions used /api/admins — try that fallback
-                return checkLegacyAdmin(email, token)
-            }
-            JSONObject(body).optInt("totalItems", 0) > 0
-        } catch (e: Exception) {
-            Log.w(tag, "checkIsPocketBaseSuperuser: ${e.message}")
-            false
-        }
-    }
+    private fun checkIsPocketBaseSuperuser(email: String, password: String): Boolean {
+        val credentials = JSONObject().apply {
+            put("identity", email)
+            put("password", password)
+        }.toString()
 
-    /** Fallback for PocketBase < 0.23 which used /api/admins. */
-    private fun checkLegacyAdmin(email: String, token: String): Boolean {
-        return try {
-            val url = "${AppConfig.BASE_URL}/api/admins" +
-                    "?filter=(email='${email.replace("'", "\\'")}')&perPage=1"
-            val res  = http.newCall(Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer $token")
-                .get().build()).execute()
-            val body = res.body?.string() ?: ""; res.close()
-            if (!res.isSuccessful) return false
-            JSONObject(body).optInt("totalItems", 0) > 0
-        } catch (e: Exception) {
-            Log.w(tag, "checkLegacyAdmin: ${e.message}")
-            false
+        val endpoints = listOf(
+            "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
+            "${AppConfig.BASE_URL}/api/admins/auth-with-password"
+        )
+
+        for (url in endpoints) {
+            try {
+                val body    = credentials.toRequestBody("application/json".toMediaType())
+                val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
+                val resBody = res.body?.string() ?: ""
+                val ok      = res.isSuccessful; res.close()
+
+                if (ok) {
+                    val superToken = JSONObject(resBody).optString("token")
+                    if (superToken.isNotBlank()) {
+                        // Seed the superuser token — unlocks admin operations this session
+                        adminTokenProvider.setTokenDirectly(superToken)
+                        Log.d(tag, "SA superuser token seeded from login — endpoint: $url")
+                    }
+                    return true
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "checkIsPocketBaseSuperuser ($url): ${e.message}")
+            }
         }
+        return false
     }
 
     /**

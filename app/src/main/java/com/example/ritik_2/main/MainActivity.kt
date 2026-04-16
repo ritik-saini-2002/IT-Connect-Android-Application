@@ -27,6 +27,7 @@ import com.example.ritik_2.chat.ChatActivity
 import com.example.ritik_2.chat.ChatNotificationService
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.core.ConnectivityMonitor
+import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.login.LoginActivity
 import com.example.ritik_2.macnet.MACNetActivity
@@ -110,6 +111,20 @@ class MainActivity : ComponentActivity() {
     // ── Card routing ──────────────────────────────────────────────────────────
 
     private fun handleCardClick(id: Int) {
+        // ── Hard permission guard (secondary defence after tile is hidden) ────
+        val session     = authRepository.getSession()
+        val role        = session?.role        ?: ""
+        val permissions = session?.permissions ?: emptyList()
+
+        if (!PermissionGuard.canAccessFeature(id, role, permissions)) {
+            Toast.makeText(
+                this,
+                "Access denied: you don't have permission to use ${PermissionGuard.featureName(id)}",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
         when (id) {
             1 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             2 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
@@ -119,7 +134,7 @@ class MainActivity : ComponentActivity() {
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
             7 -> startActivity(Intent(this, ChatActivity::class.java))
             8 -> {
-                val userId = authRepository.getSession()?.userId ?: return
+                val userId = session?.userId ?: return
                 startActivity(Intent(this, ContactActivity::class.java).apply {
                     putExtra("userId", userId)
                 })

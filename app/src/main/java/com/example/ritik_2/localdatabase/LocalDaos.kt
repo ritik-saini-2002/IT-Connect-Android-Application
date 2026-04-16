@@ -64,6 +64,10 @@ interface UserDao {
 
     @Query("SELECT COUNT(*) FROM users WHERE sanitizedCompanyName = :sc AND isActive = 1")
     suspend fun activeCount(sc: String): Int
+
+    /** Update only the permissions list for a single user — no DB migration needed. */
+    @Query("UPDATE users SET permissions = :permissions WHERE id = :id")
+    suspend fun updatePermissions(id: String, permissions: List<String>)
 }
 
 // ── Role DAO ──────────────────────────────────────────────────────────────────

@@ -69,6 +69,26 @@ class AdminTokenProvider @Inject constructor(
         return !email.isNullOrBlank() && !pass.isNullOrBlank()
     }
 
+    /**
+     * Directly inject a pre-authenticated token (e.g. from a System_Administrator login).
+     * This avoids requiring separate admin credentials when the logged-in user IS already
+     * a PocketBase superuser. Token is cached with the standard TTL.
+     *
+     * Called by PocketBaseDataSource.login() when a System_Administrator is detected.
+     */
+    fun setTokenDirectly(token: String, ttlMs: Long = TOKEN_TTL) {
+        if (token.isBlank()) return
+        cachedToken     = token
+        tokenFetchedAt  = System.currentTimeMillis() - (TOKEN_TTL - ttlMs)
+        Log.d(TAG, "Admin token seeded directly from SA login (TTL ${ttlMs / 60_000}min)")
+    }
+
+    /** True if a valid cached token exists (regardless of stored credentials). */
+    fun hasCachedToken(): Boolean {
+        val now = System.currentTimeMillis()
+        return cachedToken.isNotBlank() && (now - tokenFetchedAt) < TOKEN_TTL
+    }
+
     fun clearCredentials() {
         prefs.edit().clear().apply()
         cachedToken = ""
@@ -82,6 +102,7 @@ class AdminTokenProvider @Inject constructor(
     suspend fun getAdminToken(): String = tokenMutex.withLock {
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
+            // 1. Valid cached token (may have been seeded directly from SA login)
             if (cachedToken.isNotBlank() && (now - tokenFetchedAt) < TOKEN_TTL) {
                 return@withContext cachedToken
             }
@@ -89,7 +110,9 @@ class AdminTokenProvider @Inject constructor(
             val email = prefs.getString(KEY_EMAIL, null)
             val pass = prefs.getString(KEY_PASSWORD, null)
             if (email.isNullOrBlank() || pass.isNullOrBlank()) {
-                error("Admin credentials not configured. A System Administrator must set them in Admin Settings.")
+                // No stored credentials — if we got here the cached token expired.
+                // Caller should have refreshed via setTokenDirectly() on SA re-login.
+                error("Admin credentials not configured. A System Administrator must log in or set them in Admin Settings.")
             }
 
             listOf(
@@ -130,6 +153,7 @@ class AdminTokenProvider @Inject constructor(
      */
     fun getAdminTokenSync(): String {
         val now = System.currentTimeMillis()
+        // 1. Valid cached token (seeded directly or from stored credentials)
         if (cachedToken.isNotBlank() && (now - tokenFetchedAt) < TOKEN_TTL) {
             return cachedToken
         }
@@ -137,7 +161,7 @@ class AdminTokenProvider @Inject constructor(
         val email = prefs.getString(KEY_EMAIL, null)
         val pass = prefs.getString(KEY_PASSWORD, null)
         if (email.isNullOrBlank() || pass.isNullOrBlank()) {
-            error("Admin credentials not configured.")
+            error("Admin credentials not configured. A System Administrator must log in first.")
         }
 
         listOf(
