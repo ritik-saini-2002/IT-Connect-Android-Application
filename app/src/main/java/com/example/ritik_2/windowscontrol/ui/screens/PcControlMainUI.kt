@@ -129,9 +129,13 @@ fun PcControlMainScreen(viewModel: PcControlViewModel, isLoggedIn: Boolean = tru
     ) {
         if (isLandscape) {
             // ── LANDSCAPE: content + nav rail on right ──
-            // FIX: Bottom bar / nav rail is ALWAYS visible, including for touchpad.
-            // This was the user's main complaint — touchpad hid the navigation.
-            Row(modifier = Modifier.fillMaxSize()) {
+            // systemBarsPadding() ensures content never bleeds behind status bar (top)
+            // or nav/gesture bar (bottom). When bars are hidden (TOUCHPAD immersive mode)
+            // the insets return 0 so no padding is added — works for both cases.
+            Row(modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+            ) {
                 Box(modifier = Modifier.weight(1f)) {
                     AnimatedContent(
                         targetState   = currentScreen,
@@ -141,9 +145,12 @@ fun PcControlMainScreen(viewModel: PcControlViewModel, isLoggedIn: Boolean = tru
                 }
 
                 // Nav rail with Windows Project button
+                // windowInsets = WindowInsets(0) because the parent Row already consumed
+                // system bar insets via systemBarsPadding() — avoids double padding.
                 NavigationRail(
-                    modifier = Modifier.fillMaxHeight(),
-                    header   = {
+                    modifier     = Modifier.fillMaxHeight(),
+                    windowInsets = WindowInsets(0),
+                    header       = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Default.Menu, "Menu")
                         }
@@ -191,7 +198,13 @@ fun PcControlMainScreen(viewModel: PcControlViewModel, isLoggedIn: Boolean = tru
                     )
                 }
             ) { padding ->
-                Box(modifier = Modifier.padding(padding)) {
+                // consumeWindowInsets tells nested Scaffolds (FileBrowser, AppDirectory, etc.)
+                // that the status-bar inset is already consumed here, so their own TopAppBars
+                // don't double-count it and push content down an extra status-bar height.
+                Box(modifier = Modifier
+                    .padding(padding)
+                    .consumeWindowInsets(padding)
+                ) {
                     AnimatedContent(
                         targetState   = currentScreen,
                         transitionSpec = {
