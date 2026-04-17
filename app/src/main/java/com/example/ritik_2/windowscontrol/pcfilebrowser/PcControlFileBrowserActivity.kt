@@ -19,12 +19,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.ViewModelProvider
+import androidx.activity.viewModels
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.data.*
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel.BrowserLevelState
+import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -44,7 +45,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 class PcControlFileBrowserActivity : ComponentActivity() {
-    private lateinit var viewModel: PcControlViewModel
+    private val viewModel: PcControlViewModel by viewModels {
+        PcControlViewModelFactory(applicationContext)
+    }
 
     companion object {
         const val EXTRA_PICK_MODE    = "pick_mode"
@@ -56,7 +59,6 @@ class PcControlFileBrowserActivity : ComponentActivity() {
         enableEdgeToEdge()
         applyFullscreen()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-        viewModel = ViewModelProvider(this)[PcControlViewModel::class.java]
         val isPickMode = intent.getBooleanExtra(EXTRA_PICK_MODE, false)
         setContent {
             ITConnectTheme {
