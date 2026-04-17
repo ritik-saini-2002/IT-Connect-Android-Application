@@ -51,7 +51,12 @@ private val PERMISSION_CATEGORIES = linkedMapOf(
     "Projects"     to listOf("view_assigned_projects", "view_assigned_tasks", "submit_reports"),
     "Complaints"   to listOf("submit_complaints", "view_own_complaints", "view_team_complaints",
         "view_department_complaints", "view_all_complaints",
-        "resolve_complaints")
+        "resolve_complaints"),
+    "Feature Access" to listOf("access_server_connect", "access_windows_control",
+        "access_nagios", "access_knowledge_base"),
+    "Super Admin"  to listOf("view_all_companies", "manage_all_companies",
+        "edit_system_administrator", "grant_revoke_any_permission",
+        "manage_system_settings", "view_audit_logs")
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

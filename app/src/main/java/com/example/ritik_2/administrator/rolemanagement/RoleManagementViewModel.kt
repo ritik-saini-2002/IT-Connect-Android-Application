@@ -88,7 +88,7 @@ class RoleManagementViewModel @Inject constructor(
         val roleEntities = db.roleDao().getByCompany(sanitizedCompany)
         val userEntities = db.userDao().getByCompany(sanitizedCompany)
 
-        val roles = roleEntities.map { r ->
+        val dbRoles = roleEntities.map { r ->
             RoleInfo(
                 id          = r.id,
                 name        = r.name,
@@ -98,7 +98,26 @@ class RoleManagementViewModel @Inject constructor(
             )
         }
 
-        val finalRoles = roles
+        // Ensure all built-in roles always appear even if not yet seeded in local DB
+        val dbRoleNames = dbRoles.map { it.name }.toSet()
+        @Suppress("DEPRECATION")
+        val missingBuiltIn = Permissions.ALL_ROLES
+            .filter { it !in dbRoleNames }
+            .map { roleName ->
+                RoleInfo(
+                    id          = "${sanitizedCompany}_$roleName",
+                    name        = roleName,
+                    userCount   = userEntities.count { it.role == roleName },
+                    isCustom    = false,
+                    permissions = Permissions.forRole(roleName)
+                )
+            }
+
+        // Sort: built-in roles in hierarchy order first, then custom roles
+        val finalRoles = (dbRoles + missingBuiltIn).sortedBy { role ->
+            val idx = Permissions.ALL_ROLES.indexOf(role.name)
+            if (idx >= 0) idx else Int.MAX_VALUE
+        }
 
         val users = userEntities.map { u ->
             UserProfile(

@@ -81,6 +81,7 @@ fun MainShell(
     val navItems = listOf(
         NavItem("Dashboard", Icons.Default.Dashboard,    "dashboard"),
         NavItem("Hosts",     Icons.Default.Computer,     "hosts"),
+        NavItem("Network",   Icons.Default.Wifi,         "network"),
         NavItem("Alerts",    Icons.Default.Notifications,"alerts"),
         NavItem("Settings",  Icons.Default.Settings,     "settings")
     )
@@ -175,6 +176,9 @@ fun MainShell(
                     )
                 }
             }
+            "network"  -> NetworkScanScreen(
+                modifier = Modifier.padding(paddingValues)
+            )
             "alerts"   -> AlertsScreen(
                 viewModel = viewModel,
                 modifier  = Modifier.padding(paddingValues)
