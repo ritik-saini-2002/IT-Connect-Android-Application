@@ -385,20 +385,26 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
             _uiState.value = PcUiState.Error("Add at least one step"); return
         }
         viewModelScope.launch {
-            repo.insertPlan(plan)
-            _editingPlan.value = null
-            navigateTo(PcScreen.PLANS)
-            _uiState.value = PcUiState.Success("'${plan.planName}' saved!")
+            try {
+                withContext(Dispatchers.IO) { repo.insertPlan(plan) }
+                _editingPlan.value = null
+                navigateTo(PcScreen.PLANS)
+                _uiState.value = PcUiState.Success("'${plan.planName}' saved!")
+            } catch (e: Throwable) {
+                android.util.Log.e("PcControl", "savePlan failed", e)
+                _uiState.value = PcUiState.Error("Save failed: ${e.message ?: e.javaClass.simpleName}")
+            }
         }
     }
 
     fun savePlanDirectly(plan: PcPlan) {
         viewModelScope.launch {
             try {
-                repo.insertPlan(plan)
+                withContext(Dispatchers.IO) { repo.insertPlan(plan) }
                 _uiState.value = PcUiState.Success("File added to \"${plan.planName}\"")
-            } catch (e: Exception) {
-                _uiState.value = PcUiState.Error("Failed to save: ${e.message}")
+            } catch (e: Throwable) {
+                android.util.Log.e("PcControl", "savePlanDirectly failed", e)
+                _uiState.value = PcUiState.Error("Failed to save: ${e.message ?: e.javaClass.simpleName}")
             }
         }
     }
