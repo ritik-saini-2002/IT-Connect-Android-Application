@@ -23,11 +23,18 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.ritik_2.windowscontrol.data.PcSavedDevice
 import com.example.ritik_2.windowscontrol.network.PcLanScanner
+import com.example.ritik_2.windowscontrol.network.PcThumbnailFetcher
+import com.example.ritik_2.windowscontrol.network.WakeOnLan
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +48,8 @@ fun PcDevicesUI(viewModel: PcControlViewModel) {
     var savingAgent by remember { mutableStateOf<PcLanScanner.DiscoveredAgent?>(null) }
     var editing     by remember { mutableStateOf<PcSavedDevice?>(null) }
     var pendingDelete by remember { mutableStateOf<PcSavedDevice?>(null) }
+
+    LaunchedEffect(Unit) { viewModel.refreshStaleThumbnails() }
 
     Column(
         modifier = Modifier
@@ -108,7 +117,8 @@ fun PcDevicesUI(viewModel: PcControlViewModel) {
                         isActive  = device.host == current.pcIpAddress && device.port == current.port,
                         onConnect = { viewModel.connectToSaved(device) },
                         onEdit    = { editing = device },
-                        onDelete  = { pendingDelete = device }
+                        onDelete  = { pendingDelete = device },
+                        onWake    = { viewModel.wakePc(device) }
                     )
                 }
             }
@@ -218,10 +228,17 @@ private fun SavedDeviceCard(
     isActive : Boolean,
     onConnect: () -> Unit,
     onEdit   : () -> Unit,
-    onDelete : () -> Unit
+    onDelete : () -> Unit,
+    onWake   : () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
+    val context = LocalContext.current
     val border = if (isActive) cs.primary else cs.outline.copy(0.25f)
+    val canWake = WakeOnLan.isValidMac(device.macAddress)
+    val thumbFile = remember(device.id, device.thumbnailUpdatedAt) {
+        device.thumbnailPath?.let { File(it) }?.takeIf { it.exists() }
+            ?: PcThumbnailFetcher.cachedFile(context, device.id).takeIf { it.exists() }
+    }
     Surface(
         color    = cs.surface,
         shape    = RoundedCornerShape(12.dp),
@@ -235,19 +252,31 @@ private fun SavedDeviceCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
-                Modifier.size(38.dp).clip(CircleShape)
+                Modifier.size(42.dp).clip(RoundedCornerShape(8.dp))
                     .background(
                         if (device.isMaster) Color(0xFFFFB020).copy(0.15f)
                         else cs.primary.copy(0.12f)
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    if (device.isMaster) Icons.Default.AdminPanelSettings else Icons.Default.Computer,
-                    null,
-                    tint = if (device.isMaster) Color(0xFFFFB020) else cs.primary,
-                    modifier = Modifier.size(20.dp)
-                )
+                if (thumbFile != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(thumbFile)
+                            .memoryCacheKey("thumb-${device.id}-${device.thumbnailUpdatedAt}")
+                            .build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(42.dp).clip(RoundedCornerShape(8.dp))
+                    )
+                } else {
+                    Icon(
+                        if (device.isMaster) Icons.Default.AdminPanelSettings else Icons.Default.Computer,
+                        null,
+                        tint = if (device.isMaster) Color(0xFFFFB020) else cs.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
             Column(Modifier.weight(1f)) {
                 Text(
@@ -264,6 +293,12 @@ private fun SavedDeviceCard(
                 if (isActive) {
                     Text("Active connection", fontSize = 10.sp,
                         color = cs.primary, fontWeight = FontWeight.Medium)
+                }
+            }
+            if (canWake) {
+                IconButton(onClick = onWake) {
+                    Icon(Icons.Default.PowerSettingsNew, "Wake",
+                        modifier = Modifier.size(18.dp), tint = Color(0xFFFFB020))
                 }
             }
             IconButton(onClick = onEdit) {
@@ -417,8 +452,12 @@ private fun EditDeviceDialog(
     var key    by remember { mutableStateOf(initial.secretKey) }
     var isMaster by remember { mutableStateOf(initial.isMaster) }
     var keyVis by remember { mutableStateOf(false) }
+    var mac      by remember { mutableStateOf(initial.macAddress.orEmpty()) }
+    var bcast    by remember { mutableStateOf(initial.broadcastAddress.orEmpty()) }
+    var showAdv  by remember { mutableStateOf(initial.macAddress != null) }
 
     val isNew = initial.host.isBlank() && initial.secretKey.isBlank() && initial.label.isBlank()
+    val macOk = mac.isEmpty() || WakeOnLan.isValidMac(mac)
 
     AlertDialog(
         onDismissRequest = onCancel,
@@ -476,21 +515,57 @@ private fun EditDeviceDialog(
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface)
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { showAdv = !showAdv },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (showAdv) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        null, modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Wake-on-LAN (advanced)",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                AnimatedVisibility(visible = showAdv) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = mac, onValueChange = { mac = it.uppercase() },
+                            label = { Text("MAC address") },
+                            placeholder = { Text("AA:BB:CC:DD:EE:FF") },
+                            singleLine = true,
+                            isError = !macOk,
+                            supportingText = if (!macOk) { { Text("Invalid MAC", fontSize = 10.sp) } } else null,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = bcast, onValueChange = { bcast = it },
+                            label = { Text("Broadcast address (optional)") },
+                            placeholder = { Text("192.168.1.255") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
                     onConfirm(initial.copy(
-                        label      = label,
-                        host       = host,
-                        port       = port.toIntOrNull() ?: 5000,
-                        streamPort = stream.toIntOrNull() ?: 5001,
-                        secretKey  = key,
-                        isMaster   = isMaster
+                        label        = label,
+                        host         = host,
+                        port         = port.toIntOrNull() ?: 5000,
+                        streamPort   = stream.toIntOrNull() ?: 5001,
+                        secretKey    = key,
+                        isMaster     = isMaster,
+                        macAddress   = mac.takeIf { it.isNotBlank() },
+                        broadcastAddress = bcast.takeIf { it.isNotBlank() }
                     ))
                 },
-                enabled = host.isNotBlank() && key.isNotBlank()
+                enabled = host.isNotBlank() && key.isNotBlank() && macOk
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } }

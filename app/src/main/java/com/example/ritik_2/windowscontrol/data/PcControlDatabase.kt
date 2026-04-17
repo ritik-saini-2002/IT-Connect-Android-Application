@@ -102,7 +102,13 @@ data class PcSavedDevice(
     val pcName    : String    = "",       // reported by agent during scan
     val addedAt   : Long      = System.currentTimeMillis(),
     val lastUsed  : Long      = 0L,
-    val lastSeenOnline: Long  = 0L
+    val lastSeenOnline: Long  = 0L,
+    // v6 additions — thumbnails + Wake-on-LAN
+    val thumbnailPath     : String? = null,
+    val thumbnailUpdatedAt: Long    = 0L,
+    val macAddress        : String? = null,
+    val broadcastAddress  : String? = null,   // null = auto-pick active iface broadcast
+    val wolPort           : Int     = 9
 )
 
 @Dao
@@ -127,15 +133,21 @@ interface PcSavedDeviceDao {
 
     @Query("UPDATE pc_saved_devices SET lastSeenOnline = :ts, pcName = :pcName WHERE id = :id")
     suspend fun markOnline(id: String, ts: Long = System.currentTimeMillis(), pcName: String)
+
+    @Query("UPDATE pc_saved_devices SET thumbnailPath = :path, thumbnailUpdatedAt = :ts WHERE id = :id")
+    suspend fun setThumbnail(id: String, path: String?, ts: Long)
+
+    @Query("SELECT * FROM pc_saved_devices WHERE id = :id LIMIT 1")
+    suspend fun findById(id: String): PcSavedDevice?
 }
 
 // ─────────────────────────────────────────────────────────────
-//  DATABASE — version 5 (added saved devices table)
+//  DATABASE — version 6 (thumbnail cache + Wake-on-LAN fields)
 // ─────────────────────────────────────────────────────────────
 
 @Database(
     entities = [PcPlan::class, PcConnectionLog::class, PcSavedDevice::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class PcControlDatabase : RoomDatabase() {
@@ -174,6 +186,17 @@ abstract class PcControlDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration v5 -> v6: thumbnail cache + Wake-on-LAN fields on pc_saved_devices. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pc_saved_devices ADD COLUMN thumbnailPath TEXT")
+                db.execSQL("ALTER TABLE pc_saved_devices ADD COLUMN thumbnailUpdatedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE pc_saved_devices ADD COLUMN macAddress TEXT")
+                db.execSQL("ALTER TABLE pc_saved_devices ADD COLUMN broadcastAddress TEXT")
+                db.execSQL("ALTER TABLE pc_saved_devices ADD COLUMN wolPort INTEGER NOT NULL DEFAULT 9")
+            }
+        }
+
         fun getDatabase(context: Context): PcControlDatabase {
             return INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -181,7 +204,7 @@ abstract class PcControlDatabase : RoomDatabase() {
                     PcControlDatabase::class.java,
                     "pccontrol_database"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                     .also { INSTANCE = it }
             }
@@ -299,4 +322,10 @@ class PcControlRepository(
     }
     suspend fun findDeviceByAddress(host: String, port: Int): PcSavedDevice? =
         deviceDao?.findByHostPort(host, port)
+
+    suspend fun findDeviceById(id: String): PcSavedDevice? = deviceDao?.findById(id)
+
+    suspend fun setDeviceThumbnail(id: String, path: String?, ts: Long = System.currentTimeMillis()) {
+        deviceDao?.setThumbnail(id, path, ts)
+    }
 }

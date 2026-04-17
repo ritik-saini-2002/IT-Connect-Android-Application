@@ -277,7 +277,50 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     }
 
     fun deleteDevice(device: PcSavedDevice) {
-        viewModelScope.launch { repo.deleteDevice(device) }
+        viewModelScope.launch {
+            repo.deleteDevice(device)
+            com.example.ritik_2.windowscontrol.network.PcThumbnailFetcher
+                .deleteCached(context, device.id)
+        }
+    }
+
+    // ── Thumbnails ───────────────────────────────────────
+    private val THUMB_TTL_MS = 5 * 60_000L
+
+    /** Refresh a single device's thumbnail. Silent on failure. */
+    fun refreshThumbnail(device: PcSavedDevice) {
+        viewModelScope.launch {
+            val path = com.example.ritik_2.windowscontrol.network.PcThumbnailFetcher
+                .fetch(device, context) ?: return@launch
+            repo.setDeviceThumbnail(device.id, path)
+        }
+    }
+
+    /** Refresh thumbnails for any saved device whose cache is stale (> 5 min). */
+    fun refreshStaleThumbnails() {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            savedDevices.value
+                .filter { now - it.thumbnailUpdatedAt > THUMB_TTL_MS }
+                .forEach { refreshThumbnail(it) }
+        }
+    }
+
+    // ── Wake-on-LAN ──────────────────────────────────────
+    fun wakePc(device: PcSavedDevice) {
+        val mac = device.macAddress
+        if (!com.example.ritik_2.windowscontrol.network.WakeOnLan.isValidMac(mac)) {
+            _uiState.value = PcUiState.Error("Set a valid MAC address first")
+            return
+        }
+        viewModelScope.launch {
+            val result = com.example.ritik_2.windowscontrol.network.WakeOnLan
+                .wake(mac!!, device.broadcastAddress, device.wolPort)
+            _uiState.value = result.fold(
+                onSuccess = { PcUiState.Success("Wake packet sent to ${device.label.ifBlank { device.host }}") },
+                onFailure = { PcUiState.Error("WoL failed: ${it.message}") }
+            )
+        }
     }
 
     /** Save a scan result. If one already exists for host:port, update its label/pcName. */
