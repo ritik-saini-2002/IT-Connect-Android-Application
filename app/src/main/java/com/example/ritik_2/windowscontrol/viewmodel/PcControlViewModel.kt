@@ -24,7 +24,7 @@ sealed class PcUiState {
 
 enum class PcConnectionStatus { UNKNOWN, CHECKING, ONLINE, OFFLINE }
 
-enum class PcScreen { PLANS, APP_DIRECTORY, FILE_BROWSER, TOUCHPAD, KEYBOARD, SETTINGS }
+enum class PcScreen { PLANS, APP_DIRECTORY, FILE_BROWSER, TOUCHPAD, KEYBOARD, SETTINGS, DEVICES }
 
 enum class FileBrowserMode { EXECUTE, TRANSFER }
 
@@ -66,7 +66,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     val currentScreen: StateFlow<PcScreen> = _currentScreen
 
     /** Screens accessible without login */
-    val guestScreens: Set<PcScreen> = setOf(PcScreen.SETTINGS, PcScreen.TOUCHPAD)
+    val guestScreens: Set<PcScreen> = setOf(PcScreen.SETTINGS, PcScreen.TOUCHPAD, PcScreen.DEVICES)
 
     private val _showLoginRequired = MutableStateFlow(false)
     val showLoginRequired: StateFlow<Boolean> = _showLoginRequired.asStateFlow()
@@ -229,6 +229,91 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     }
 
     fun resetUiState() { _uiState.value = PcUiState.Idle }
+
+    // ─────────────────────────────────────────────────────
+    //  SAVED DEVICES + LAN DISCOVERY
+    // ─────────────────────────────────────────────────────
+
+    val savedDevices: StateFlow<List<PcSavedDevice>> = repo.savedDevices
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val _scanning = MutableStateFlow(false)
+    val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    private val _scanResults = MutableStateFlow<List<com.example.ritik_2.windowscontrol.network.PcLanScanner.DiscoveredAgent>>(emptyList())
+    val scanResults: StateFlow<List<com.example.ritik_2.windowscontrol.network.PcLanScanner.DiscoveredAgent>> = _scanResults.asStateFlow()
+
+    private var scanJob: Job? = null
+
+    fun startLanScan(durationMs: Long = 4_000L) {
+        scanJob?.cancel()
+        _scanResults.value = emptyList()
+        _scanning.value    = true
+        scanJob = viewModelScope.launch {
+            try {
+                val scanner = com.example.ritik_2.windowscontrol.network.PcLanScanner(context)
+                scanner.scan(durationMs).collect { agent ->
+                    _scanResults.value = _scanResults.value + agent
+                }
+            } catch (e: Exception) {
+                _uiState.value = PcUiState.Error("Scan failed: ${e.message}")
+            } finally {
+                _scanning.value = false
+            }
+        }
+    }
+
+    fun stopLanScan() {
+        scanJob?.cancel()
+        _scanning.value = false
+    }
+
+    /** Save a device (new or update) then optionally mark as last-used. */
+    fun saveDevice(device: PcSavedDevice) {
+        viewModelScope.launch {
+            repo.saveDevice(device)
+            _uiState.value = PcUiState.Success("Saved '${device.label.ifBlank { device.host }}'")
+        }
+    }
+
+    fun deleteDevice(device: PcSavedDevice) {
+        viewModelScope.launch { repo.deleteDevice(device) }
+    }
+
+    /** Save a scan result. If one already exists for host:port, update its label/pcName. */
+    fun saveFromScan(
+        agent    : com.example.ritik_2.windowscontrol.network.PcLanScanner.DiscoveredAgent,
+        label    : String,
+        secretKey: String,
+        isMaster : Boolean
+    ) {
+        viewModelScope.launch {
+            val existing = repo.findDeviceByAddress(agent.ip, agent.port)
+            val device = (existing ?: PcSavedDevice()).copy(
+                label      = label.ifBlank { agent.pcName.ifBlank { agent.ip } },
+                host       = agent.ip,
+                port       = agent.port,
+                streamPort = agent.streamPort,
+                secretKey  = secretKey,
+                isMaster   = isMaster,
+                pcName     = agent.pcName,
+                lastSeenOnline = System.currentTimeMillis()
+            )
+            repo.saveDevice(device)
+            _uiState.value = PcUiState.Success("Saved '${device.label}'")
+        }
+    }
+
+    /** Switch active connection to the selected saved device. */
+    fun connectToSaved(device: PcSavedDevice) {
+        viewModelScope.launch {
+            repo.touchDevice(device.id)
+            PcControlMain.updateConnection(device.host, device.port, device.secretKey)
+            _settings.value = PcControlMain.getSettings()
+            _uiState.value  = PcUiState.Success("Connected to ${device.label.ifBlank { device.host }}")
+            pingPc()
+        }
+    }
 
     // ─────────────────────────────────────────────────────
     //  PLAN EXECUTION
@@ -897,6 +982,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         stopLiveScreen()
         openWithPollJob?.cancel()
         searchJob?.cancel()
+        scanJob?.cancel()
         // Release any held keys when leaving
         releaseAllHeldKeys()
     }

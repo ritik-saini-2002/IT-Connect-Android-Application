@@ -228,6 +228,7 @@ private fun ScreenContent(screen: PcScreen, viewModel: PcControlViewModel) {
         PcScreen.FILE_BROWSER  -> PcFileBrowserCompat(viewModel)
         PcScreen.KEYBOARD      -> PcControlKeyboardUI(viewModel)
         PcScreen.SETTINGS      -> PcControlSettingsUI(viewModel)
+        PcScreen.DEVICES       -> PcDevicesUI(viewModel)
     }
 }
 
@@ -293,6 +294,7 @@ private fun WindowsProjectPopup(
 
 private val railItems = listOf(
     PcNavItem(PcScreen.TOUCHPAD,      "Control",  Icons.Default.Mouse),
+    PcNavItem(PcScreen.DEVICES,       "Devices",  Icons.Default.Devices),
     PcNavItem(PcScreen.PLANS,         "Plans",    Icons.AutoMirrored.Filled.List),
     PcNavItem(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
     PcNavItem(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder, Icons.Default.FolderOpen),

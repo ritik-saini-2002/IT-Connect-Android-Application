@@ -83,17 +83,65 @@ interface PcConnectionLogDao {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  DATABASE — version 3 (added connection logs table)
+//  SAVED DEVICE ENTITY — stores user's known PCs for instant reconnect.
+//  Secret key is stored in cleartext because SharedPreferences already
+//  holds the active one — any device-level attacker reads both. If this
+//  ever needs hardening, swap this column for an EncryptedSharedPreferences
+//  lookup keyed by id.
+// ─────────────────────────────────────────────────────────────
+
+@Entity(tableName = "pc_saved_devices")
+data class PcSavedDevice(
+    @PrimaryKey val id        : String = java.util.UUID.randomUUID().toString(),
+    val label     : String    = "",
+    val host      : String    = "",       // IP or hostname
+    val port      : Int       = 5000,
+    val streamPort: Int       = 5001,
+    val secretKey : String    = "",
+    val isMaster  : Boolean   = false,    // stored key is master (admin) key
+    val pcName    : String    = "",       // reported by agent during scan
+    val addedAt   : Long      = System.currentTimeMillis(),
+    val lastUsed  : Long      = 0L,
+    val lastSeenOnline: Long  = 0L
+)
+
+@Dao
+interface PcSavedDeviceDao {
+    @Query("SELECT * FROM pc_saved_devices ORDER BY lastUsed DESC, addedAt DESC")
+    fun getAll(): Flow<List<PcSavedDevice>>
+
+    @Query("SELECT * FROM pc_saved_devices ORDER BY lastUsed DESC, addedAt DESC")
+    suspend fun getAllSync(): List<PcSavedDevice>
+
+    @Query("SELECT * FROM pc_saved_devices WHERE host = :host AND port = :port LIMIT 1")
+    suspend fun findByHostPort(host: String, port: Int): PcSavedDevice?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(device: PcSavedDevice)
+
+    @Delete
+    suspend fun delete(device: PcSavedDevice)
+
+    @Query("UPDATE pc_saved_devices SET lastUsed = :ts WHERE id = :id")
+    suspend fun touch(id: String, ts: Long = System.currentTimeMillis())
+
+    @Query("UPDATE pc_saved_devices SET lastSeenOnline = :ts, pcName = :pcName WHERE id = :id")
+    suspend fun markOnline(id: String, ts: Long = System.currentTimeMillis(), pcName: String)
+}
+
+// ─────────────────────────────────────────────────────────────
+//  DATABASE — version 5 (added saved devices table)
 // ─────────────────────────────────────────────────────────────
 
 @Database(
-    entities = [PcPlan::class, PcConnectionLog::class],
-    version = 4,
+    entities = [PcPlan::class, PcConnectionLog::class, PcSavedDevice::class],
+    version = 5,
     exportSchema = true
 )
 abstract class PcControlDatabase : RoomDatabase() {
     abstract fun planDao(): PcPlanDao
     abstract fun connectionLogDao(): PcConnectionLogDao
+    abstract fun savedDeviceDao(): PcSavedDeviceDao
 
     companion object {
         @Volatile private var INSTANCE: PcControlDatabase? = null
@@ -105,6 +153,27 @@ abstract class PcControlDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration v4 -> v5: saved devices table. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `pc_saved_devices` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`label` TEXT NOT NULL, " +
+                        "`host` TEXT NOT NULL, " +
+                        "`port` INTEGER NOT NULL, " +
+                        "`streamPort` INTEGER NOT NULL, " +
+                        "`secretKey` TEXT NOT NULL, " +
+                        "`isMaster` INTEGER NOT NULL, " +
+                        "`pcName` TEXT NOT NULL, " +
+                        "`addedAt` INTEGER NOT NULL, " +
+                        "`lastUsed` INTEGER NOT NULL, " +
+                        "`lastSeenOnline` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): PcControlDatabase {
             return INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -112,7 +181,7 @@ abstract class PcControlDatabase : RoomDatabase() {
                     PcControlDatabase::class.java,
                     "pccontrol_database"
                 )
-                    .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { INSTANCE = it }
             }
@@ -126,7 +195,8 @@ abstract class PcControlDatabase : RoomDatabase() {
 
 class PcControlRepository(
     private val planDao: PcPlanDao,
-    private val logDao: PcConnectionLogDao? = null
+    private val logDao: PcConnectionLogDao? = null,
+    private val deviceDao: PcSavedDeviceDao? = null
 ) {
     val allPlans: Flow<List<PcPlan>> = planDao.getAllPlans()
 
@@ -215,4 +285,18 @@ class PcControlRepository(
         val cutoff = System.currentTimeMillis() - (daysToKeep * 86_400_000L)
         logDao?.deleteOlderThan(cutoff)
     }
+
+    // ── Saved devices ─────────────────────────────────────────
+
+    val savedDevices: Flow<List<PcSavedDevice>> =
+        deviceDao?.getAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun saveDevice(d: PcSavedDevice) { deviceDao?.upsert(d) }
+    suspend fun deleteDevice(d: PcSavedDevice) { deviceDao?.delete(d) }
+    suspend fun touchDevice(id: String) { deviceDao?.touch(id) }
+    suspend fun markDeviceOnline(id: String, pcName: String) {
+        deviceDao?.markOnline(id, System.currentTimeMillis(), pcName)
+    }
+    suspend fun findDeviceByAddress(host: String, port: Int): PcSavedDevice? =
+        deviceDao?.findByHostPort(host, port)
 }

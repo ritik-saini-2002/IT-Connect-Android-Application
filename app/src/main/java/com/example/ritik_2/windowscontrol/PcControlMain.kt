@@ -59,7 +59,11 @@ object PcControlMain {
         browseClient = PcControlBrowseClient(_settings!!)
 
         val db       = PcControlDatabase.getDatabase(context)
-        repository   = PcControlRepository(db.planDao())
+        repository   = PcControlRepository(
+            planDao   = db.planDao(),
+            logDao    = db.connectionLogDao(),
+            deviceDao = db.savedDeviceDao()
+        )
     }
 
     fun updateConnection(pcIp: String, port: Int = 5000, secretKey: String = "") {
