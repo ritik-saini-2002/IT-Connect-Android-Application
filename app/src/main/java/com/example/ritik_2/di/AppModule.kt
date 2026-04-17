@@ -65,9 +65,10 @@ object AppModule {
 
     @Provides @Singleton
     fun provideAuthRepository(
-        dataSource    : AppDataSource,
-        pbDataSource  : PocketBaseDataSource,
-        sessionManager: SessionManager,
-        syncManager   : SyncManager
-    ): AuthRepository = AuthRepository(dataSource, pbDataSource, sessionManager, syncManager)
+        dataSource         : AppDataSource,
+        pbDataSource       : PocketBaseDataSource,
+        sessionManager     : SessionManager,
+        syncManager        : SyncManager,
+        adminTokenProvider : AdminTokenProvider
+    ): AuthRepository = AuthRepository(dataSource, pbDataSource, sessionManager, syncManager, adminTokenProvider)
 }
