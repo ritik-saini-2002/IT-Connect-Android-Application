@@ -33,12 +33,8 @@ class SyncManager @Inject constructor(
     private val scope      = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val tokenMutex = Mutex()
 
-    // ── Admin token (writes + collection management only) ─────────────────────
-    private var adminToken     = ""
-    private var tokenFetchedAt = 0L
-    private val tokenTtl       = 10 * 60 * 1000L
-
     // ── User token (set after login/restore, used for all reads) ─────────────
+    // Admin token is managed entirely by AdminTokenProvider (keep-alive loop).
     @Volatile private var userToken = ""
 
     /**

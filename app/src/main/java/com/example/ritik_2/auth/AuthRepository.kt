@@ -1,6 +1,7 @@
 package com.example.ritik_2.auth
 
 import android.util.Log
+import com.example.ritik_2.core.AdminTokenProvider
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.source.AppDataSource
@@ -15,10 +16,11 @@ import javax.inject.Singleton
 
 @Singleton
 class AuthRepository @Inject constructor(
-    private val dataSource    : AppDataSource,
-    private val pbDataSource  : PocketBaseDataSource,
-    private val sessionManager: SessionManager,
-    private val syncManager   : SyncManager
+    private val dataSource         : AppDataSource,
+    private val pbDataSource       : PocketBaseDataSource,
+    private val sessionManager     : SessionManager,
+    private val syncManager        : SyncManager,
+    private val adminTokenProvider : AdminTokenProvider
 ) {
     companion object { private const val TAG = "AuthRepository" }
 
@@ -63,6 +65,8 @@ class AuthRepository @Inject constructor(
         try {
             dataSource.restoreSession(session.token)
             syncManager.setUserToken(session.token)
+            // Resume admin-token keep-alive for the restored session.
+            adminTokenProvider.startKeepAlive()
             Log.d(TAG, "Session restored  email=${session.email}  role=${session.role}")
         } catch (e: Exception) {
             Log.w(TAG, "Session restore failed (possibly offline): ${e.message}")
@@ -109,6 +113,9 @@ class AuthRepository @Inject constructor(
             val session = dataSource.login(email, password)
             sessionManager.save(session)
             syncManager.setUserToken(session.token)
+            // Start proactive admin-token keep-alive for the duration of this session.
+            // The loop refreshes the token every 9 min so it never expires while logged in.
+            adminTokenProvider.startKeepAlive()
             Log.d(TAG, "Login ✅  email=$email  role=${session.role}  sysAdmin=${isDbAdmin()}")
 
             bgScope.launch {
@@ -153,6 +160,7 @@ class AuthRepository @Inject constructor(
 
     suspend fun logout() {
         try { dataSource.logout() } catch (_: Exception) {}
+        adminTokenProvider.stopKeepAlive()   // stop background refresh, clear cached token
         sessionManager.clear()
         syncManager.setUserToken("")
         Log.d(TAG, "Logged out ✅")
