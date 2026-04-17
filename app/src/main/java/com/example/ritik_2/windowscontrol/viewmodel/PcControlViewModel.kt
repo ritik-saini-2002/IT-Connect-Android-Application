@@ -368,7 +368,12 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     fun connectToSaved(device: PcSavedDevice) {
         viewModelScope.launch {
             repo.touchDevice(device.id)
-            PcControlMain.updateConnection(device.host, device.port, device.secretKey)
+            PcControlMain.updateConnection(
+                pcIp            = device.host,
+                port            = device.port,
+                secretKey       = device.secretKey,
+                certFingerprint = device.certFingerprint,
+            )
             _settings.value = PcControlMain.getSettings()
             _uiState.value  = PcUiState.Success("Connected to ${device.label.ifBlank { device.host }}")
             pingPc()

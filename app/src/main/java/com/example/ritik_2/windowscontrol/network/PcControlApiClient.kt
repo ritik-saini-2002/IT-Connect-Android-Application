@@ -39,6 +39,7 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .writeTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
         .socketFactory(tunedSocketFactory())
+        .applyPinning(settings)
         .build()
 
     protected val httpFast = OkHttpClient.Builder()
@@ -46,6 +47,7 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .readTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
         .writeTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
+        .applyPinning(settings)
         .build()
 
     protected val httpTransfer = OkHttpClient.Builder()
@@ -55,6 +57,7 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .retryOnConnectionFailure(false)
         .socketFactory(tunedSocketFactory())
         .connectionPool(ConnectionPool(5, 60, TimeUnit.SECONDS))
+        .applyPinning(settings)
         .build()
 
     private fun tunedSocketFactory(): javax.net.SocketFactory {
@@ -290,6 +293,7 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
+            .applyPinning(settings)
             .build()
     }
 
@@ -714,4 +718,52 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
 
     suspend fun setBrightness(level: Int): PcNetworkResult<String> =
         post("/system/brightness/set", mapOf("level" to level))
+}
+
+// ── Phase 2.1 — conditional cert pinning ────────────────────────────────────
+//
+// When a saved device carries a SHA-256 cert fingerprint, every OkHttpClient
+// in PcBaseClient pins the agent host to that hash. The agent currently
+// ships self-signed certs without hostname SANs (it's addressed by raw IP
+// on LAN), so we also install a permissive hostname verifier: the pin
+// itself is the trust anchor, the CN/SAN check is redundant and would fail.
+//
+// Accepted fingerprint formats (whitespace/colons stripped):
+//   • 64-char hex         — e.g. "aabbcc...ff"
+//   • sha256/<base64>     — exact OkHttp form, passed through as-is
+//
+// Silent no-op for http:// URLs or when the fingerprint is null/blank.
+
+internal fun OkHttpClient.Builder.applyPinning(settings: PcControlSettings): OkHttpClient.Builder {
+    val fp   = settings.certFingerprint?.trim()?.takeIf { it.isNotBlank() } ?: return this
+    val host = settings.pcIpAddress.takeIf { it.isNotBlank() } ?: return this
+    val pin  = toOkHttpPin(fp) ?: return this
+
+    val pinner = CertificatePinner.Builder()
+        .add(host, pin)
+        .build()
+    certificatePinner(pinner)
+
+    // Self-signed agent certs without SAN: the pin is the trust anchor.
+    hostnameVerifier { _, _ -> true }
+    return this
+}
+
+private fun toOkHttpPin(raw: String): String? {
+    val cleaned = raw.trim()
+    // Already in OkHttp canonical form.
+    if (cleaned.startsWith("sha256/")) return cleaned
+
+    // Hex (colon-separated or flat) — 64 hex chars = 32 bytes.
+    val hex = cleaned.replace(":", "").replace(" ", "").lowercase()
+    if (hex.length == 64 && hex.all { it in '0'..'9' || it in 'a'..'f' }) {
+        val bytes = ByteArray(32) { i ->
+            ((Character.digit(hex[i * 2], 16) shl 4) +
+                Character.digit(hex[i * 2 + 1], 16)).toByte()
+        }
+        return "sha256/" + android.util.Base64.encodeToString(
+            bytes, android.util.Base64.NO_WRAP
+        )
+    }
+    return null
 }

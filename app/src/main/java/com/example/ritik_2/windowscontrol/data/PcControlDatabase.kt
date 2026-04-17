@@ -108,7 +108,11 @@ data class PcSavedDevice(
     val thumbnailUpdatedAt: Long    = 0L,
     val macAddress        : String? = null,
     val broadcastAddress  : String? = null,   // null = auto-pick active iface broadcast
-    val wolPort           : Int     = 9
+    val wolPort           : Int     = 9,
+    // v8 additions — transport security (Phase 2.1).
+    // When set, OkHttp switches to HTTPS for this device and pins the server
+    // cert to the stored SHA-256. Hex (colons ok) or base64. Null = HTTP, no pin.
+    val certFingerprint   : String? = null
 )
 
 @Dao
@@ -196,7 +200,7 @@ interface PcScheduleDao {
 
 @Database(
     entities = [PcPlan::class, PcConnectionLog::class, PcSavedDevice::class, PcSchedule::class],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class PcControlDatabase : RoomDatabase() {
@@ -247,6 +251,16 @@ abstract class PcControlDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration v7 -> v8: per-device HTTPS cert fingerprint (Phase 2.1).
+         * Nullable; existing rows default to HTTP (no pin) via implicit NULL.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pc_saved_devices ADD COLUMN certFingerprint TEXT")
+            }
+        }
+
         /** Migration v6 -> v7: per-device schedule table. */
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -275,7 +289,7 @@ abstract class PcControlDatabase : RoomDatabase() {
                     PcControlDatabase::class.java,
                     "pccontrol_database"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .build()
                     .also { INSTANCE = it }
             }

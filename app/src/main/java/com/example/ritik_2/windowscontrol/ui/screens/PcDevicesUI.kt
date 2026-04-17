@@ -470,9 +470,19 @@ private fun EditDeviceDialog(
     var mac      by remember { mutableStateOf(initial.macAddress.orEmpty()) }
     var bcast    by remember { mutableStateOf(initial.broadcastAddress.orEmpty()) }
     var showAdv  by remember { mutableStateOf(initial.macAddress != null) }
+    // Phase 2.1 — optional HTTPS cert pin for this device.
+    var certFp   by remember { mutableStateOf(initial.certFingerprint.orEmpty()) }
+    var showSec  by remember { mutableStateOf(initial.certFingerprint != null) }
 
-    val isNew = initial.host.isBlank() && initial.secretKey.isBlank() && initial.label.isBlank()
-    val macOk = mac.isEmpty() || WakeOnLan.isValidMac(mac)
+    val isNew  = initial.host.isBlank() && initial.secretKey.isBlank() && initial.label.isBlank()
+    val macOk  = mac.isEmpty() || WakeOnLan.isValidMac(mac)
+    val certOk = run {
+        val t = certFp.trim()
+        if (t.isEmpty()) return@run true
+        if (t.startsWith("sha256/") && t.length > 10) return@run true
+        val hex = t.replace(":", "").replace(" ", "").lowercase()
+        hex.length == 64 && hex.all { it in '0'..'9' || it in 'a'..'f' }
+    }
 
     AlertDialog(
         onDismissRequest = onCancel,
@@ -564,6 +574,42 @@ private fun EditDeviceDialog(
                         )
                     }
                 }
+                // ── Phase 2.1 — HTTPS cert pin (advanced) ──────────────
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { showSec = !showSec },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (showSec) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        null, modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("HTTPS cert pin (advanced)",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                AnimatedVisibility(visible = showSec) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = certFp, onValueChange = { certFp = it.trim() },
+                            label = { Text("SHA-256 fingerprint (optional)") },
+                            placeholder = { Text("AA:BB:…  or  sha256/<base64>") },
+                            singleLine = true,
+                            isError = !certOk,
+                            supportingText = {
+                                Text(
+                                    if (!certOk)
+                                        "Expected 64 hex chars or sha256/<base64>"
+                                    else
+                                        "Leave blank for HTTP. When set, connection upgrades to HTTPS and pins the agent's cert.",
+                                    fontSize = 10.sp
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -577,10 +623,11 @@ private fun EditDeviceDialog(
                         secretKey    = key,
                         isMaster     = isMaster,
                         macAddress   = mac.takeIf { it.isNotBlank() },
-                        broadcastAddress = bcast.takeIf { it.isNotBlank() }
+                        broadcastAddress = bcast.takeIf { it.isNotBlank() },
+                        certFingerprint  = certFp.trim().takeIf { it.isNotEmpty() }
                     ))
                 },
-                enabled = host.isNotBlank() && key.isNotBlank() && macOk
+                enabled = host.isNotBlank() && key.isNotBlank() && macOk && certOk
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } }

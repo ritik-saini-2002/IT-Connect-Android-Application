@@ -14,11 +14,19 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
 import com.example.ritik_2.windowscontrol.ui.screens.PcControlMainScreen
 
 data class PcControlSettings(
-    val pcIpAddress : String = "",
-    val port        : Int    = 5000,
-    val secretKey   : String = ""
+    val pcIpAddress    : String  = "",
+    val port           : Int     = 5000,
+    val secretKey      : String  = "",
+    /**
+     * Phase 2.1 — SHA-256 of the agent's HTTPS certificate in either
+     * "hex-with-colons" (AA:BB:…) or "sha256/<base64>" form. When non-null,
+     * [baseUrl] switches to HTTPS and OkHttp pins the chain to this fp;
+     * any other cert aborts the handshake. Null keeps the legacy HTTP flow.
+     */
+    val certFingerprint: String? = null,
 ) {
-    val baseUrl      get() = "http://$pcIpAddress:$port"
+    /** Scheme flips to HTTPS as soon as the user has attested a cert fingerprint. */
+    val baseUrl      get() = "${if (certFingerprint.isNullOrBlank()) "http" else "https"}://$pcIpAddress:$port"
     val isConfigured get() = pcIpAddress.isNotEmpty() && secretKey.isNotEmpty()
 }
 
@@ -49,12 +57,13 @@ object PcControlMain {
         val rawKey = prefs.getString("pc_key", secretKey) ?: secretKey
         // Treat legacy hardcoded key as empty — force user to set a new one
         val savedKey = if (rawKey == LEGACY_DEFAULT_KEY) "" else rawKey
+        val savedFp  = prefs.getString("pc_cert_fp", null)?.takeIf { it.isNotBlank() }
 
         val resolvedIp   = if (pcIp.isNotEmpty()) pcIp else savedIp
         val resolvedPort = savedPort
         val resolvedKey  = savedKey
 
-        _settings    = PcControlSettings(resolvedIp, resolvedPort, resolvedKey)
+        _settings    = PcControlSettings(resolvedIp, resolvedPort, resolvedKey, savedFp)
         apiClient    = PcControlApiClient(_settings!!)
         browseClient = PcControlBrowseClient(_settings!!)
 
@@ -67,14 +76,23 @@ object PcControlMain {
         )
     }
 
-    fun updateConnection(pcIp: String, port: Int = 5000, secretKey: String = "") {
+    fun updateConnection(
+        pcIp           : String,
+        port           : Int     = 5000,
+        secretKey      : String  = "",
+        certFingerprint: String? = null,
+    ) {
         val ctx = _context ?: return
-        val s = PcControlSettings(pcIp, port, secretKey)
+        val s = PcControlSettings(pcIp, port, secretKey, certFingerprint?.takeIf { it.isNotBlank() })
         _settings    = s
         apiClient    = PcControlApiClient(s)
         browseClient = PcControlBrowseClient(s)
         ctx.getSharedPreferences("pccontrol_prefs", Context.MODE_PRIVATE).edit()
-            .putString("pc_ip", pcIp).putInt("pc_port", port).putString("pc_key", secretKey).apply()
+            .putString("pc_ip", pcIp)
+            .putInt("pc_port", port)
+            .putString("pc_key", secretKey)
+            .putString("pc_cert_fp", s.certFingerprint) // null clears it
+            .apply()
     }
 
     fun getSettings(): PcControlSettings = _settings ?: PcControlSettings()
