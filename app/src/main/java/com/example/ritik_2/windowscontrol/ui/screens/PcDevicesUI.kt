@@ -48,6 +48,7 @@ fun PcDevicesUI(viewModel: PcControlViewModel) {
     var savingAgent by remember { mutableStateOf<PcLanScanner.DiscoveredAgent?>(null) }
     var editing     by remember { mutableStateOf<PcSavedDevice?>(null) }
     var pendingDelete by remember { mutableStateOf<PcSavedDevice?>(null) }
+    var schedulingFor by remember { mutableStateOf<PcSavedDevice?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refreshStaleThumbnails() }
 
@@ -118,7 +119,8 @@ fun PcDevicesUI(viewModel: PcControlViewModel) {
                         onConnect = { viewModel.connectToSaved(device) },
                         onEdit    = { editing = device },
                         onDelete  = { pendingDelete = device },
-                        onWake    = { viewModel.wakePc(device) }
+                        onWake    = { viewModel.wakePc(device) },
+                        onSchedule = { schedulingFor = device }
                     )
                 }
             }
@@ -188,6 +190,14 @@ fun PcDevicesUI(viewModel: PcControlViewModel) {
             }
         )
     }
+
+    schedulingFor?.let { d ->
+        PcScheduleDialog(
+            device    = d,
+            viewModel = viewModel,
+            onDismiss = { schedulingFor = null }
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -224,12 +234,13 @@ private fun EmptyHint(text: String) {
 
 @Composable
 private fun SavedDeviceCard(
-    device   : PcSavedDevice,
-    isActive : Boolean,
-    onConnect: () -> Unit,
-    onEdit   : () -> Unit,
-    onDelete : () -> Unit,
-    onWake   : () -> Unit
+    device    : PcSavedDevice,
+    isActive  : Boolean,
+    onConnect : () -> Unit,
+    onEdit    : () -> Unit,
+    onDelete  : () -> Unit,
+    onWake    : () -> Unit,
+    onSchedule: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -300,6 +311,10 @@ private fun SavedDeviceCard(
                     Icon(Icons.Default.PowerSettingsNew, "Wake",
                         modifier = Modifier.size(18.dp), tint = Color(0xFFFFB020))
                 }
+            }
+            IconButton(onClick = onSchedule) {
+                Icon(Icons.Default.Schedule, "Schedules",
+                    modifier = Modifier.size(18.dp), tint = cs.onSurfaceVariant)
             }
             IconButton(onClick = onEdit) {
                 Icon(Icons.Default.Edit, "Edit",

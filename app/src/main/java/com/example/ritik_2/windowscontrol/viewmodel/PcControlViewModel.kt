@@ -306,6 +306,23 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    // ── Schedules ────────────────────────────────────────
+    fun schedulesFor(deviceId: String): StateFlow<List<PcSchedule>> =
+        repo.schedulesForDevice(deviceId)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun upsertSchedule(s: PcSchedule) {
+        viewModelScope.launch { repo.upsertSchedule(s) }
+    }
+
+    fun deleteSchedule(s: PcSchedule) {
+        viewModelScope.launch { repo.deleteSchedule(s) }
+    }
+
+    fun toggleSchedule(s: PcSchedule) {
+        viewModelScope.launch { repo.setScheduleEnabled(s.id, !s.enabled) }
+    }
+
     // ── Wake-on-LAN ──────────────────────────────────────
     fun wakePc(device: PcSavedDevice) {
         val mac = device.macAddress

@@ -142,18 +142,64 @@ interface PcSavedDeviceDao {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  DATABASE — version 6 (thumbnail cache + Wake-on-LAN fields)
+//  SCHEDULE ENTITY — WorkManager-polled automations per saved device.
+//  Worker runs every ~15 min (WorkManager floor) and fires any schedule
+//  whose local hh:mm falls inside the current ±3 min window and whose
+//  daysMask bit for today is set and whose lastFiredAt is older than 90s.
+// ─────────────────────────────────────────────────────────────
+
+@Entity(tableName = "pc_schedules")
+data class PcSchedule(
+    @PrimaryKey val id: String = java.util.UUID.randomUUID().toString(),
+    val deviceId    : String,              // FK-by-convention to pc_saved_devices.id
+    val action      : String,              // WOL | SHUTDOWN | SLEEP | LOCK | EXECUTE_PLAN
+    val planId      : String? = null,      // set when action == EXECUTE_PLAN
+    val hour        : Int,                 // 0..23 local
+    val minute      : Int,                 // 0..59 local
+    val daysMask    : Int,                 // bit 0..6 = Sun..Sat; 0x7F = daily
+    val enabled     : Boolean = true,
+    val lastFiredAt : Long    = 0L,
+    val createdAt   : Long    = System.currentTimeMillis()
+)
+
+@Dao
+interface PcScheduleDao {
+    @Query("SELECT * FROM pc_schedules ORDER BY hour, minute")
+    fun getAll(): Flow<List<PcSchedule>>
+
+    @Query("SELECT * FROM pc_schedules WHERE deviceId = :id ORDER BY hour, minute")
+    fun getForDevice(id: String): Flow<List<PcSchedule>>
+
+    @Query("SELECT * FROM pc_schedules WHERE enabled = 1")
+    suspend fun getEnabledSync(): List<PcSchedule>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(s: PcSchedule)
+
+    @Delete
+    suspend fun delete(s: PcSchedule)
+
+    @Query("UPDATE pc_schedules SET enabled = :enabled WHERE id = :id")
+    suspend fun setEnabled(id: String, enabled: Boolean)
+
+    @Query("UPDATE pc_schedules SET lastFiredAt = :ts WHERE id = :id")
+    suspend fun markFired(id: String, ts: Long)
+}
+
+// ─────────────────────────────────────────────────────────────
+//  DATABASE — version 7 (schedule table for per-device automations)
 // ─────────────────────────────────────────────────────────────
 
 @Database(
-    entities = [PcPlan::class, PcConnectionLog::class, PcSavedDevice::class],
-    version = 6,
+    entities = [PcPlan::class, PcConnectionLog::class, PcSavedDevice::class, PcSchedule::class],
+    version = 7,
     exportSchema = true
 )
 abstract class PcControlDatabase : RoomDatabase() {
     abstract fun planDao(): PcPlanDao
     abstract fun connectionLogDao(): PcConnectionLogDao
     abstract fun savedDeviceDao(): PcSavedDeviceDao
+    abstract fun scheduleDao(): PcScheduleDao
 
     companion object {
         @Volatile private var INSTANCE: PcControlDatabase? = null
@@ -197,6 +243,27 @@ abstract class PcControlDatabase : RoomDatabase() {
             }
         }
 
+        /** Migration v6 -> v7: per-device schedule table. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `pc_schedules` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`deviceId` TEXT NOT NULL, " +
+                        "`action` TEXT NOT NULL, " +
+                        "`planId` TEXT, " +
+                        "`hour` INTEGER NOT NULL, " +
+                        "`minute` INTEGER NOT NULL, " +
+                        "`daysMask` INTEGER NOT NULL, " +
+                        "`enabled` INTEGER NOT NULL, " +
+                        "`lastFiredAt` INTEGER NOT NULL DEFAULT 0, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `idx_pc_schedules_device` ON `pc_schedules`(`deviceId`)")
+            }
+        }
+
         fun getDatabase(context: Context): PcControlDatabase {
             return INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -204,7 +271,7 @@ abstract class PcControlDatabase : RoomDatabase() {
                     PcControlDatabase::class.java,
                     "pccontrol_database"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build()
                     .also { INSTANCE = it }
             }
@@ -219,7 +286,8 @@ abstract class PcControlDatabase : RoomDatabase() {
 class PcControlRepository(
     private val planDao: PcPlanDao,
     private val logDao: PcConnectionLogDao? = null,
-    private val deviceDao: PcSavedDeviceDao? = null
+    private val deviceDao: PcSavedDeviceDao? = null,
+    private val scheduleDao: PcScheduleDao? = null
 ) {
     val allPlans: Flow<List<PcPlan>> = planDao.getAllPlans()
 
@@ -327,5 +395,42 @@ class PcControlRepository(
 
     suspend fun setDeviceThumbnail(id: String, path: String?, ts: Long = System.currentTimeMillis()) {
         deviceDao?.setThumbnail(id, path, ts)
+    }
+
+    // ── Schedules ────────────────────────────────────────────
+
+    val allSchedules: Flow<List<PcSchedule>> =
+        scheduleDao?.getAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    fun schedulesForDevice(deviceId: String): Flow<List<PcSchedule>> =
+        scheduleDao?.getForDevice(deviceId) ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun upsertSchedule(s: PcSchedule) { scheduleDao?.upsert(s) }
+    suspend fun deleteSchedule(s: PcSchedule) { scheduleDao?.delete(s) }
+    suspend fun setScheduleEnabled(id: String, enabled: Boolean) {
+        scheduleDao?.setEnabled(id, enabled)
+    }
+
+    /** Returns enabled schedules due in the current local ±3 min window whose
+     *  `lastFiredAt` is older than 90 s, keyed by today's weekday bit. */
+    suspend fun dueSchedulesNow(
+        cal: java.util.Calendar = java.util.Calendar.getInstance()
+    ): List<PcSchedule> {
+        val all   = scheduleDao?.getEnabledSync() ?: return emptyList()
+        val now   = cal.timeInMillis
+        val hour  = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        val min   = cal.get(java.util.Calendar.MINUTE)
+        val dowBit = 1 shl (cal.get(java.util.Calendar.DAY_OF_WEEK) - 1)  // Sun=1 → bit0
+        val nowMinutes = hour * 60 + min
+        return all.filter { s ->
+            if ((s.daysMask and dowBit) == 0) return@filter false
+            if (now - s.lastFiredAt < 90_000L) return@filter false
+            val schedMinutes = s.hour * 60 + s.minute
+            kotlin.math.abs(nowMinutes - schedMinutes) <= 3
+        }
+    }
+
+    suspend fun markScheduleFired(id: String, ts: Long = System.currentTimeMillis()) {
+        scheduleDao?.markFired(id, ts)
     }
 }

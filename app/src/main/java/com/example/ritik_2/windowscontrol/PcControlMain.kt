@@ -60,9 +60,10 @@ object PcControlMain {
 
         val db       = PcControlDatabase.getDatabase(context)
         repository   = PcControlRepository(
-            planDao   = db.planDao(),
-            logDao    = db.connectionLogDao(),
-            deviceDao = db.savedDeviceDao()
+            planDao     = db.planDao(),
+            logDao      = db.connectionLogDao(),
+            deviceDao   = db.savedDeviceDao(),
+            scheduleDao = db.scheduleDao()
         )
     }
 
