@@ -228,10 +228,10 @@ private fun WindowsProjectPopup(
     onSelect: (PcStep) -> Unit
 ) {
     val options = listOf(
-        Triple("PC Screen Only",   "", PcStep("SYSTEM_CMD", "DISPLAY_INTERNAL")),
-        Triple("Duplicate",        "", PcStep("SYSTEM_CMD", "DISPLAY_CLONE")),
-        Triple("Extend",           "", PcStep("SYSTEM_CMD", "DISPLAY_EXTEND")),
-        Triple("Second Screen Only","", PcStep("SYSTEM_CMD", "DISPLAY_EXTERNAL")),
+        Triple("PC Screen Only",    "💻", PcStep("SYSTEM_CMD", "DISPLAY_INTERNAL")),
+        Triple("Duplicate",         "🔁", PcStep("SYSTEM_CMD", "DISPLAY_CLONE")),
+        Triple("Extend",            "↔️", PcStep("SYSTEM_CMD", "DISPLAY_EXTEND")),
+        Triple("Second Screen Only","📺", PcStep("SYSTEM_CMD", "DISPLAY_EXTERNAL")),
     )
 
     AlertDialog(

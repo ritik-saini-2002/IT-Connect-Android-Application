@@ -37,6 +37,7 @@ enum class PcStepType(val display: String, val description: String) {
     MOUSE_SCROLL("Scroll",         "Scroll mouse wheel"),
     RUN_SCRIPT  ("Run Script",     "Execute .py/.bat/.ps1"),
     OPEN_FILE   ("Open File",      "Open file with default app"),
+    FILE_OP     ("File Op",        "Copy / Move / Delete files"),
     SYSTEM_CMD  ("System Command", "Lock/Sleep/Volume etc"),
     WAIT        ("Wait",           "Pause between steps")
 }
