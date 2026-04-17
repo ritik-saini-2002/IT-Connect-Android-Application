@@ -109,6 +109,7 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.biometric)
 
     // Compose
     implementation(libs.androidx.ui)

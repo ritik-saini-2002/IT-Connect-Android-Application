@@ -15,10 +15,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.windowscontrol.network.PcControlApiClient
+import com.example.ritik_2.windowscontrol.security.MasterActionGate
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import kotlinx.coroutines.launch
 
@@ -43,6 +46,49 @@ fun PcControlAdminSettingsUI(
 ) {
     val cs = MaterialTheme.colorScheme
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val ctx      = LocalContext.current
+    val activity = ctx as? FragmentActivity
+
+    // Phase 2.3 — gate the entire screen behind biometric / device-credential
+    // auth. Cache holds for 5 min so master-key sub-actions don't re-prompt.
+    var unlocked  by remember { mutableStateOf(MasterActionGate.isUnlocked()) }
+    var gateError by remember { mutableStateOf<String?>(null) }
+    // On first entry, auto-trigger the prompt once (skipped if cache hit).
+    LaunchedEffect(Unit) {
+        if (unlocked || activity == null) return@LaunchedEffect
+        MasterActionGate.prompt(
+            activity      = activity,
+            title         = "Admin authentication",
+            subtitle      = "Unlock to manage master-key actions",
+            onAllow       = { unlocked = true; gateError = null },
+            onDeny        = { err -> gateError = err },
+            onUnavailable = {
+                // No biometric + no device lock — permit entry with a warning.
+                // Server-side master-key check still gates the actual calls.
+                unlocked  = true
+                gateError = "Device has no screen lock — biometric gate skipped."
+            },
+        )
+    }
+
+    if (!unlocked) {
+        AdminLockedScreen(
+            errorText = gateError,
+            onRetry   = {
+                if (activity != null) MasterActionGate.prompt(
+                    activity = activity,
+                    onAllow  = { unlocked = true; gateError = null },
+                    onDeny   = { err -> gateError = err },
+                    onUnavailable = {
+                        unlocked  = true
+                        gateError = "Device has no screen lock — biometric gate skipped."
+                    },
+                )
+            },
+            onBack = onBack,
+        )
+        return
+    }
 
     val scope = rememberCoroutineScope()
     var masterKey        by remember { mutableStateOf("ITConnect_Master_2024") }
@@ -346,6 +392,84 @@ fun PcControlAdminSettingsUI(
 
                 // ── Agent self-update (Phase 1.4) ────────────────
                 AgentUpdatePanel(api = api, masterKey = masterKey.trim())
+            }
+        }
+    }
+}
+
+/**
+ * Phase 2.3 — rendered while [MasterActionGate] is locked. Users see a
+ * calm "this screen is protected" card with a retry button and a back
+ * exit; nothing about the underlying admin UI is disclosed.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AdminLockedScreen(
+    errorText: String?,
+    onRetry  : () -> Unit,
+    onBack   : () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Admin Settings", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.Default.Close, contentDescription = "Back") }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = cs.surface,
+                    titleContentColor = cs.onSurface
+                )
+            )
+        }
+    ) { pad ->
+        Column(
+            modifier = Modifier
+                .padding(pad)
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Surface(
+                color = cs.surfaceVariant,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, cs.outline.copy(0.25f)),
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(Icons.Default.Fingerprint, null, tint = cs.primary, modifier = Modifier.size(44.dp))
+                    Text(
+                        "Protected screen",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "Master-key admin actions require device authentication. Use your fingerprint, face or PIN to continue.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                    )
+                    if (errorText != null) Text(
+                        errorText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = cs.error,
+                    )
+                    Button(
+                        onClick = onRetry,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.LockOpen, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Authenticate", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }

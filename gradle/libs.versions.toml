@@ -11,6 +11,7 @@ activity                     = "1.9.3"
 constraintlayout             = "2.1.4"
 documentfile                 = "1.0.1"
 securityCrypto               = "1.1.0-alpha06"
+biometric                    = "1.2.0-alpha05"
 
 # ── Compose ───────────────────────────────────────────────────
 composeBom                   = "2024.10.01"
@@ -74,6 +75,7 @@ androidx-activity                    = { group = "androidx.activity",           
 androidx-constraintlayout            = { group = "androidx.constraintlayout",     name = "constraintlayout",             version.ref = "constraintlayout" }
 androidx-documentfile                = { group = "androidx.documentfile",         name = "documentfile",                 version.ref = "documentfile" }
 androidx-security-crypto             = { group = "androidx.security",             name = "security-crypto",              version.ref = "securityCrypto" }
+androidx-biometric                   = { group = "androidx.biometric",            name = "biometric",                    version.ref = "biometric" }
 material                             = { group = "com.google.android.material",   name = "material",                     version.ref = "material" }
 
 # ── Compose BOM ───────────────────────────────────────────────

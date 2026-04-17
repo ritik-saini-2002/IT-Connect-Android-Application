@@ -2,7 +2,6 @@ package com.example.ritik_2.windowscontrol.ui.screens
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -10,6 +9,7 @@ import androidx.compose.material3.Surface
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.fragment.app.FragmentActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
@@ -23,7 +23,13 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
  * Shares the same PcControlViewModel-shaped factory used by the other
  * windowscontrol Activities so settings/connection-status stay consistent.
  */
-class PcControlAdminSettingsActivity : ComponentActivity() {
+/**
+ * Extends [FragmentActivity] (not bare ComponentActivity) because Phase 2.3's
+ * [com.example.ritik_2.windowscontrol.security.MasterActionGate] uses
+ * `BiometricPrompt`, which requires a FragmentActivity host to stage its
+ * internal fragment.
+ */
+class PcControlAdminSettingsActivity : FragmentActivity() {
 
     private val viewModel: PcControlViewModel by viewModels {
         PcControlViewModelFactory(applicationContext)
