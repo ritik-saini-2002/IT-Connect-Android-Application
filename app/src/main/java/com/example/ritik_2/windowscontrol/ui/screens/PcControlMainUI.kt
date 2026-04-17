@@ -294,7 +294,6 @@ private fun WindowsProjectPopup(
 
 private val railItems = listOf(
     PcNavItem(PcScreen.TOUCHPAD,      "Control",  Icons.Default.Mouse),
-    PcNavItem(PcScreen.DEVICES,       "Devices",  Icons.Default.Devices),
     PcNavItem(PcScreen.PLANS,         "Plans",    Icons.AutoMirrored.Filled.List),
     PcNavItem(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
     PcNavItem(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder, Icons.Default.FolderOpen),
@@ -340,6 +339,7 @@ fun NavigationPanel(
                 Triple(PcScreen.KEYBOARD,      "Keyboard", Icons.Default.Keyboard),
                 Triple(PcScreen.APP_DIRECTORY, "Apps",     Icons.Default.Apps),
                 Triple(PcScreen.FILE_BROWSER,  "Files",    Icons.Default.Folder),
+                Triple(PcScreen.DEVICES,       "Devices",  Icons.Default.Devices),
                 Triple(PcScreen.SETTINGS,      "Settings", Icons.Default.Settings),
             ).forEach { (screen, label, icon) ->
                 val isLocked = !isLoggedIn && screen !in viewModel.guestScreens
