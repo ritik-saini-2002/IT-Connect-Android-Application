@@ -148,7 +148,10 @@ interface PcSavedDeviceDao {
 //  daysMask bit for today is set and whose lastFiredAt is older than 90s.
 // ─────────────────────────────────────────────────────────────
 
-@Entity(tableName = "pc_schedules")
+@Entity(
+    tableName = "pc_schedules",
+    indices   = [Index(value = ["deviceId"], name = "idx_pc_schedules_device")]
+)
 data class PcSchedule(
     @PrimaryKey val id: String = java.util.UUID.randomUUID().toString(),
     val deviceId    : String,              // FK-by-convention to pc_saved_devices.id
@@ -158,6 +161,7 @@ data class PcSchedule(
     val minute      : Int,                 // 0..59 local
     val daysMask    : Int,                 // bit 0..6 = Sun..Sat; 0x7F = daily
     val enabled     : Boolean = true,
+    @ColumnInfo(defaultValue = "0")
     val lastFiredAt : Long    = 0L,
     val createdAt   : Long    = System.currentTimeMillis()
 )
