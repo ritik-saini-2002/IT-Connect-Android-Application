@@ -291,5 +291,8 @@ private fun MasterKeyAdminPanel(viewModel: PcControlViewModel) {
                 }
             }
         }
+
+        // Self-update (Phase 1.4) — gated on master auth like the other admin panels above.
+        AgentUpdatePanel(api = api, masterKey = masterKey.trim())
     }
 }

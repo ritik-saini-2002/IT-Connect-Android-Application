@@ -274,6 +274,95 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
                 }
             } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
         }
+
+    // ── Agent self-update (Phase 1.4) ─────────────────────────────────────────
+    // The agent writes the new script, rotates a .bak ring, then exit(42) so
+    // NSSM relaunches. Expect the response to arrive ~1s before the process
+    // dies; subsequent `ping` may be unreachable for up to ~10s during restart.
+
+    /**
+     * Long-timeout client for self-update calls.
+     * Restart + relaunch can take ~20s on slower machines; allow 60s headroom.
+     */
+    private val httpAgentUpdate by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+    }
+
+    /**
+     * Upload and activate a new agent script.
+     *
+     * @param masterKey admin credential (PBKDF2-verified server-side)
+     * @param code      raw bytes of the new `.py` script; SHA-256 is computed here
+     *                  and sent alongside so the agent can verify the upload wasn't
+     *                  truncated or tampered with in transit.
+     *
+     * The agent rotates the current file into `.bak1` before writing the new one,
+     * then self-exits so its service wrapper relaunches it with the updated code.
+     */
+    suspend fun uploadAgentCode(masterKey: String, code: ByteArray): PcNetworkResult<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val b64    = android.util.Base64.encodeToString(code, android.util.Base64.NO_WRAP)
+                val digest = java.security.MessageDigest.getInstance("SHA-256").digest(code)
+                    .joinToString("") { "%02x".format(it) }
+                val body = gson.toJson(mapOf("code" to b64, "sha256" to digest))
+                    .toRequestBody(JSON_MT)
+                val resp = httpAgentUpdate.newCall(
+                    Request.Builder()
+                        .url("${settings.baseUrl}/agent/update")
+                        .header("X-Secret-Key", masterKey)
+                        .post(body).build()
+                ).execute()
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}: ${r.body?.string().orEmpty()}")
+                }
+            } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+        }
+
+    /** Ask the agent to restore its previous version from the .bak1 slot. */
+    suspend fun rollbackAgent(masterKey: String): PcNetworkResult<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val empty = "{}".toRequestBody(JSON_MT)
+                val resp = httpAgentUpdate.newCall(
+                    Request.Builder()
+                        .url("${settings.baseUrl}/agent/rollback")
+                        .header("X-Secret-Key", masterKey)
+                        .post(empty).build()
+                ).execute()
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}: ${r.body?.string().orEmpty()}")
+                }
+            } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+        }
+
+    /**
+     * Returns the running script's sha256 plus a backup inventory (.bak1/2/3).
+     * Use to compare against a candidate upload before sending — skip the upload
+     * when digests already match.
+     */
+    suspend fun getAgentVersion(masterKey: String): PcNetworkResult<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                val resp = http.newCall(
+                    Request.Builder()
+                        .url("${settings.baseUrl}/agent/version")
+                        .header("X-Secret-Key", masterKey)
+                        .get().build()
+                ).execute()
+                resp.use { r ->
+                    if (r.isSuccessful) PcNetworkResult(true, r.body?.string())
+                    else PcNetworkResult(false, error = "HTTP ${r.code}")
+                }
+            } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
+        }
 }
 
 // ── Browse client ─────────────────────────────────────────────────────────────
