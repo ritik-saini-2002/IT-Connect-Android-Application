@@ -145,8 +145,6 @@ fun MainScreen(
                         val userPermissions = uiState.userProfile?.permissions ?: emptyList()
 
                         val features = listOf(
-                            FeatureItem(1, "Register Complaint",  Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
-                            FeatureItem(2, "Manage Complaints",   Icons.Outlined.List,               Color(0xFF8E24AA)),
                             FeatureItem(3, "Admin Panel",         Icons.Outlined.AdminPanelSettings, Color(0xFFFF6F00)),
                             FeatureItem(4, "Server Connect",      Icons.Outlined.Code,               Color(0xFF6200EA)),
                             FeatureItem(5, "Knowledge Base",      Icons.Outlined.MenuBook,           Color(0xFF00796B)),
@@ -395,8 +393,6 @@ fun AppSidebar(
     val sidebarPermissions = profile?.permissions ?: emptyList()
 
     val sidebarItems = listOf(
-        FeatureItem(1, "Register Complaint", Icons.Outlined.ReportProblem,      Color(0xFFE53935)),
-        FeatureItem(2, "Manage Complaints",  Icons.Outlined.List,               Color(0xFF8E24AA)),
         FeatureItem(3, "Admin Panel",        Icons.Outlined.AdminPanelSettings,  Color(0xFFFF6F00)),
         FeatureItem(4, "Server Connect",     Icons.Outlined.Code,               Color(0xFF6200EA)),
         FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,           Color(0xFF00796B)),

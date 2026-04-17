@@ -34,10 +34,7 @@ class ProfileActivity : ComponentActivity() {
         val session     = authRepository.getSession()
         val sessionRole = session?.role    ?: ""
         val sessionId   = session?.userId  ?: ""
-        val permissions = session?.let { /* loaded below from profile */ } ?: Unit
         val isDbAdmin   = authRepository.isDbAdmin()
-        // canEdit is permission-based: checks the user's actual permission list,
-        // not a hardcoded role string set
         val canEdit = PermissionGuard.canEditProfile(
             editorRole = sessionRole,
             targetRole = intent.getStringExtra("targetRole") ?: "",
@@ -45,6 +42,9 @@ class ProfileActivity : ComponentActivity() {
             targetId   = userId,
             isDbAdmin  = isDbAdmin
         )
+        // Admins/sysadmin who can edit the profile can also manage permissions.
+        // Users cannot edit their own permissions (self-escalation guard).
+        val canManagePermissions = canEdit && sessionId != userId
 
         setContent {
             ITConnectTheme {
@@ -72,9 +72,14 @@ class ProfileActivity : ComponentActivity() {
                             pendingTasks       = p.pendingTasks,
                             totalComplaints    = p.totalComplaints,
                             resolvedComplaints = p.resolvedComplaints,
-                            isLoading          = uiState.isLoading,
-                            canEdit            = canEdit,
-                            onEditClick        = {
+                            isLoading             = uiState.isLoading,
+                            canEdit               = canEdit,
+                            permissions           = p.permissions,
+                            canManagePermissions  = canManagePermissions,
+                            onSavePermissions     = { updated ->
+                                viewModel.updateUserPermissions(userId, updated)
+                            },
+                            onEditClick           = {
                                 startActivity(
                                     ProfileCompletionActivity.createIntent(
                                         this, userId, isEditMode = true

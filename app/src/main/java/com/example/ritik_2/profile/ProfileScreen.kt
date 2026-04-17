@@ -25,30 +25,35 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ritik_2.data.model.Permissions
 
 @Composable
 fun ProfileScreen(
-    imageUrl          : String?,
-    name              : String,
-    email             : String,
-    phoneNumber       : String,
-    designation       : String,
-    companyName       : String,
-    department        : String,
-    role              : String,
-    userId            : String,
-    experience        : Int,
-    completedProjects : Int,
-    activeProjects    : Int,
-    pendingTasks      : Int,
-    totalComplaints   : Int,
-    resolvedComplaints: Int,
-    isLoading         : Boolean,
-    canEdit           : Boolean = false,   // ✅ only true for Administrator/Manager/HR
-    onLogoutClick     : () -> Unit,
-    onEditClick       : () -> Unit,
-    onBackClick       : () -> Unit
+    imageUrl            : String?,
+    name                : String,
+    email               : String,
+    phoneNumber         : String,
+    designation         : String,
+    companyName         : String,
+    department          : String,
+    role                : String,
+    userId              : String,
+    experience          : Int,
+    completedProjects   : Int,
+    activeProjects      : Int,
+    pendingTasks        : Int,
+    totalComplaints     : Int,
+    resolvedComplaints  : Int,
+    isLoading           : Boolean,
+    canEdit             : Boolean          = false,
+    permissions         : List<String>     = emptyList(),
+    canManagePermissions: Boolean          = false,
+    onSavePermissions   : (List<String>) -> Unit = {},
+    onLogoutClick       : () -> Unit,
+    onEditClick         : () -> Unit,
+    onBackClick         : () -> Unit
 ) {
+    var showPermissionsDialog by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -225,6 +230,14 @@ fun ProfileScreen(
 
                 Spacer(Modifier.height(8.dp))
 
+                PermissionsCard(
+                    granted              = permissions,
+                    canManagePermissions = canManagePermissions,
+                    onManageClick        = { showPermissionsDialog = true }
+                )
+
+                Spacer(Modifier.height(8.dp))
+
                 // ── Action buttons ────────────────────────────────────────────
                 // Edit button: only shown if canEdit = true (Administrator/Manager/HR)
                 // Logout button: always shown (user can always log out)
@@ -279,7 +292,112 @@ fun ProfileScreen(
                 Spacer(Modifier.height(32.dp))
             }
         }
+
+        if (showPermissionsDialog) {
+            PermissionsEditDialog(
+                granted            = permissions,
+                readOnly           = !canManagePermissions,
+                onDismiss          = { showPermissionsDialog = false },
+                onSave             = { updated ->
+                    onSavePermissions(updated)
+                    showPermissionsDialog = false
+                }
+            )
+        }
     }
+}
+
+@Composable
+private fun PermissionsCard(
+    granted             : List<String>,
+    canManagePermissions: Boolean,
+    onManageClick       : () -> Unit
+) {
+    Card(
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(14.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Shield, null,
+                    tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Permissions",
+                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("${granted.size}/${Permissions.ALL_PERMISSIONS.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(
+                onClick  = onManageClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    if (canManagePermissions) Icons.Default.Edit else Icons.Default.Visibility,
+                    null, Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(if (canManagePermissions) "Manage Permissions" else "View All Permissions")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionsEditDialog(
+    granted  : List<String>,
+    readOnly : Boolean,
+    onDismiss: () -> Unit,
+    onSave   : (List<String>) -> Unit
+) {
+    val selected = remember { mutableStateListOf<String>().apply { addAll(granted) } }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (readOnly) "Permissions" else "Manage Permissions") },
+        text = {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                Permissions.ALL_PERMISSIONS.forEach { perm ->
+                    val isGranted = selected.contains(perm)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked  = isGranted,
+                            onCheckedChange = { checked ->
+                                if (readOnly) return@Checkbox
+                                if (checked) selected.add(perm) else selected.remove(perm)
+                            },
+                            enabled  = !readOnly
+                        )
+                        Text(
+                            perm,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isGranted) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!readOnly) {
+                TextButton(onClick = { onSave(selected.toList()) }) { Text("Save") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+        dismissButton = if (!readOnly) {
+            { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        } else null
+    )
 }
 
 // ── Reusable composables ──────────────────────────────────────────────────────

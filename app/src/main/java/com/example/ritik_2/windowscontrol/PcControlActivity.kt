@@ -40,6 +40,7 @@ class PcControlActivity : ComponentActivity() {
         }
 
         viewModel.startRealTimeRefresh(3000L)
+        viewModel.setSession(authRepository.getSession())
 
         setContent {
             ITConnectTheme {
@@ -51,6 +52,7 @@ class PcControlActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         applyFullscreen()
+        viewModel.setSession(authRepository.getSession())
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

@@ -91,7 +91,8 @@ fun PcControlAppDirectoryUI(viewModel: PcControlViewModel) {
                 isLandscape      = isLandscape,
                 minimizeStateMap = minimizeStateMap,
                 onLaunch         = { app -> viewModel.executeQuickStep(PcStep("LAUNCH_APP", app.exePath)) },
-                onKill           = { app -> viewModel.executeQuickStep(PcStep("KILL_APP", if (showRunning) app.exePath else app.name)) },
+                onKill           = { app -> viewModel.killApp(if (showRunning) app.exePath else app.name) },
+                onForceKill      = { app -> viewModel.forceKillApp(if (showRunning) app.exePath else app.name) },
                 onToggleMinMax   = { app ->
                     val newState = !(minimizeStateMap[app.exePath] ?: false)
                     viewModel.setAppMinimized(app.exePath, newState)
@@ -114,6 +115,7 @@ fun AppListContent(
     apps: List<PcInstalledApp>, isLoading: Boolean, searchQuery: String, showRunning: Boolean, isLandscape: Boolean,
     minimizeStateMap: Map<String, Boolean> = emptyMap(),
     onLaunch: (PcInstalledApp) -> Unit, onKill: (PcInstalledApp) -> Unit,
+    onForceKill: (PcInstalledApp) -> Unit = {},
     onToggleMinMax: (PcInstalledApp) -> Unit, onForceMaximize: (PcInstalledApp) -> Unit,
     onRetry: () -> Unit, recentPaths: List<PcRecentPath> = emptyList(), onRecentClick: ((PcRecentPath) -> Unit)? = null
 ) {
@@ -147,6 +149,7 @@ fun AppListContent(
                 }
                 items(running, key = { "run_${it.exePath}" }) { app ->
                     PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = { onKill(app) },
+                        onForceKill = { onForceKill(app) },
                         onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) },
                         isMinimized = minimizeStateMap[app.exePath] ?: false, compact = true)
                 }
@@ -156,7 +159,7 @@ fun AppListContent(
                 }
             }
             items(notRunning, key = { it.exePath }) { app ->
-                PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = null, onToggleMinMax = null, onForceMaximize = null, compact = true)
+                PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = null, onForceKill = null, onToggleMinMax = null, onForceMaximize = null, compact = true)
             }
             item(span = { GridItemSpan(2) }) { Spacer(Modifier.height(60.dp)) }
         }
@@ -173,34 +176,33 @@ fun AppListContent(
                 item { Text("● RUNNING (${running.size})", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4ADE80), modifier = Modifier.padding(vertical = 4.dp)) }
                 items(running, key = { "run_${it.exePath}" }) { app ->
                     PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = { onKill(app) },
+                        onForceKill = { onForceKill(app) },
                         onToggleMinMax = { onToggleMinMax(app) }, onForceMaximize = { onForceMaximize(app) },
                         isMinimized = minimizeStateMap[app.exePath] ?: false)
                 }
                 item { Text("ALL APPS (${notRunning.size})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) }
             }
             items(notRunning, key = { it.exePath }) { app ->
-                PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = null, onToggleMinMax = null, onForceMaximize = null)
+                PcAppItemCard(app = app, onLaunch = { onLaunch(app) }, onKill = null, onForceKill = null, onToggleMinMax = null, onForceMaximize = null)
             }
             item { Spacer(Modifier.height(80.dp)) }
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-//  APP ITEM CARD — buttons ordered: Run → Kill → Min/Max (at end)
-//  Min/Max is bigger (36dp) and spaced away from Kill to prevent
-//  accidental presses. Single tap toggles, double tap force max.
-// ─────────────────────────────────────────────────────────────
+// Kill: tap = close, double-tap = force close. Min/Max: tap = toggle, double-tap = force max.
 
 @Composable
 fun PcAppItemCard(
     app: PcInstalledApp, onLaunch: () -> Unit, onKill: (() -> Unit)?,
+    onForceKill: (() -> Unit)? = null,
     onToggleMinMax: (() -> Unit)?, onForceMaximize: (() -> Unit)?,
     isMinimized: Boolean = false,
     compact: Boolean = false
 ) {
     val haptic = LocalHapticFeedback.current
     var lastToggleTap by remember { mutableLongStateOf(0L) }
+    var lastKillTap by remember { mutableLongStateOf(0L) }
 
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
         Row(Modifier.fillMaxWidth().padding(if (compact) 8.dp else 12.dp),
@@ -226,9 +228,21 @@ fun PcAppItemCard(
                     Icon(Icons.Default.PlayArrow, null, Modifier.size(if (compact) 12.dp else 14.dp))
                     if (!compact) { Spacer(Modifier.width(2.dp)); Text("Run", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
                 }
-                // Kill button
+                // Kill button — single tap closes, double tap force-closes
                 if (onKill != null) {
-                    OutlinedButton(onClick = onKill, contentPadding = PaddingValues(horizontal = if (compact) 6.dp else 8.dp, vertical = 4.dp),
+                    OutlinedButton(
+                        onClick = {
+                            val now = System.currentTimeMillis()
+                            if (now - lastKillTap < 350L && onForceKill != null) {
+                                onForceKill()
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            } else {
+                                onKill()
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            lastKillTap = now
+                        },
+                        contentPadding = PaddingValues(horizontal = if (compact) 6.dp else 8.dp, vertical = 4.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                         shape = RoundedCornerShape(10.dp), modifier = Modifier.height(if (compact) 28.dp else 32.dp)) {
                         Text("Kill", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)

@@ -2,6 +2,7 @@ package com.example.ritik_2.windowscontrol.viewmodel
 
 import android.content.Context
 import androidx.lifecycle.*
+import com.example.ritik_2.data.model.AuthSession
 import com.example.ritik_2.windowscontrol.PcControlMain
 import com.example.ritik_2.windowscontrol.PcControlSettings
 import com.example.ritik_2.windowscontrol.data.*
@@ -46,6 +47,16 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
 
     // Fresh InputClient per call — always picks up latest settings
     private val input  get() = PcControlInputClient(PcControlMain.getSettings())
+
+    // ── Current user session ───────────────────────────────
+    private val _session = MutableStateFlow<AuthSession?>(null)
+    val session: StateFlow<AuthSession?> = _session.asStateFlow()
+
+    fun setSession(session: AuthSession?) { _session.value = session }
+
+    val currentUserId: String? get() = _session.value?.userId
+    val currentRole: String get() = _session.value?.role.orEmpty()
+    val currentPermissions: List<String> get() = _session.value?.permissions.orEmpty()
 
     // ── Plans ──────────────────────────────────────────────
     val plans: LiveData<List<PcPlan>> = repo.allPlans.asLiveData()
@@ -401,8 +412,6 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     fun minimizeApp(exePath: String) {
         viewModelScope.launch {
             try {
-                val result = api.executeQuickStep(PcStep("KILL_APP", value = "")) // placeholder
-                // Use dedicated endpoint via post
                 input.post("/app/minimize", mapOf("name" to exePath))
             } catch (e: Exception) {
                 android.util.Log.e("PcControl", "minimizeApp: ${e.message}")
@@ -416,6 +425,26 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                 input.post("/app/restore", mapOf("name" to exePath))
             } catch (e: Exception) {
                 android.util.Log.e("PcControl", "restoreApp: ${e.message}")
+            }
+        }
+    }
+
+    fun killApp(exePath: String) {
+        viewModelScope.launch {
+            try {
+                input.post("/app/kill", mapOf("name" to exePath, "force" to false))
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "killApp: ${e.message}")
+            }
+        }
+    }
+
+    fun forceKillApp(exePath: String) {
+        viewModelScope.launch {
+            try {
+                input.post("/app/kill", mapOf("name" to exePath, "force" to true))
+            } catch (e: Exception) {
+                android.util.Log.e("PcControl", "forceKillApp: ${e.message}")
             }
         }
     }

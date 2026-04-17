@@ -126,8 +126,6 @@ class MainActivity : ComponentActivity() {
         }
 
         when (id) {
-            1 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
-            2 -> Toast.makeText(this, "Coming soon", Toast.LENGTH_SHORT).show()
             3 -> startActivity(Intent(this, AdministratorPanelActivity::class.java))
             4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
             5 -> startActivity(Intent(this, MACNetActivity::class.java))
