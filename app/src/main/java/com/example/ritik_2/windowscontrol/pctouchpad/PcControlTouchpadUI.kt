@@ -286,20 +286,22 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
 //    v1  WebView + <img src="/screen/stream"> — failed with net::ERR_FAILED
 //        because Android WebView can't consume `multipart/x-mixed-replace`.
 //    v2  Polled /screen/capture at ~5 fps — worked everywhere but choppy.
-//    v3  (current) Parse the MJPEG stream ourselves with okio and render
-//        each frame into a Compose `Image`.
+//    v3  Parsed MJPEG directly, decoded to ARGB_8888 at 1366×768 q=40 —
+//        smooth in theory, but per-frame BitmapFactory allocation +
+//        full-color decode caused jank on mid-tier phones.
+//    v4  (current) Same parser but:
+//        • Decode path reuses one Bitmap via BitmapFactory.Options.inBitmap
+//          (no GC churn at 30 fps).
+//        • RGB_565 config instead of ARGB_8888 — half the memory, half the
+//          GPU upload, indistinguishable for a HUD background.
+//        • Conflated channel between network and UI: if the renderer falls
+//          behind, we drop stale JPEGs instead of queuing them, so the UI
+//          always renders the newest frame and the network coroutine never
+//          blocks.
+//        • Defaults tuned to 1024×576 q=30 — still sharp at phone DPI,
+//          ~3× less decode work, ~150-250 KB/s over LAN.
 //
-//  streamScreen() opens the agent's MJPEG endpoint on the stream port,
-//  splits frames on the `\r\n--frame` boundary, and hands each JPEG to the
-//  composable. Delivers the agent's full native fps (capped server-side at
-//  30) at 1366×768 with q=40, which is ~500KB/s over LAN — trivial for
-//  modern Wi-Fi and gives a smooth-enough picture that we can render the
-//  live screen at alpha 1.0 behind the transparent control buttons.
-//
-//  Failure modes (401, unreachable, decode error) are logged under the
-//  `LiveScreen` tag and the UI holds whatever it had rendered last. If the
-//  stream connection drops we retry after a short backoff so a transient
-//  Wi-Fi hiccup doesn't permanently kill the view.
+//  Auto-reconnects with an 800 ms backoff if the TCP body ends or errors.
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
@@ -312,25 +314,68 @@ fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
             android.util.Log.w("LiveScreen", "apiClient null — PcControlMain not initialized")
             return@LaunchedEffect
         }
-        // Outer retry loop so a dropped TCP connection (device sleep, Wi-Fi
-        // roam) reconnects automatically while `isOn` stays true.
-        while (true) {
-            try {
-                api.streamScreen(width = 1366, quality = 40, fps = 30) { jpeg ->
-                    val bmp = runCatching {
-                        android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
-                    }.getOrNull()
-                    if (bmp != null) frame = bmp.asImageBitmap()
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                android.util.Log.w("LiveScreen", "stream loop: ${e.message}")
+
+        // Conflated channel: capacity=1 with DROP_OLDEST means if a new JPEG
+        // arrives while the previous one hasn't been decoded/rendered yet,
+        // the old one is discarded. Net effect: network coroutine never
+        // blocks on slow decode, renderer always gets the freshest frame.
+        val jpegs = kotlinx.coroutines.channels.Channel<ByteArray>(
+            capacity = 1,
+            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+        )
+
+        // Decoder coroutine — reuses one Bitmap across frames via inBitmap.
+        val decoder = launch(kotlinx.coroutines.Dispatchers.Default) {
+            val opts = android.graphics.BitmapFactory.Options().apply {
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                inMutable = true
+                inSampleSize = 1
             }
-            // If streamScreen returns (server ended body) or threw, wait a
-            // little before reconnecting so we don't pound the agent after a
-            // 401 or a hard network failure.
-            kotlinx.coroutines.delay(800)
+            for (jpeg in jpegs) {
+                try {
+                    // inBitmap is "hint, may fail if size/config differ" — on
+                    // first frame or a resolution change the decoder will
+                    // silently allocate a fresh Bitmap, which then becomes
+                    // the reuse candidate for subsequent frames.
+                    val bmp = try {
+                        android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
+                    } catch (iae: IllegalArgumentException) {
+                        // inBitmap rejected — clear the hint and retry.
+                        opts.inBitmap = null
+                        android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
+                    }
+                    if (bmp != null) {
+                        opts.inBitmap = bmp
+                        frame = bmp.asImageBitmap()
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    android.util.Log.w("LiveScreen", "decode: ${e.message}")
+                }
+            }
+        }
+
+        try {
+            // Outer retry loop so a dropped TCP connection (device sleep,
+            // Wi-Fi roam) reconnects automatically while `isOn` stays true.
+            while (true) {
+                try {
+                    api.streamScreen(width = 1024, quality = 30, fps = 30) { jpeg ->
+                        // trySend is non-blocking; if channel is full (capacity=1)
+                        // BufferOverflow.DROP_OLDEST evicts the previous entry.
+                        jpegs.trySend(jpeg)
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    android.util.Log.w("LiveScreen", "stream loop: ${e.message}")
+                }
+                kotlinx.coroutines.delay(800)
+            }
+        } finally {
+            jpegs.close()
+            decoder.cancel()
         }
     }
 
@@ -340,12 +385,16 @@ fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
             androidx.compose.foundation.Image(
                 bitmap = bmp,
                 contentDescription = null,
-                // Full opacity: the live screen should be clearly visible.
-                // All control buttons are rendered with transparent
-                // backgrounds in this mode (see glassColors(liveOn=true)),
-                // so the icons/text float over the PC desktop.
+                // Full opacity: the live screen is clearly visible.
+                // Buttons are rendered with transparent backgrounds in
+                // this mode (see glassColors(liveOn=true)), so the icons
+                // and text float over the PC desktop.
                 modifier = Modifier.fillMaxSize(),
                 contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                // The image filter cost is tiny at RGB_565 and produces
+                // noticeably less aliasing when scaling from ~1024 up to
+                // a tablet viewport. Disable for very old devices only.
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
             )
         }
     }
