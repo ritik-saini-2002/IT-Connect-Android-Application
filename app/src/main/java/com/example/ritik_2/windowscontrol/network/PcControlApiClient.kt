@@ -188,11 +188,38 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
         if (!r.success) return PcNetworkResult(false, error = r.error)
         return try {
             val map = gson.fromJson(r.data, Map::class.java)
-            val img = map["image"] as? String
+            // Agent v10 returns `{"ok": true, "data": "<base64>", ...}`. The old
+            // code read `map["image"]`, which never existed → always "No image".
+            val img = (map["data"] as? String) ?: (map["image"] as? String)
                 ?: return PcNetworkResult(false, error = "No image")
             PcNetworkResult(true, img)
         } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
     }
+
+    /**
+     * Polls `/screen/capture` for a single JPEG frame and returns the decoded
+     * bytes. Used by the touchpad live-view: WebView's `<img>` loader can't
+     * consume `multipart/x-mixed-replace`, so we render stills via native
+     * BitmapFactory instead. Low-quality, downscaled by default so ~5fps
+     * polling stays well under 250KB/s on a normal Wi-Fi LAN.
+     *
+     * Returns null on network error, non-2xx, bad JSON, or blank payload —
+     * the caller should simply keep the previous frame and try again.
+     */
+    suspend fun fetchScreenFrame(quality: Int = 25, scale: Int = 4): ByteArray? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val req = baseRequest("/screen/capture?q=$quality&s=$scale").get().build()
+                httpFast.newCall(req).execute().use { r ->
+                    if (!r.isSuccessful) return@use null
+                    val body = r.body?.string() ?: return@use null
+                    val obj  = org.json.JSONObject(body)
+                    if (!obj.optBoolean("ok", false)) return@use null
+                    val b64  = obj.optString("data", "").ifBlank { return@use null }
+                    android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                }
+            }.getOrNull()
+        }
 
     suspend fun pollOpenWithDialog(): PcNetworkResult<PcOpenWithDialog?> {
         val r = get("/dialog/openwith/poll")

@@ -1,9 +1,6 @@
 package com.example.ritik_2.windowscontrol.pctouchpad
 
 import android.annotation.SuppressLint
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -23,6 +20,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,7 +33,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.windowscontrol.PcControlMain
 import com.example.ritik_2.windowscontrol.data.PcStep
@@ -260,101 +257,93 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  LIVE SCREEN — MJPEG viewer from the agent's stream port (default 5001).
+//  LIVE SCREEN — JPEG snapshot poller.
 //
-//  Pulls `settings.streamPort` (persisted in connectToSaved) instead of
-//  hard-coding 5001, URL-encodes the credential so master keys with special
-//  characters don't break the query, and sends the same credential as an
-//  `X-Secret-Key` header so agents that gate on header auth still see it.
+//  History: v1 tried WebView + <img src="/screen/stream"> (MJPEG). That
+//  fails on Android WebView because the image loader cannot consume
+//  `multipart/x-mixed-replace`; the first frame arrives, parsing bails with
+//  `net::ERR_FAILED`, and the viewer just reconnects forever behind a black
+//  background. See Logcat repro: `LiveScreen viewer err -1 net::ERR_FAILED
+//  on /screen/stream`.
 //
-//  The agent validates whichever key the user stored on this device — a
-//  plain secret key and a master key both hash through the same PBKDF2
-//  path server-side, so the viewer endpoint accepts either as long as the
-//  query/header actually reaches it. Prior bug: `$key` was interpolated
-//  raw, so a key containing `&`, `#`, `=`, `+`, or spaces (all legal in
-//  master keys) silently truncated the URL and the server returned 401 /
-//  blank. URLEncoder fixes that.
-//
-//  Error callbacks log to Logcat (tag `LiveScreen`) so auth failures are
-//  visible instead of silently rendering black behind the transparent
-//  buttons.
+//  v2 (current): poll `/screen/capture` ~5 fps through OkHttp, decode each
+//  JPEG with BitmapFactory, push into a Compose `Image`. Benefits:
+//    • Works on every Android version — no WebView quirks.
+//    • Reuses the existing authenticated OkHttp client (header + query key,
+//      cert pinning, LAN-only interceptor) → both secret-key and master-key
+//      devices stream identically.
+//    • Downscaled JPEGs (`s=4`, `q=20`) keep per-frame payloads under ~40KB,
+//      so 5 fps is ~200KB/s over LAN.
+//    • Failures (network, 401, decode) just skip a frame and the UI holds
+//      the previous bitmap instead of flashing to black.
 // ─────────────────────────────────────────────────────────────────────────────
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
-    val settings = remember { PcControlMain.getSettings() }
-    val viewerUrl = remember(settings) {
-        val host = settings.pcIpAddress.ifBlank {
-            // Fall back to baseUrl host if pcIpAddress is empty for any reason.
-            settings.baseUrl
-                .removePrefix("http://").removePrefix("https://")
-                .substringBefore(':').substringBefore('/')
-        }
-        val encodedKey = java.net.URLEncoder.encode(settings.secretKey.trim(), "UTF-8")
-        "http://$host:${settings.streamPort}/screen/viewer?key=$encodedKey&q=12&w=720&fps=8"
-    }
-    val extraHeaders = remember(settings) {
-        // Back-up auth channel for agents that gate the viewer on header creds
-        // (control API uses X-Secret-Key; keeping the same name here matches).
-        mapOf("X-Secret-Key" to settings.secretKey.trim())
-    }
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var frame by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var errorTag by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(isOn, viewerUrl) {
-        val wv = webViewRef ?: return@LaunchedEffect
-        if (isOn) wv.loadUrl(viewerUrl, extraHeaders)
-        else { wv.stopLoading(); wv.loadUrl("about:blank") }
+    LaunchedEffect(isOn) {
+        if (!isOn) {
+            frame = null
+            errorTag = null
+            return@LaunchedEffect
+        }
+        val api = PcControlMain.apiClient
+        if (api == null) {
+            errorTag = "not-connected"
+            android.util.Log.w("LiveScreen", "apiClient null — PcControlMain not initialized")
+            return@LaunchedEffect
+        }
+        errorTag = null
+        var consecutiveFails = 0
+        while (true) {
+            val jpeg = api.fetchScreenFrame(quality = 20, scale = 4)
+            if (jpeg != null && jpeg.isNotEmpty()) {
+                val bmp = try {
+                    android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+                } catch (e: Throwable) {
+                    android.util.Log.w("LiveScreen", "decode failed: ${e.message}")
+                    null
+                }
+                if (bmp != null) {
+                    frame = bmp.asImageBitmap()
+                    consecutiveFails = 0
+                    errorTag = null
+                }
+            } else {
+                consecutiveFails++
+                if (consecutiveFails == 1 || consecutiveFails % 10 == 0) {
+                    android.util.Log.w(
+                        "LiveScreen",
+                        "fetch failed (#$consecutiveFails) — check agent /screen/capture & key"
+                    )
+                }
+                if (consecutiveFails >= 3) errorTag = "fetch-failed"
+            }
+            // ~5 fps. Background visual doesn't need faster; cheap on LAN.
+            kotlinx.coroutines.delay(200)
+        }
     }
 
     Box(modifier = modifier) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize().alpha(if (isOn) 1f else 0f),
-            factory = { ctx ->
-                WebView(ctx).also { wv ->
-                    wv.webViewClient = object : WebViewClient() {
-                        // Let the WebView follow same-origin sub-requests
-                        // (the viewer HTML embeds the MJPEG <img>).
-                        override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = false
-                        override fun onReceivedError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            error: android.webkit.WebResourceError?,
-                        ) {
-                            android.util.Log.w(
-                                "LiveScreen",
-                                "viewer err ${error?.errorCode} ${error?.description} on ${request?.url}"
-                            )
-                        }
-                        override fun onReceivedHttpError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            errorResponse: android.webkit.WebResourceResponse?,
-                        ) {
-                            android.util.Log.w(
-                                "LiveScreen",
-                                "viewer http ${errorResponse?.statusCode} on ${request?.url}"
-                            )
-                        }
-                    }
-                    with(wv.settings) {
-                        javaScriptEnabled = true
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        builtInZoomControls = false
-                        displayZoomControls = false
-                        mediaPlaybackRequiresUserGesture = false
-                    }
-                    wv.setBackgroundColor(android.graphics.Color.BLACK)
-                    // Keep the stream subtle so the transparent buttons on top
-                    // stay legible. 0.28 is a comfortable middle — bump to
-                    // 0.40 if you want a more visible background.
-                    wv.alpha = 0.28f
-                    webViewRef = wv
-                    if (isOn) wv.loadUrl(viewerUrl, extraHeaders)
-                }
-            },
-            update = { wv -> webViewRef = wv }
-        )
+        val bmp = frame
+        if (isOn && bmp != null) {
+            androidx.compose.foundation.Image(
+                bitmap = bmp,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize().alpha(0.28f),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        }
+        // When enabled but no frame yet, a subtle shimmer tells the user the
+        // stream is trying; completely silent failures are bad UX.
+        if (isOn && bmp == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.08f))
+            )
+        }
     }
 }
 
