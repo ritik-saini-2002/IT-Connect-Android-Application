@@ -1,10 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <!--
-        Allow cleartext HTTP — the app connects to LAN services
-        (PocketBase, PC agent) via raw IP addresses, which Android's
-        domain-config cannot match. PrivateNetworkInterceptor blocks
-        cleartext to public IPs at the OkHttp layer instead.
+        Phase 2.2 — Cleartext HTTP traffic policy.
+
+        Platform constraint: Android network-security-config can match only
+        hostnames, not IP ranges. This app talks to agents and PocketBase
+        via raw IP addresses on the LAN, so a "LAN-only cleartext" rule
+        cannot be expressed declaratively here. Instead, PrivateNetworkInterceptor
+        (core/PrivateNetworkInterceptor.kt) enforces the LAN-only guarantee
+        at the OkHttp layer for *every* client in the app:
+
+          • di/AppModule provides the global/Hilt-injected OkHttpClient,
+            used by PocketBase and general networking.
+          • windowscontrol/network/PcBaseClient installs the same
+            interceptor on its http / httpFast / httpTransfer /
+            httpAgentUpdate instances (Phase 2.2 closed the gap).
+
+        Any cleartext request whose resolved host falls outside RFC 1918,
+        loopback, or link-local space raises IOException before the socket
+        opens — a public-IP downgrade cannot slip through.
+
+        HTTPS flows through unconditionally. When a saved device has an
+        attested cert fingerprint (Phase 2.1), OkHttp's CertificatePinner
+        then guards chain integrity for that host.
     -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>

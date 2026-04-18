@@ -3,6 +3,7 @@ package com.example.ritik_2.windowscontrol.network
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
+import com.example.ritik_2.core.PrivateNetworkInterceptor
 import com.example.ritik_2.windowscontrol.PcControlSettings
 import com.example.ritik_2.windowscontrol.data.*
 import kotlinx.coroutines.Dispatchers
@@ -33,12 +34,19 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
 
     protected val gson = Gson()
 
+    // Phase 2.2 — every OkHttp client in this file installs
+    // PrivateNetworkInterceptor so cleartext HTTP is locked to LAN
+    // (RFC1918, loopback, link-local). Public-IP HTTP raises IOException.
+    // HTTPS flows through unconditionally; pinning (Phase 2.1) then guards
+    // chain integrity. Order: pinning-gate → HTTPS or LAN-only HTTP.
+
     protected val http = OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
         .socketFactory(tunedSocketFactory())
+        .addInterceptor(PrivateNetworkInterceptor())
         .applyPinning(settings)
         .build()
 
@@ -47,6 +55,7 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .readTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
         .writeTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
+        .addInterceptor(PrivateNetworkInterceptor())
         .applyPinning(settings)
         .build()
 
@@ -57,6 +66,7 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .retryOnConnectionFailure(false)
         .socketFactory(tunedSocketFactory())
         .connectionPool(ConnectionPool(5, 60, TimeUnit.SECONDS))
+        .addInterceptor(PrivateNetworkInterceptor())
         .applyPinning(settings)
         .build()
 
@@ -293,6 +303,7 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
+            .addInterceptor(PrivateNetworkInterceptor())
             .applyPinning(settings)
             .build()
     }
