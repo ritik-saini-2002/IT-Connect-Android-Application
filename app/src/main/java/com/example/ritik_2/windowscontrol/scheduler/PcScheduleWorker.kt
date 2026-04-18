@@ -27,13 +27,26 @@ class PcScheduleWorker(
 ) : CoroutineWorker(ctx, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        val tickTs = System.currentTimeMillis()
+        Log.d(TAG, "tick @ ${java.util.Date(tickTs)}")
+
         if (!PcControlMain.isInitialized) PcControlMain.init(applicationContext)
-        val repo = PcControlMain.repository ?: return@withContext Result.success()
+        val repo = PcControlMain.repository ?: run {
+            Log.w(TAG, "repository null — PcControlMain not initialized")
+            return@withContext Result.success()
+        }
 
-        val due = runCatching { repo.dueSchedulesNow() }.getOrNull().orEmpty()
-        if (due.isEmpty()) return@withContext Result.success()
+        val due = runCatching { repo.dueSchedulesNow() }
+            .onFailure { Log.e(TAG, "dueSchedulesNow failed: ${it.message}", it) }
+            .getOrNull()
+            .orEmpty()
 
-        Log.d(TAG, "firing ${due.size} schedule(s)")
+        if (due.isEmpty()) {
+            Log.d(TAG, "no schedules due")
+            return@withContext Result.success()
+        }
+
+        Log.i(TAG, "firing ${due.size} schedule(s)")
         for (s in due) {
             val device = runCatching { repo.findDeviceById(s.deviceId) }.getOrNull()
             if (device == null) {
@@ -41,8 +54,18 @@ class PcScheduleWorker(
                 repo.markScheduleFired(s.id)
                 continue
             }
-            runCatching { dispatch(s, device, repo) }
-                .onFailure { Log.w(TAG, "schedule ${s.id} failed: ${it.message}") }
+            Log.i(TAG, "-> ${s.action} on '${device.label}' (schedule ${s.id})")
+            val outcome = runCatching { dispatch(s, device, repo) }
+            outcome.onFailure {
+                // Keep marking fired so a permanently-unreachable PC doesn't
+                // cause the same schedule to retry every 15 min all day. The
+                // user will see the missed fire in their device's connection
+                // log (agent-side) or via the absence of expected state.
+                Log.w(TAG, "schedule ${s.id} dispatch failed: ${it.message}")
+            }
+            outcome.onSuccess {
+                Log.d(TAG, "schedule ${s.id} dispatched OK")
+            }
             repo.markScheduleFired(s.id)
         }
         Result.success()

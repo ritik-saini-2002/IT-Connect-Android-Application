@@ -429,26 +429,62 @@ class PcControlRepository(
         scheduleDao?.setEnabled(id, enabled)
     }
 
-    /** Returns enabled schedules due in the current local ±3 min window whose
-     *  `lastFiredAt` is older than 90 s, keyed by today's weekday bit. */
+    /**
+     * Returns enabled schedules whose scheduled wall-clock time has arrived
+     * and is within the catch-up window, haven't already fired today.
+     *
+     * Tuning rationale:
+     *  - [PRE_FIRE_TOLERANCE_MS] (90 s) — if WorkManager happens to tick
+     *    slightly early relative to the schedule, still fire. Matches the
+     *    previous dedupe constant.
+     *  - [CATCH_UP_MS] (30 min) — if Doze or App-Standby delayed the
+     *    worker past the scheduled time, we still fire within this
+     *    grace window. Chosen to safely cover the 15-minute WorkManager
+     *    periodic floor + jitter. Longer delays are considered a missed
+     *    event and skipped until the next day.
+     *  - Idempotency keyed on "today's scheduled slot" wall-clock ms
+     *    rather than a 90 s dedupe — overlapping ticks can't double-fire,
+     *    and the check is robust to the worker running several times
+     *    during the catch-up window.
+     *
+     * Why the previous ±3 min window was buggy:
+     *  15-min periodic interval with a 6-min window = 60% blind minutes.
+     *  Any schedule set to `XX:05` would be missed if the worker ticked
+     *  on 15-minute boundaries. Users observed schedules silently
+     *  never firing.
+     */
     suspend fun dueSchedulesNow(
         cal: java.util.Calendar = java.util.Calendar.getInstance()
     ): List<PcSchedule> {
-        val all   = scheduleDao?.getEnabledSync() ?: return emptyList()
-        val now   = cal.timeInMillis
-        val hour  = cal.get(java.util.Calendar.HOUR_OF_DAY)
-        val min   = cal.get(java.util.Calendar.MINUTE)
+        val all    = scheduleDao?.getEnabledSync() ?: return emptyList()
+        val now    = cal.timeInMillis
         val dowBit = 1 shl (cal.get(java.util.Calendar.DAY_OF_WEEK) - 1)  // Sun=1 → bit0
-        val nowMinutes = hour * 60 + min
+
         return all.filter { s ->
             if ((s.daysMask and dowBit) == 0) return@filter false
-            if (now - s.lastFiredAt < 90_000L) return@filter false
-            val schedMinutes = s.hour * 60 + s.minute
-            kotlin.math.abs(nowMinutes - schedMinutes) <= 3
+
+            // Compute today's scheduled wall-clock moment.
+            val schedCal = (cal.clone() as java.util.Calendar).apply {
+                set(java.util.Calendar.HOUR_OF_DAY, s.hour)
+                set(java.util.Calendar.MINUTE, s.minute)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val schedTime = schedCal.timeInMillis
+            val delta = now - schedTime  // positive ⇒ past scheduled time
+
+            if (delta < -PRE_FIRE_TOLERANCE_MS) return@filter false   // too early
+            if (delta >  CATCH_UP_MS)           return@filter false   // too late
+            s.lastFiredAt < schedTime                                  // already fired today?
         }
     }
 
     suspend fun markScheduleFired(id: String, ts: Long = System.currentTimeMillis()) {
         scheduleDao?.markFired(id, ts)
+    }
+
+    companion object {
+        private const val PRE_FIRE_TOLERANCE_MS = 90_000L             // 1.5 min
+        private const val CATCH_UP_MS           = 30 * 60_000L        // 30 min
     }
 }
