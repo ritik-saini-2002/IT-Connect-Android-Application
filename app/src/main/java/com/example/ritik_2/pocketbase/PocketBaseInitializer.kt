@@ -15,9 +15,9 @@ object PocketBaseInitializer {
     private const val TAG = "PBInitializer"
 
     private val http = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(1330, TimeUnit.SECONDS)
+        .readTimeout(1330, TimeUnit.SECONDS)
+        .writeTimeout(1330, TimeUnit.SECONDS)
         .build()
 
     suspend fun initialize() {

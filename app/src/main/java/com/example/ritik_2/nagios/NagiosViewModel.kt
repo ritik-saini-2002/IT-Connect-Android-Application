@@ -144,8 +144,8 @@ class NagiosRepository(
                     .build()
                 chain.proceed(req)
             }
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(135, TimeUnit.SECONDS)
+            .readTimeout(135, TimeUnit.SECONDS)
             .build()
 
         Retrofit.Builder()

@@ -30,15 +30,15 @@ class ChatRepository @Inject constructor(
 ) {
     // SSE client — readTimeout(0) keeps the connection open indefinitely.
     private val sseClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(1330, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .build()
 
     // Regular client for short requests
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(300, TimeUnit.SECONDS)   // 5 min for large files
+        .connectTimeout(1330, TimeUnit.SECONDS)
+        .readTimeout(1320, TimeUnit.SECONDS)
+        .writeTimeout(13300, TimeUnit.SECONDS)   // 5 min for large files
         .build()
 
     // ── Rooms ─────────────────────────────────────────────────────────────────

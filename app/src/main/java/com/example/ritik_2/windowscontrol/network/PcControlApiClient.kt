@@ -56,8 +56,8 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
 
     protected val http = OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(135, TimeUnit.SECONDS)
+        .writeTimeout(135, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
         .socketFactory(tunedSocketFactory())
         .dispatcher(opsDispatcher)
@@ -429,7 +429,7 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
      */
     private val httpAgentUpdate by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(130, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)

@@ -34,7 +34,7 @@ import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.login.LoginActivity
-import com.example.ritik_2.macnet.MACNetActivity
+//import com.example.ritik_2.macnet.MACNetActivity
 import com.example.ritik_2.nagios.ConnectActivity as NagiosConnectActivity
 import com.example.ritik_2.notifications.NotificationActivity
 import com.example.ritik_2.profile.ProfileActivity
@@ -190,7 +190,7 @@ class MainActivity : FragmentActivity() {
         when (id) {
             3 -> startActivity(Intent(this, AdministratorPanelActivity::class.java))
             4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
-            5 -> startActivity(Intent(this, MACNetActivity::class.java))
+//            5 -> startActivity(Intent(this, MACNetActivity::class.java))
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
             7 -> startActivity(Intent(this, ChatActivity::class.java))
             8 -> {

@@ -143,8 +143,8 @@ fun ConnectScreen(
         Thread {
             try {
                 val client = OkHttpClient.Builder()
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(10, TimeUnit.SECONDS)
+                    .connectTimeout(130, TimeUnit.SECONDS)
+                    .readTimeout(130, TimeUnit.SECONDS)
                     .build()
                 val testUrl = url.trimEnd('/') + "/nagios/cgi-bin/statusjson.cgi?query=hostcount"
                 val request = Request.Builder()

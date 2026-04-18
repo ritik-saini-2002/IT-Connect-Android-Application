@@ -37,8 +37,8 @@ object AppModule {
             .addInterceptor(PrivateNetworkInterceptor())
             // Keep connect/read short so a single unreachable endpoint cannot
             // cumulatively burn 60s+ on the login path (sequential probes).
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(130, TimeUnit.SECONDS)
+            .readTimeout(130, TimeUnit.SECONDS)
             // Writes (uploads) keep a generous timeout for slow LANs.
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()

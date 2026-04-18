@@ -36,7 +36,7 @@ class ChatNotificationService : Service() {
     private var currentCall: Call? = null
 
     private val sseClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(1330, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .build()
 

@@ -35,8 +35,8 @@ class SplashActivity : ComponentActivity() {
 
     // Own lightweight client — short timeouts so splash never hangs
     private val probeClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(3, TimeUnit.SECONDS)
+        .connectTimeout(133, TimeUnit.SECONDS)
+        .readTimeout(133, TimeUnit.SECONDS)
         .build()
 
     override fun onCreate(savedInstanceState: Bundle?) {

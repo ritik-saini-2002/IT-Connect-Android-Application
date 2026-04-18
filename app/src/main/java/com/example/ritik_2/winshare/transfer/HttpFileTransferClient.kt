@@ -54,7 +54,7 @@ class HttpFileTransferClient(
     // • read/write timeout: 0 = disabled (necessary for files > a few hundred MB)
     // • default connection pool: 5 connections, 5 min keep-alive
     private val http = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(1330, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(0, TimeUnit.SECONDS)
         .build()
