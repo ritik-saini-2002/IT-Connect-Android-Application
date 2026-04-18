@@ -3,7 +3,6 @@ package com.example.ritik_2.main
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.*
@@ -11,13 +10,17 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.administrator.AdministratorPanelActivity
@@ -26,6 +29,7 @@ import com.example.ritik_2.auth.SessionStatus
 import com.example.ritik_2.chat.ChatActivity
 import com.example.ritik_2.chat.ChatNotificationService
 import com.example.ritik_2.contact.ContactActivity
+import com.example.ritik_2.core.AppLaunchGate
 import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.SyncManager
@@ -42,8 +46,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Extends [FragmentActivity] (instead of bare ComponentActivity) so
+ * [AppLaunchGate] can host BiometricPrompt — that API requires a
+ * FragmentActivity to stage its internal fragment.
+ */
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
@@ -70,6 +79,34 @@ class MainActivity : ComponentActivity() {
                 var bannerReady by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { delay(5_000); bannerReady = true }
 
+                // ── App-launch biometric gate (Phase 2) ────────────────
+                // Honours the "unlock every time the app is opened" contract:
+                // the flag lives in the process-scoped LaunchGateState, so a
+                // fresh cold start demands a new unlock, but returning from
+                // child activities (Chat, PcControl, ...) reuses the unlock
+                // because the process stayed alive.
+                var gateUnlocked by remember { mutableStateOf(LaunchGateState.unlocked) }
+                var gateError    by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(Unit) {
+                    if (gateUnlocked) return@LaunchedEffect
+                    AppLaunchGate.prompt(
+                        activity = this@MainActivity,
+                        onAllow  = {
+                            LaunchGateState.unlocked = true
+                            gateUnlocked = true
+                            gateError    = null
+                        },
+                        onDeny   = { msg -> gateError = msg ?: "Authentication cancelled" },
+                        onUnavailable = {
+                            // No screen lock configured — let them in; session
+                            // auth on the server still protects sensitive calls.
+                            LaunchGateState.unlocked = true
+                            gateUnlocked = true
+                            gateError    = "Device has no screen lock — launch gate skipped."
+                        },
+                    )
+                }
+
                 Box(Modifier.fillMaxSize()) {
                     MainScreen(
                         uiState                   = uiState,
@@ -87,6 +124,31 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.align(Alignment.TopCenter)
                     ) {
                         OfflineBanner(pendingCount = pendingCount)
+                    }
+
+                    // Lock overlay — covers everything until the user authenticates.
+                    if (!gateUnlocked) {
+                        LaunchLockOverlay(
+                            errorText = gateError,
+                            onRetry   = {
+                                gateError = null
+                                AppLaunchGate.prompt(
+                                    activity = this@MainActivity,
+                                    onAllow  = {
+                                        LaunchGateState.unlocked = true
+                                        gateUnlocked = true
+                                        gateError    = null
+                                    },
+                                    onDeny   = { msg -> gateError = msg ?: "Authentication cancelled" },
+                                    onUnavailable = {
+                                        LaunchGateState.unlocked = true
+                                        gateUnlocked = true
+                                        gateError    = "Device has no screen lock — launch gate skipped."
+                                    },
+                                )
+                            },
+                            onLogout = { handleLogout() },
+                        )
                     }
                 }
             }
@@ -158,6 +220,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             ChatNotificationService.stop(this@MainActivity)
             authRepository.logout()
+            // Force re-prompt on next login.
+            LaunchGateState.unlocked = false
             startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             })
@@ -179,11 +243,98 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             ChatNotificationService.stop(this@MainActivity)
             authRepository.logout()
+            LaunchGateState.unlocked = false
             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
             startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             })
             finish()
+        }
+    }
+}
+
+/**
+ * Process-scoped state for the app-launch biometric gate. Cleared when the
+ * process dies (Android kills the app) so the next cold launch forces a
+ * fresh unlock, but preserved while the user dips into child activities so
+ * they aren't re-prompted on every return.
+ */
+private object LaunchGateState {
+    @Volatile var unlocked: Boolean = false
+}
+
+/**
+ * Full-bleed lock overlay shown until [AppLaunchGate] unlocks. Offers a
+ * retry button and a logout exit; nothing of the underlying UI is
+ * disclosed while locked.
+ */
+@Composable
+private fun LaunchLockOverlay(
+    errorText: String?,
+    onRetry  : () -> Unit,
+    onLogout : () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color    = cs.background,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            verticalArrangement  = Arrangement.Center,
+            horizontalAlignment  = Alignment.CenterHorizontally,
+        ) {
+            Surface(
+                color = cs.surfaceVariant,
+                shape = RoundedCornerShape(16.dp),
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        Icons.Default.Fingerprint,
+                        contentDescription = null,
+                        tint = cs.primary,
+                        modifier = Modifier.size(44.dp),
+                    )
+                    Text(
+                        "IT Connect is locked",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "Authenticate with your fingerprint, face or device PIN to continue.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSurfaceVariant,
+                    )
+                    if (errorText != null) Text(
+                        errorText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = cs.error,
+                    )
+                    Button(
+                        onClick  = onRetry,
+                        shape    = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.LockOpen, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Authenticate", fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(
+                        onClick  = onLogout,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Sign out", color = cs.error)
+                    }
+                }
+            }
         }
     }
 }
