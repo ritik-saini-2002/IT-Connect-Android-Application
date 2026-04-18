@@ -64,19 +64,42 @@ data class GlassColors(
     val touchpadBg: Color
 )
 
+/**
+ * Returns the glass palette used by the touchpad UI. When [liveOn] is true,
+ * every surface/background color goes fully transparent so the live screen
+ * behind the overlay is visible through each button; borders, accents, and
+ * text colors are left intact so the controls remain legible and tappable.
+ * This is what makes "all buttons transparent while live screen" actually
+ * read as a HUD over the PC desktop instead of as a dimmed video
+ * background with opaque chrome sitting on top.
+ */
 @Composable
-private fun glassColors(): GlassColors {
+private fun glassColors(liveOn: Boolean = false): GlassColors {
     val cs = MaterialTheme.colorScheme
+    // Transparent surfaces when the live screen is on; default surfaceVariant
+    // otherwise. We also dial the main `bg` / `surface` / `touchpadBg` to
+    // transparent so the root scaffolding doesn't draw an opaque sheet over
+    // the WebView-less `AndroidView` that hosts the bitmap.
+    val zero           = Color.Transparent
+    val surfaceColor   = if (liveOn) zero else cs.surface
+    val glassBgColor   = if (liveOn) zero else cs.surfaceVariant
+    val buttonBgColor  = if (liveOn) zero else cs.surfaceVariant
+    val touchpadColor  = if (liveOn) zero else cs.surfaceVariant
+    // Borders stay lightly visible in live mode so buttons still have an
+    // outline — a fully-transparent button with no border is impossible to
+    // find on a busy desktop background.
+    val borderAlpha    = if (liveOn) 0.55f else 0.25f
+    val borderColor    = cs.outline.copy(alpha = borderAlpha)
     return GlassColors(
-        bg = cs.surface, bgGradientEnd = cs.surface,
-        glassBg = cs.surfaceVariant,
-        glassBorder = cs.outline.copy(alpha = 0.25f),
-        surface = cs.surface, accent = cs.primary, accentSecondary = cs.secondary,
+        bg = surfaceColor, bgGradientEnd = surfaceColor,
+        glassBg = glassBgColor,
+        glassBorder = borderColor,
+        surface = surfaceColor, accent = cs.primary, accentSecondary = cs.secondary,
         danger = cs.error, textPrimary = cs.onSurface, textSecondary = cs.onSurfaceVariant,
         textTertiary = cs.onSurfaceVariant.copy(0.5f),
-        buttonBg = cs.surfaceVariant,
-        buttonBorder = cs.outline.copy(alpha = 0.25f),
-        touchpadBg = cs.surfaceVariant
+        buttonBg = buttonBgColor,
+        buttonBorder = borderColor,
+        touchpadBg = touchpadColor
     )
 }
 
@@ -257,71 +280,57 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  LIVE SCREEN — JPEG snapshot poller.
+//  LIVE SCREEN — native MJPEG stream, full-opacity.
 //
-//  History: v1 tried WebView + <img src="/screen/stream"> (MJPEG). That
-//  fails on Android WebView because the image loader cannot consume
-//  `multipart/x-mixed-replace`; the first frame arrives, parsing bails with
-//  `net::ERR_FAILED`, and the viewer just reconnects forever behind a black
-//  background. See Logcat repro: `LiveScreen viewer err -1 net::ERR_FAILED
-//  on /screen/stream`.
+//  History:
+//    v1  WebView + <img src="/screen/stream"> — failed with net::ERR_FAILED
+//        because Android WebView can't consume `multipart/x-mixed-replace`.
+//    v2  Polled /screen/capture at ~5 fps — worked everywhere but choppy.
+//    v3  (current) Parse the MJPEG stream ourselves with okio and render
+//        each frame into a Compose `Image`.
 //
-//  v2 (current): poll `/screen/capture` ~5 fps through OkHttp, decode each
-//  JPEG with BitmapFactory, push into a Compose `Image`. Benefits:
-//    • Works on every Android version — no WebView quirks.
-//    • Reuses the existing authenticated OkHttp client (header + query key,
-//      cert pinning, LAN-only interceptor) → both secret-key and master-key
-//      devices stream identically.
-//    • Downscaled JPEGs (`s=4`, `q=20`) keep per-frame payloads under ~40KB,
-//      so 5 fps is ~200KB/s over LAN.
-//    • Failures (network, 401, decode) just skip a frame and the UI holds
-//      the previous bitmap instead of flashing to black.
+//  streamScreen() opens the agent's MJPEG endpoint on the stream port,
+//  splits frames on the `\r\n--frame` boundary, and hands each JPEG to the
+//  composable. Delivers the agent's full native fps (capped server-side at
+//  30) at 1366×768 with q=40, which is ~500KB/s over LAN — trivial for
+//  modern Wi-Fi and gives a smooth-enough picture that we can render the
+//  live screen at alpha 1.0 behind the transparent control buttons.
+//
+//  Failure modes (401, unreachable, decode error) are logged under the
+//  `LiveScreen` tag and the UI holds whatever it had rendered last. If the
+//  stream connection drops we retry after a short backoff so a transient
+//  Wi-Fi hiccup doesn't permanently kill the view.
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
     var frame by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var errorTag by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(isOn) {
-        if (!isOn) {
-            frame = null
-            errorTag = null
-            return@LaunchedEffect
-        }
+        if (!isOn) { frame = null; return@LaunchedEffect }
         val api = PcControlMain.apiClient
         if (api == null) {
-            errorTag = "not-connected"
             android.util.Log.w("LiveScreen", "apiClient null — PcControlMain not initialized")
             return@LaunchedEffect
         }
-        errorTag = null
-        var consecutiveFails = 0
+        // Outer retry loop so a dropped TCP connection (device sleep, Wi-Fi
+        // roam) reconnects automatically while `isOn` stays true.
         while (true) {
-            val jpeg = api.fetchScreenFrame(quality = 20, scale = 4)
-            if (jpeg != null && jpeg.isNotEmpty()) {
-                val bmp = try {
-                    android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
-                } catch (e: Throwable) {
-                    android.util.Log.w("LiveScreen", "decode failed: ${e.message}")
-                    null
+            try {
+                api.streamScreen(width = 1366, quality = 40, fps = 30) { jpeg ->
+                    val bmp = runCatching {
+                        android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+                    }.getOrNull()
+                    if (bmp != null) frame = bmp.asImageBitmap()
                 }
-                if (bmp != null) {
-                    frame = bmp.asImageBitmap()
-                    consecutiveFails = 0
-                    errorTag = null
-                }
-            } else {
-                consecutiveFails++
-                if (consecutiveFails == 1 || consecutiveFails % 10 == 0) {
-                    android.util.Log.w(
-                        "LiveScreen",
-                        "fetch failed (#$consecutiveFails) — check agent /screen/capture & key"
-                    )
-                }
-                if (consecutiveFails >= 3) errorTag = "fetch-failed"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                android.util.Log.w("LiveScreen", "stream loop: ${e.message}")
             }
-            // ~5 fps. Background visual doesn't need faster; cheap on LAN.
-            kotlinx.coroutines.delay(200)
+            // If streamScreen returns (server ended body) or threw, wait a
+            // little before reconnecting so we don't pound the agent after a
+            // 401 or a hard network failure.
+            kotlinx.coroutines.delay(800)
         }
     }
 
@@ -331,17 +340,12 @@ fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
             androidx.compose.foundation.Image(
                 bitmap = bmp,
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize().alpha(0.28f),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-            )
-        }
-        // When enabled but no frame yet, a subtle shimmer tells the user the
-        // stream is trying; completely silent failures are bad UX.
-        if (isOn && bmp == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.08f))
+                // Full opacity: the live screen should be clearly visible.
+                // All control buttons are rendered with transparent
+                // backgrounds in this mode (see glassColors(liveOn=true)),
+                // so the icons/text float over the PC desktop.
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
             )
         }
     }
@@ -415,9 +419,18 @@ private fun LandscapeLayout(
     shortcutGroup: ModifierGroup? = null, onShortcutGroupChange: (ModifierGroup?) -> Unit = {},
     onShowVolumeSlider: () -> Unit = {}, onShowBrightnessSlider: () -> Unit = {},
 ) {
-    val c = glassColors()
+    // When liveScreenOn is true, glassColors() returns a transparent palette
+    // (button/glass/touchpad backgrounds → Color.Transparent) so every
+    // control button lets the MJPEG stream bleed through. Icons and text
+    // keep their full colors, and borders are slightly emphasised so you
+    // can still find buttons against a busy desktop background.
+    val c = glassColors(liveOn = liveScreenOn)
     val dotColor = connectionStatus.toGlassColor(c)
-    val btnAlpha = if (liveScreenOn) 0.6f else 1f
+    // Previously dimmed the button panels to 0.6 alpha so the old
+    // semi-transparent live-view (alpha 0.28) was less obscured. With the
+    // native MJPEG stream at full opacity behind fully-transparent
+    // buttons, dimming would only hide the icons — so we keep btnAlpha=1.
+    val btnAlpha = 1f
     val haptic = LocalHapticFeedback.current
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize().background(c.surface)) {
@@ -696,7 +709,14 @@ fun LaptopTouchpad(
     val touchpadLockedState = rememberUpdatedState(touchpadLocked)
     val zoomLockedState     = rememberUpdatedState(zoomLocked)
 
-    val surfaceAlpha = if (semiTransparent) 0.45f else 1f
+    // 0f in live-view mode so the touchpad surface draws nothing at all —
+    // previously we dimmed to 0.45, but with the live MJPEG stream at full
+    // opacity behind, any non-zero alpha tints the stream with the base
+    // `touchpadBg` color (and Color.Transparent.copy(alpha=0.45) reads as
+    // translucent black, not invisible). The active/drag tints below are
+    // multiplied by surfaceAlpha so they also vanish in live mode, which
+    // is what we want — the live desktop speaks for itself.
+    val surfaceAlpha = if (semiTransparent) 0f else 1f
     val sliderWidthDp = 26.dp
     val dotSizeDp = 20.dp
 

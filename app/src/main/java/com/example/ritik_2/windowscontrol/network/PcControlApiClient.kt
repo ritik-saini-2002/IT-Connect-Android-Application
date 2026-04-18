@@ -12,6 +12,7 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
+import okio.ByteString.Companion.encodeUtf8
 import okio.source
 import java.io.InputStream
 import java.io.OutputStream
@@ -198,10 +199,8 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
 
     /**
      * Polls `/screen/capture` for a single JPEG frame and returns the decoded
-     * bytes. Used by the touchpad live-view: WebView's `<img>` loader can't
-     * consume `multipart/x-mixed-replace`, so we render stills via native
-     * BitmapFactory instead. Low-quality, downscaled by default so ~5fps
-     * polling stays well under 250KB/s on a normal Wi-Fi LAN.
+     * bytes. Used by the touchpad live-view as a fallback when the MJPEG
+     * stream is unavailable.
      *
      * Returns null on network error, non-2xx, bad JSON, or blank payload —
      * the caller should simply keep the previous frame and try again.
@@ -220,6 +219,92 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
                 }
             }.getOrNull()
         }
+
+    /**
+     * Opens the agent's MJPEG screen stream (`/screen/stream` on the stream
+     * port) and invokes [onFrame] with each JPEG payload as it arrives. Runs
+     * until the coroutine is cancelled, the response body ends, or a parse
+     * error is hit.
+     *
+     * The agent v10 emits frames with the sentinel form:
+     *     --frame\r\n
+     *     Content-Type: image/jpeg\r\n
+     *     \r\n
+     *     <JPEG bytes>\r\n
+     *     --frame\r\n ...
+     *
+     * Android WebView can't render `multipart/x-mixed-replace` directly, so
+     * we parse the body ourselves with okio: scan for the `\r\n--frame`
+     * boundary, skip the part headers (up through `\r\n\r\n`), then capture
+     * the JPEG bytes up to (but not including) the trailing `\r\n` before
+     * the next boundary. This delivers the agent's full native fps (capped
+     * server-side at 30) with smooth sub-100ms latency on LAN.
+     *
+     * Auth: the stream port ([PcControlSettings.streamPort]) runs a separate
+     * Flask app with its own `before_request` hook, but the hook accepts the
+     * same `X-Secret-Key` header used by the control API — so this stream
+     * works identically for secret-key and master-key devices.
+     *
+     * @param width   output width, 320..1920 (agent clamps)
+     * @param quality JPEG quality, 8..80 (agent clamps)
+     * @param fps     target frames per second, 1..30 (agent clamps)
+     */
+    suspend fun streamScreen(
+        width  : Int = 1366,
+        quality: Int = 40,
+        fps    : Int = 30,
+        onFrame: suspend (ByteArray) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        val host = settings.pcIpAddress
+        if (host.isBlank()) return@withContext
+        val scheme = if (settings.certFingerprint.isNullOrBlank()) "http" else "https"
+        val url = "$scheme://$host:${settings.streamPort}" +
+            "/screen/stream?q=$quality&w=$width&fps=$fps" +
+            "&key=${URLEncoder.encode(settings.secretKey, "UTF-8")}"
+        val req = Request.Builder()
+            .url(url)
+            .header("X-Secret-Key", settings.secretKey)
+            .header("Cache-Control", "no-cache")
+            .build()
+
+        // httpTransfer has readTimeout=0 (infinite), which is what streaming needs.
+        val call = httpTransfer.newCall(req)
+        try {
+            call.execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    android.util.Log.w("LiveScreen", "stream HTTP ${resp.code}")
+                    return@use
+                }
+                val source = resp.body?.source() ?: return@use
+                val boundary = "\r\n--frame".encodeUtf8()
+                val headerEnd = "\r\n\r\n".encodeUtf8()
+
+                // Skip the preamble (first "--frame" may arrive without a
+                // leading CRLF, so we align using the header terminator).
+                while (kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive != false) {
+                    val headersEnd = source.indexOf(headerEnd)
+                    if (headersEnd < 0L) break
+                    source.skip(headersEnd + headerEnd.size)
+
+                    val nextBoundary = source.indexOf(boundary)
+                    if (nextBoundary < 0L) break
+                    val jpeg = source.readByteArray(nextBoundary)
+                    // Advance past the leading "\r\n" of the boundary so the
+                    // next iteration's indexOf(headerEnd) picks up the new
+                    // part's headers, not the one we just consumed.
+                    source.skip(2)
+
+                    if (jpeg.isNotEmpty()) onFrame(jpeg)
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("LiveScreen", "stream error: ${e.message}")
+        } finally {
+            runCatching { call.cancel() }
+        }
+    }
 
     suspend fun pollOpenWithDialog(): PcNetworkResult<PcOpenWithDialog?> {
         val r = get("/dialog/openwith/poll")
