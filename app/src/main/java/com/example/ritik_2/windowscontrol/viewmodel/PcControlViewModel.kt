@@ -851,10 +851,41 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
     //  INPUT — Touchpad / Keyboard
     // ─────────────────────────────────────────────────────
 
+    // ── Mouse-delta coalescer ────────────────────────────────────
+    // A touch screen generates finger samples at 60–120 Hz. Naïvely firing
+    // a fresh HTTP POST per sample saturates OkHttp's per-host dispatcher
+    // (5 concurrent) and each subsequent sample queues behind the last —
+    // especially bad when the live-view MJPEG stream is also consuming
+    // Wi-Fi bandwidth. Visible symptom: cursor lags behind the finger by
+    // hundreds of milliseconds.
+    //
+    // Instead we keep at most ONE move request in flight. New deltas just
+    // accumulate into [pendingDx]/[pendingDy] while a POST is outstanding,
+    // and the next POST flushes whatever has been accrued since. End result:
+    // finger motion is translated to cursor motion at network RTT, not
+    // RTT × (samples in burst).
+    @Volatile private var pendingDx: Float = 0f
+    @Volatile private var pendingDy: Float = 0f
+    private val mouseFlushLock = Any()
+    private var mouseFlushJob: Job? = null
+
     fun sendMouseDelta(dx: Float, dy: Float) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try { input.moveMouse(dx, dy) }
-            catch (e: Exception) { android.util.Log.e("PcControl","sendMouseDelta: ${e.message}") }
+        synchronized(mouseFlushLock) {
+            pendingDx += dx
+            pendingDy += dy
+            if (mouseFlushJob?.isActive == true) return@synchronized
+            mouseFlushJob = viewModelScope.launch(Dispatchers.IO) {
+                while (true) {
+                    val (sendDx, sendDy) = synchronized(mouseFlushLock) {
+                        val sx = pendingDx; val sy = pendingDy
+                        pendingDx = 0f; pendingDy = 0f
+                        if (sx == 0f && sy == 0f) return@launch
+                        sx to sy
+                    }
+                    try { input.moveMouse(sendDx, sendDy) }
+                    catch (e: Exception) { android.util.Log.e("PcControl","sendMouseDelta: ${e.message}") }
+                }
+            }
         }
     }
 
