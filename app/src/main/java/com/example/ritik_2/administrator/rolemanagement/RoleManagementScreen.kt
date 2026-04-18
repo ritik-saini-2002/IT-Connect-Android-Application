@@ -62,8 +62,9 @@ private val PERMISSION_CATEGORIES = linkedMapOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RoleManagementScreen(
-    viewModel    : RoleManagementViewModel,
-    onRoleChanged: (String, String, String) -> Unit
+    viewModel             : RoleManagementViewModel,
+    onRoleChanged         : (String, String, String) -> Unit,
+    canManagePermissions  : Boolean = false
 ) {
     val state        by viewModel.state.collectAsState()
     val snack         = remember { SnackbarHostState() }
@@ -211,10 +212,13 @@ fun RoleManagementScreen(
                             isLoading = state.isLoading,
                             onClick   = { role -> level = RoleLevel.Users(role) },
                             onDelete  = { role -> deleteTarget = role },
-                            onEditPerms = { role ->
+                            // Pass through ONLY when the current admin can manage
+                            // permissions (System_Administrator-only) so the
+                            // edit-perms button is hidden for everyone else.
+                            onEditPerms = if (canManagePermissions) ({ role ->
                                 viewModel.startEditingPermissions(role)
                                 level = RoleLevel.Perms(role)
-                            }
+                            }) else null
                         )
                     is RoleLevel.Users ->
                         UsersInRoleView(
@@ -336,7 +340,8 @@ private fun RolesListView(
     isLoading  : Boolean,
     onClick    : (RoleInfo) -> Unit,
     onDelete   : (RoleInfo) -> Unit,
-    onEditPerms: (RoleInfo) -> Unit
+    /** Null = caller is not allowed to grant/revoke; the edit-perms icon hides. */
+    onEditPerms: ((RoleInfo) -> Unit)?
 ) {
     if (isLoading && roles.isEmpty()) {
         Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
@@ -369,7 +374,8 @@ private fun RolesListView(
                 role        = role,
                 onClick     = { onClick(role) },
                 onDelete    = { onDelete(role) },
-                onEditPerms = { onEditPerms(role) }
+                // null → RoleCard hides the edit-perms icon entirely.
+                onEditPerms = onEditPerms?.let { handler -> { handler(role) } }
             )
         }
         item { Spacer(Modifier.height(16.dp)) }
@@ -381,7 +387,8 @@ private fun RoleCard(
     role       : RoleInfo,
     onClick    : () -> Unit,
     onDelete   : () -> Unit,
-    onEditPerms: () -> Unit
+    /** Null = current admin lacks permission to grant/revoke; icon is omitted. */
+    onEditPerms: (() -> Unit)?
 ) {
     Card(
         Modifier.fillMaxWidth().clickable { onClick() },
@@ -417,11 +424,14 @@ private fun RoleCard(
                         Color(0xFF7B1FA2))
                 }
             }
-            // Edit permissions button
-            IconButton(onClick = onEditPerms) {
-                Icon(Icons.Default.Security, null,
-                    tint     = Color(0xFF7B1FA2).copy(0.8f),
-                    modifier = Modifier.size(20.dp))
+            // Edit permissions button — hidden when the current admin lacks the
+            // grant_revoke_any_permission privilege (i.e. is not System_Administrator).
+            if (onEditPerms != null) {
+                IconButton(onClick = onEditPerms) {
+                    Icon(Icons.Default.Security, null,
+                        tint     = Color(0xFF7B1FA2).copy(0.8f),
+                        modifier = Modifier.size(20.dp))
+                }
             }
             IconButton(
                 onClick = onDelete,

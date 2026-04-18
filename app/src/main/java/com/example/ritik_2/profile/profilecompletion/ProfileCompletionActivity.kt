@@ -100,6 +100,20 @@ class ProfileCompletionActivity : ComponentActivity() {
         ) && !isAdmin
         val editingOther = sessionId != userId
 
+        // Per-field permission gate. Fed into ProfileCompletionScreen so each
+        // sensitive input renders only when the editor is allowed to write that
+        // specific field — own-profile users always get SELF_EDITABLE_FIELDS,
+        // admins/sysadmins get ALL_FIELDS, managers get MANAGER_EDITABLE_FIELDS,
+        // everyone else gets nothing.
+        val editableFields = PermissionGuard.editableFields(
+            editorRole        = editorRole,
+            targetRole        = targetRole,
+            editorId          = sessionId,
+            targetId          = userId,
+            isDbAdmin         = isDbAdmin,
+            editorPermissions = editorPermissions
+        )
+
         if (isEditMode && editingOther && !canEdit) {
             Toast.makeText(this,
                 "You don't have permission to edit this user", Toast.LENGTH_SHORT).show()
@@ -150,7 +164,8 @@ class ProfileCompletionActivity : ComponentActivity() {
                     isEditMode       = isEditMode,
                     isAdmin          = isAdmin,
                     isManager        = isManager && editingOther,
-                    userId           = userId
+                    userId           = userId,
+                    editableFields   = editableFields
                 )
             }
         }

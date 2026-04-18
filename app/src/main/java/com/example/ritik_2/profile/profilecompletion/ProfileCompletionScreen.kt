@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ritik_2.core.PermissionGuard
 
 private data class FormState(
     val address                  : String = "",
@@ -74,7 +75,14 @@ fun ProfileCompletionScreen(
     isEditMode      : Boolean = false,
     isAdmin         : Boolean = false,
     isManager       : Boolean = false,   // Manager or HR editing another user
-    userId          : String  = ""
+    userId          : String  = "",
+    /**
+     * Permission-based per-field gate. Only fields whose key is in this set
+     * are exposed for editing in the admin branch — even if [isAdmin] is true.
+     * Computed by the launching Activity from [PermissionGuard.editableFields].
+     * Defaults to ALL_FIELDS so legacy callers keep their previous behaviour.
+     */
+    editableFields  : Set<String> = PermissionGuard.ALL_FIELDS
 ) {
     val uiState    by viewModel.uiState.collectAsState()
     val scrollState = rememberLazyListState()
@@ -283,19 +291,28 @@ fun ProfileCompletionScreen(
                     PCCard("Account Info", Icons.Default.Person) {
                         when {
                             isAdmin && isEditing -> {
-                                // Admin edits all account fields
-                                PCField(form.name,        { form = form.copy(name = it) },
-                                    "Full Name",   Icons.Default.Person)
-                                PCField(form.phoneNumber, { form = form.copy(phoneNumber = it) },
-                                    "Phone",       Icons.Default.Phone, KeyboardType.Phone)
-                                PCField(form.designation, { form = form.copy(designation = it) },
-                                    "Designation", Icons.Default.Badge)
-                                PCField(form.role,        { form = form.copy(role = it) },
-                                    "Role",        Icons.Default.ManageAccounts)
-                                PCField(form.companyName, { form = form.copy(companyName = it) },
-                                    "Company",     Icons.Default.Business)
-                                PCField(form.department,  { form = form.copy(department = it) },
-                                    "Department",  Icons.Default.Groups)
+                                // Admin branch — but each field is still gated by
+                                // editableFields so a permission revoke (e.g. taking
+                                // away "edit_role") drops the field even within the
+                                // admin section.
+                                if ("name" in editableFields)
+                                    PCField(form.name,        { form = form.copy(name = it) },
+                                        "Full Name",   Icons.Default.Person)
+                                if ("phoneNumber" in editableFields)
+                                    PCField(form.phoneNumber, { form = form.copy(phoneNumber = it) },
+                                        "Phone",       Icons.Default.Phone, KeyboardType.Phone)
+                                if ("designation" in editableFields)
+                                    PCField(form.designation, { form = form.copy(designation = it) },
+                                        "Designation", Icons.Default.Badge)
+                                if ("role" in editableFields)
+                                    PCField(form.role,        { form = form.copy(role = it) },
+                                        "Role",        Icons.Default.ManageAccounts)
+                                if ("companyName" in editableFields)
+                                    PCField(form.companyName, { form = form.copy(companyName = it) },
+                                        "Company",     Icons.Default.Business)
+                                if ("department" in editableFields)
+                                    PCField(form.department,  { form = form.copy(department = it) },
+                                        "Department",  Icons.Default.Groups)
                             }
                             isManager && isEditing -> {
                                 // Manager/HR can edit designation and department
@@ -332,14 +349,18 @@ fun ProfileCompletionScreen(
                     PCCard("Professional Details", Icons.Default.Work) {
                         when {
                             isAdmin && isEditing -> {
-                                PCField(form.experience,  { form = form.copy(experience = it) },
-                                    "Years of Experience", Icons.Default.Timeline, KeyboardType.Number)
-                                PCField(form.employeeId,  { form = form.copy(employeeId = it) },
-                                    "Employee ID",  Icons.Default.Badge)
-                                PCField(form.reportingTo, { form = form.copy(reportingTo = it) },
-                                    "Reporting To", Icons.Default.SupervisorAccount)
-                                PCField(form.salary,      { form = form.copy(salary = it) },
-                                    "Salary",       Icons.Default.CurrencyRupee, KeyboardType.Number)
+                                if ("experience" in editableFields)
+                                    PCField(form.experience,  { form = form.copy(experience = it) },
+                                        "Years of Experience", Icons.Default.Timeline, KeyboardType.Number)
+                                if ("employeeId" in editableFields)
+                                    PCField(form.employeeId,  { form = form.copy(employeeId = it) },
+                                        "Employee ID",  Icons.Default.Badge)
+                                if ("reportingTo" in editableFields)
+                                    PCField(form.reportingTo, { form = form.copy(reportingTo = it) },
+                                        "Reporting To", Icons.Default.SupervisorAccount)
+                                if ("salary" in editableFields)
+                                    PCField(form.salary,      { form = form.copy(salary = it) },
+                                        "Salary",       Icons.Default.CurrencyRupee, KeyboardType.Number)
                             }
                             isEditing -> {
                                 // Manager, HR or own profile — only experience is editable

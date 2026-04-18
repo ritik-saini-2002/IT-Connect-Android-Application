@@ -36,6 +36,11 @@ class ManageUserViewModel @Inject constructor(
     private var sanitizedCompany = ""
     private var isDbAdmin        = false
 
+    // Cached permission list of the CURRENT editor (refreshed every loadCurrentUser).
+    // Used by canModify() so that an admin who lost user-management permissions
+    // mid-session is blocked at the action site, not just at the screen entry.
+    private var editorPerms: List<String> = emptyList()
+
     init { loadCurrentUser() }
 
     private fun loadCurrentUser() {
@@ -46,6 +51,9 @@ class ManageUserViewModel @Inject constructor(
                 isDbAdmin     = authRepository.isDbAdmin()
                 val profile   = dataSource.getUserProfile(session.userId).getOrThrow()
                 sanitizedCompany = profile.sanitizedCompany
+                // Prefer the freshly-fetched profile's permissions over the cached
+                // session list so a demoted admin gets the new (possibly empty) set.
+                editorPerms      = profile.permissions.ifEmpty { session.permissions }
 
                 _state.update { it.copy(
                     currentRole = profile.role,
@@ -461,15 +469,27 @@ class ManageUserViewModel @Inject constructor(
     private fun canModify(user: MUUser): Boolean {
         if (isDbAdmin) return true
         val editorRole = _state.value.currentRole
+        if (PermissionGuard.isSystemAdmin(editorRole)) return true
         // Must be same company
         if (user.companyName != sanitizedCompany) return false
-        return PermissionGuard.canEditProfile(
+        // Role hierarchy gate (existing check)
+        val roleAllows = PermissionGuard.canEditProfile(
             editorRole = editorRole,
             targetRole = user.role,
             editorId   = "",   // editing other
             targetId   = user.id,
             isDbAdmin  = false
         )
+        if (!roleAllows) return false
+        // Live permission-list gate. Even if role hierarchy says yes, the editor
+        // must currently hold at least one user-management permission. An admin
+        // who was demoted mid-session is blocked here instead of acting on stale
+        // role information.
+        val USER_MOD_PERMS = setOf(
+            "modify_user", "delete_user", "view_all_users",
+            "modify_team_user", "manage_employees"
+        )
+        return editorPerms.any { it in USER_MOD_PERMS }
     }
 
     private suspend fun updateAccessControlField(

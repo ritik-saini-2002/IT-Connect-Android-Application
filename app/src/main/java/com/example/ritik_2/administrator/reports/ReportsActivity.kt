@@ -17,14 +17,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.requirePermission
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class ReportsActivity : ComponentActivity() {
 
     private val vm: ReportsViewModel by viewModels()
+
+    @Inject lateinit var authRepository: AuthRepository
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -35,6 +41,18 @@ class ReportsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!requirePermission(authRepository,
+                rule = { role, perms, dba ->
+                    PermissionGuard.canAccessAdminPanel(role, dba) &&
+                            (dba || PermissionGuard.isSystemAdmin(role) ||
+                                    perms.any { it in listOf(
+                                        "view_reports", "view_analytics",
+                                        "view_team_analytics", "view_hr_analytics",
+                                        "generate_reports", "export_data") })
+                },
+                deniedMessage = "Reports — analytics access required"))
+            return
+
         setContent {
             ITConnectTheme {
                 ReportsScreen(

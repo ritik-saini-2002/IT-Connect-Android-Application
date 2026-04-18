@@ -10,6 +10,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
 import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.requirePermission
 import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.drawer.AppDrawerWrapper
@@ -40,6 +42,18 @@ class ManageUserActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!requirePermission(authRepository,
+                rule = { role, perms, dba ->
+                    PermissionGuard.canAccessAdminPanel(role, dba) &&
+                            (dba || PermissionGuard.isSystemAdmin(role) ||
+                                    perms.any { it in listOf(
+                                        "modify_user", "delete_user",
+                                        "view_all_users", "modify_team_user",
+                                        "manage_employees") })
+                },
+                deniedMessage = "User Management — admin access required"))
+            return
+
         setContent {
             ITConnectTheme {
                 val session = remember { authRepository.getSession() }
