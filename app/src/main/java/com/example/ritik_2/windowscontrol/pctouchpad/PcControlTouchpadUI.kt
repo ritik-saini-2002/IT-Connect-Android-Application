@@ -260,39 +260,97 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  LIVE SCREEN — uses stream port 5001
+//  LIVE SCREEN — MJPEG viewer from the agent's stream port (default 5001).
+//
+//  Pulls `settings.streamPort` (persisted in connectToSaved) instead of
+//  hard-coding 5001, URL-encodes the credential so master keys with special
+//  characters don't break the query, and sends the same credential as an
+//  `X-Secret-Key` header so agents that gate on header auth still see it.
+//
+//  The agent validates whichever key the user stored on this device — a
+//  plain secret key and a master key both hash through the same PBKDF2
+//  path server-side, so the viewer endpoint accepts either as long as the
+//  query/header actually reaches it. Prior bug: `$key` was interpolated
+//  raw, so a key containing `&`, `#`, `=`, `+`, or spaces (all legal in
+//  master keys) silently truncated the URL and the server returned 401 /
+//  blank. URLEncoder fixes that.
+//
+//  Error callbacks log to Logcat (tag `LiveScreen`) so auth failures are
+//  visible instead of silently rendering black behind the transparent
+//  buttons.
 // ─────────────────────────────────────────────────────────────────────────────
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
     val settings = remember { PcControlMain.getSettings() }
     val viewerUrl = remember(settings) {
-        val base = settings.baseUrl.trimEnd('/')
-        val key = settings.secretKey.trim()
-        val host = base.removePrefix("http://").removePrefix("https://").split(":").firstOrNull() ?: base
-        "http://$host:5001/screen/viewer?key=$key&q=12&w=720&fps=8"
+        val host = settings.pcIpAddress.ifBlank {
+            // Fall back to baseUrl host if pcIpAddress is empty for any reason.
+            settings.baseUrl
+                .removePrefix("http://").removePrefix("https://")
+                .substringBefore(':').substringBefore('/')
+        }
+        val encodedKey = java.net.URLEncoder.encode(settings.secretKey.trim(), "UTF-8")
+        "http://$host:${settings.streamPort}/screen/viewer?key=$encodedKey&q=12&w=720&fps=8"
+    }
+    val extraHeaders = remember(settings) {
+        // Back-up auth channel for agents that gate the viewer on header creds
+        // (control API uses X-Secret-Key; keeping the same name here matches).
+        mapOf("X-Secret-Key" to settings.secretKey.trim())
     }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    LaunchedEffect(isOn) {
+
+    LaunchedEffect(isOn, viewerUrl) {
         val wv = webViewRef ?: return@LaunchedEffect
-        if (isOn) wv.loadUrl(viewerUrl) else { wv.stopLoading(); wv.loadUrl("about:blank") }
+        if (isOn) wv.loadUrl(viewerUrl, extraHeaders)
+        else { wv.stopLoading(); wv.loadUrl("about:blank") }
     }
+
     Box(modifier = modifier) {
         AndroidView(
             modifier = Modifier.fillMaxSize().alpha(if (isOn) 1f else 0f),
             factory = { ctx ->
                 WebView(ctx).also { wv ->
                     wv.webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = true
+                        // Let the WebView follow same-origin sub-requests
+                        // (the viewer HTML embeds the MJPEG <img>).
+                        override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = false
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: android.webkit.WebResourceError?,
+                        ) {
+                            android.util.Log.w(
+                                "LiveScreen",
+                                "viewer err ${error?.errorCode} ${error?.description} on ${request?.url}"
+                            )
+                        }
+                        override fun onReceivedHttpError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            errorResponse: android.webkit.WebResourceResponse?,
+                        ) {
+                            android.util.Log.w(
+                                "LiveScreen",
+                                "viewer http ${errorResponse?.statusCode} on ${request?.url}"
+                            )
+                        }
                     }
                     with(wv.settings) {
-                        @SuppressLint("SetJavaScriptEnabled")
-                        javaScriptEnabled = true; loadWithOverviewMode = true; useWideViewPort = true
-                        builtInZoomControls = false; displayZoomControls = false
+                        javaScriptEnabled = true
+                        loadWithOverviewMode = true
+                        useWideViewPort = true
+                        builtInZoomControls = false
+                        displayZoomControls = false
                         mediaPlaybackRequiresUserGesture = false
                     }
-                    wv.setBackgroundColor(android.graphics.Color.BLACK); wv.alpha = 0.22f
-                    webViewRef = wv; if (isOn) wv.loadUrl(viewerUrl)
+                    wv.setBackgroundColor(android.graphics.Color.BLACK)
+                    // Keep the stream subtle so the transparent buttons on top
+                    // stay legible. 0.28 is a comfortable middle — bump to
+                    // 0.40 if you want a more visible background.
+                    wv.alpha = 0.28f
+                    webViewRef = wv
+                    if (isOn) wv.loadUrl(viewerUrl, extraHeaders)
                 }
             },
             update = { wv -> webViewRef = wv }

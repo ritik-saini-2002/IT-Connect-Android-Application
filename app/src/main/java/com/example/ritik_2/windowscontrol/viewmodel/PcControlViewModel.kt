@@ -373,6 +373,7 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
                 port            = device.port,
                 secretKey       = device.secretKey,
                 certFingerprint = device.certFingerprint,
+                streamPort      = device.streamPort,
             )
             _settings.value = PcControlMain.getSettings()
             _uiState.value  = PcUiState.Success("Connected to ${device.label.ifBlank { device.host }}")

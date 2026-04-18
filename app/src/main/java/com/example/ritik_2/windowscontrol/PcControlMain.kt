@@ -24,6 +24,13 @@ data class PcControlSettings(
      * any other cert aborts the handshake. Null keeps the legacy HTTP flow.
      */
     val certFingerprint: String? = null,
+    /**
+     * Agent's MJPEG viewer port (defaults to 5001 — matches the agent's
+     * built-in `/screen/viewer` server). Kept separate from [port] so the
+     * control API and the live-view stream can live on different ports,
+     * which matches how the Flask agent actually serves them.
+     */
+    val streamPort     : Int     = 5001,
 ) {
     /** Scheme flips to HTTPS as soon as the user has attested a cert fingerprint. */
     val baseUrl      get() = "${if (certFingerprint.isNullOrBlank()) "http" else "https"}://$pcIpAddress:$port"
@@ -58,12 +65,17 @@ object PcControlMain {
         // Treat legacy hardcoded key as empty — force user to set a new one
         val savedKey = if (rawKey == LEGACY_DEFAULT_KEY) "" else rawKey
         val savedFp  = prefs.getString("pc_cert_fp", null)?.takeIf { it.isNotBlank() }
+        val savedStreamPort = try {
+            prefs.getInt("pc_stream_port", 5001)
+        } catch (e: ClassCastException) {
+            prefs.getString("pc_stream_port", "5001")?.toIntOrNull() ?: 5001
+        }
 
         val resolvedIp   = if (pcIp.isNotEmpty()) pcIp else savedIp
         val resolvedPort = savedPort
         val resolvedKey  = savedKey
 
-        _settings    = PcControlSettings(resolvedIp, resolvedPort, resolvedKey, savedFp)
+        _settings    = PcControlSettings(resolvedIp, resolvedPort, resolvedKey, savedFp, savedStreamPort)
         apiClient    = PcControlApiClient(_settings!!)
         browseClient = PcControlBrowseClient(_settings!!)
 
@@ -81,9 +93,16 @@ object PcControlMain {
         port           : Int     = 5000,
         secretKey      : String  = "",
         certFingerprint: String? = null,
+        streamPort     : Int     = 5001,
     ) {
         val ctx = _context ?: return
-        val s = PcControlSettings(pcIp, port, secretKey, certFingerprint?.takeIf { it.isNotBlank() })
+        val s = PcControlSettings(
+            pcIpAddress     = pcIp,
+            port            = port,
+            secretKey       = secretKey,
+            certFingerprint = certFingerprint?.takeIf { it.isNotBlank() },
+            streamPort      = streamPort,
+        )
         _settings    = s
         apiClient    = PcControlApiClient(s)
         browseClient = PcControlBrowseClient(s)
@@ -92,6 +111,7 @@ object PcControlMain {
             .putInt("pc_port", port)
             .putString("pc_key", secretKey)
             .putString("pc_cert_fp", s.certFingerprint) // null clears it
+            .putInt("pc_stream_port", streamPort)
             .apply()
     }
 
