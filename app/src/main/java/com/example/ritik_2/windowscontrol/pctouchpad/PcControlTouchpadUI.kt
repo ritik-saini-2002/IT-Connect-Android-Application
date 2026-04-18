@@ -61,7 +61,16 @@ data class GlassColors(
     val surface: Color, val accent: Color, val accentSecondary: Color, val danger: Color,
     val textPrimary: Color, val textSecondary: Color, val textTertiary: Color,
     val buttonBg: Color, val buttonBorder: Color,
-    val touchpadBg: Color
+    val touchpadBg: Color,
+    /**
+     * True when the live-screen stream is the background. Sub-composables
+     * that paint their own containers (e.g. GlassButton ignores [buttonBg]
+     * and computes a Material3 container color from the theme) consult this
+     * flag to force a fully-transparent background so the MJPEG behind
+     * stays visible — matching the touchpad which is already see-through
+     * in this mode.
+     */
+    val isLive: Boolean = false,
 )
 
 /**
@@ -99,7 +108,8 @@ private fun glassColors(liveOn: Boolean = false): GlassColors {
         textTertiary = cs.onSurfaceVariant.copy(0.5f),
         buttonBg = buttonBgColor,
         buttonBorder = borderColor,
-        touchpadBg = touchpadColor
+        touchpadBg = touchpadColor,
+        isLive = liveOn,
     )
 }
 
@@ -1123,7 +1133,7 @@ private fun ShortcutModifierColumn(c: GlassColors, selected: ModifierGroup?, onS
                 color = if (isSel) c.accent.copy(0.2f) else c.buttonBg,
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(if (isSel) 1.5.dp else 1.dp, if (isSel) c.accent.copy(0.4f) else c.buttonBorder),
-                tonalElevation = 2.dp,
+                tonalElevation = if (c.isLive) 0.dp else 2.dp,
                 modifier = Modifier.fillMaxWidth().weight(1f)
             ) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1163,7 +1173,10 @@ private fun ShortcutsGrid(c: GlassColors, group: ModifierGroup, vm: PcControlVie
                             onClick = { vm.sendKey(sc.combo); haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onFeedback(sc.combo) },
                             color = c.buttonBg, shape = RoundedCornerShape(10.dp),
                             border = BorderStroke(1.dp, c.buttonBorder),
-                            tonalElevation = 2.dp,
+                            // Zero elevation in live mode — otherwise Material's
+                            // surface-tint overlay paints a frosted fill on top
+                            // of our transparent `color`, defeating the HUD look.
+                            tonalElevation = if (c.isLive) 0.dp else 2.dp,
                             modifier = Modifier.weight(1f).height(56.dp)
                         ) {
                             Column(Modifier.fillMaxSize().padding(3.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -1191,24 +1204,41 @@ fun GlassButton(c: GlassColors, label: String, modifier: Modifier, tintColor: Co
     val cs = MaterialTheme.colorScheme
 
     // Map tint → Material3 container/content tokens (same pattern as keyboard KbBtn)
-    val containerColor = when (tintColor) {
+    val themeContainer = when (tintColor) {
         c.accent          -> cs.primaryContainer
         c.accentSecondary -> cs.secondaryContainer
         c.danger          -> cs.errorContainer
         else              -> cs.surfaceVariant
     }
+    // In live mode every button's fill goes fully transparent so the MJPEG
+    // stream behind bleeds through. Icons/labels keep their original colors
+    // so the tinted accent (Alt+F4 = red, Space = accent, etc.) is still
+    // readable against the desktop. On press we bump to a semi-transparent
+    // tint of the content color so touch feedback remains visible.
+    val containerColor =
+        if (c.isLive) Color.Transparent else themeContainer
+
     val contentColor = when (tintColor) {
         c.accent          -> cs.onPrimaryContainer
         c.accentSecondary -> cs.onSecondaryContainer
         c.danger          -> cs.error
         else              -> cs.onSurfaceVariant
     }
-    val borderColor = when (tintColor) {
+    val themeBorder = when (tintColor) {
         c.accent          -> cs.primary.copy(alpha = 0.35f)
         c.accentSecondary -> cs.secondary.copy(alpha = 0.35f)
         c.danger          -> cs.error.copy(alpha = 0.35f)
         else              -> cs.outline.copy(alpha = 0.25f)
     }
+    // Bump border contrast when live so transparent buttons still have a
+    // findable outline against a potentially busy desktop background.
+    val borderColor =
+        if (c.isLive) themeBorder.copy(alpha = (themeBorder.alpha * 2f).coerceAtMost(0.7f))
+        else themeBorder
+
+    val pressedFill =
+        if (c.isLive) contentColor.copy(alpha = 0.18f)
+        else containerColor.copy(alpha = 0.75f)
 
     Surface(
         modifier = modifier
@@ -1239,9 +1269,12 @@ fun GlassButton(c: GlassColors, label: String, modifier: Modifier, tintColor: Co
                 }
             },
         shape = RoundedCornerShape(10.dp),
-        color = if (pressed) containerColor.copy(alpha = 0.75f) else containerColor,
+        color = if (pressed) pressedFill else containerColor,
         border = BorderStroke(if (pressed) 1.5.dp else 1.dp, if (pressed) contentColor.copy(0.4f) else borderColor),
-        tonalElevation = 2.dp
+        // Tonal elevation paints a translucent surface-tint overlay on top
+        // of `color` — if we leave it at 2dp while live, the button looks
+        // like a frosted rectangle even though `color` is transparent.
+        tonalElevation = if (c.isLive) 0.dp else 2.dp
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(label, fontSize = when { label.length > 8 -> 7.5.sp; label.length > 5 -> 9.sp; label.length > 3 -> 10.sp; else -> 12.sp },
