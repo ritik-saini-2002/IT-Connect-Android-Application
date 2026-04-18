@@ -8,7 +8,13 @@ import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.data.source.dto.*
 import com.example.ritik_2.localdatabase.AppDatabase
 import com.example.ritik_2.localdatabase.UserEntity
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -45,6 +51,10 @@ class PocketBaseDataSource @Inject constructor(
     private var cachedAdminToken    = ""
     private var adminTokenFetchedAt = 0L
     private val adminTokenTtlMs     = 10 * 60 * 1000L
+
+    // Background scope for fire-and-forget work that must not block login
+    // (e.g. role back-fill after SA auto-detection).
+    private val bgScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -94,9 +104,13 @@ class PocketBaseDataSource @Inject constructor(
                 if (role != Permissions.ROLE_SYSTEM_ADMIN) {
                     role = Permissions.ROLE_SYSTEM_ADMIN
                     Log.d(tag, "Auto-assigned System_Administrator role to $email (PB superuser)")
-                    // Back-fill the role in user_access_control and users record
-                    // so subsequent offline sessions also have the right role.
-                    backfillSystemAdminRole(uid, isSuperuser = true)
+                    // Back-fill is fire-and-forget — the user has already been authenticated,
+                    // so we MUST NOT block the UI transition on additional admin-token
+                    // round-trips and PocketBase PATCH calls.
+                    bgScope.launch {
+                        try { backfillSystemAdminRole(uid, isSuperuser = true) }
+                        catch (e: Exception) { Log.w(tag, "bg backfillSystemAdminRole: ${e.message}") }
+                    }
                 }
                 // adminTokenProvider was seeded inside checkIsPocketBaseSuperuser()
             } else if (role == Permissions.ROLE_SYSTEM_ADMIN) {
@@ -231,39 +245,45 @@ class PocketBaseDataSource @Inject constructor(
      * Fails silently for non-SA users — the failed HTTP request is the only
      * side-effect (one extra network call per login).
      */
-    private fun checkIsPocketBaseSuperuser(email: String, password: String): Boolean {
-        val credentials = JSONObject().apply {
-            put("identity", email)
-            put("password", password)
-        }.toString()
+    private suspend fun checkIsPocketBaseSuperuser(email: String, password: String): Boolean =
+        coroutineScope {
+            val credentials = JSONObject().apply {
+                put("identity", email)
+                put("password", password)
+            }.toString()
 
-        val endpoints = listOf(
-            "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
-            "${AppConfig.BASE_URL}/api/admins/auth-with-password"
-        )
+            val endpoints = listOf(
+                "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
+                "${AppConfig.BASE_URL}/api/admins/auth-with-password"
+            )
 
-        for (url in endpoints) {
-            try {
-                val body    = credentials.toRequestBody("application/json".toMediaType())
-                val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
-                val resBody = res.body?.string() ?: ""
-                val ok      = res.isSuccessful; res.close()
-
-                if (ok) {
-                    val superToken = JSONObject(resBody).optString("token")
-                    if (superToken.isNotBlank()) {
-                        // Seed the superuser token — unlocks admin operations this session
-                        adminTokenProvider.setTokenDirectly(superToken)
-                        Log.d(tag, "SA superuser token seeded from login — endpoint: $url")
+            // Fire both endpoints in parallel and take the first success.
+            // Sequential probes used to burn 30s per endpoint when the first was
+            // unreachable (~60s total worst case). Parallel collapses that to a
+            // single timeout window (~10s with the lowered OkHttp timeout).
+            val results = endpoints.map { url ->
+                async(Dispatchers.IO) {
+                    try {
+                        val body    = credentials.toRequestBody("application/json".toMediaType())
+                        val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
+                        val resBody = res.body?.string() ?: ""
+                        val ok      = res.isSuccessful; res.close()
+                        if (ok) {
+                            val superToken = JSONObject(resBody).optString("token")
+                            if (superToken.isNotBlank()) {
+                                adminTokenProvider.setTokenDirectly(superToken)
+                                Log.d(tag, "SA superuser token seeded from login — endpoint: $url")
+                            }
+                            true
+                        } else false
+                    } catch (e: Exception) {
+                        Log.w(tag, "checkIsPocketBaseSuperuser ($url): ${e.message}")
+                        false
                     }
-                    return true
                 }
-            } catch (e: Exception) {
-                Log.w(tag, "checkIsPocketBaseSuperuser ($url): ${e.message}")
             }
+            results.awaitAll().any { it }
         }
-        return false
-    }
 
     /**
      * Called after auto-detecting a System_Administrator at login.

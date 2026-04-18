@@ -47,6 +47,10 @@ abstract class AppDatabase : RoomDatabase() {
                     "itconnect.db"
                 )
                     .addMigrations(MIGRATION_1_2)
+                    // Cache-only DB: every entity is regenerable from PocketBase.
+                    // If a future schema bump ships without a matching migration we'd
+                    // rather wipe-and-rebuild than crash on first launch after upgrade.
+                    .fallbackToDestructiveMigration()
                     .build().also { INSTANCE = it }
             }
     }

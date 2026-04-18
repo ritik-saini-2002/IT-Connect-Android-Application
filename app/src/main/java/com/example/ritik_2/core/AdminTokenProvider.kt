@@ -24,6 +24,9 @@ import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Thrown when the server actively rejects (401/403) the admin credentials we hold. */
+class AuthRejectedException(message: String) : RuntimeException(message)
+
 /**
  * Secure admin token provider that stores PocketBase admin credentials
  * in EncryptedSharedPreferences instead of shipping them in the APK.
@@ -131,9 +134,18 @@ class AdminTokenProvider @Inject constructor(
             while (isActive && isLoggedIn) {
                 try {
                     refreshToken()
+                } catch (e: AuthRejectedException) {
+                    // Server actively rejected our credentials (401/403). The cached
+                    // token is now confirmed stale (revoked / password changed / role
+                    // demoted). Clear it and stop the loop so subsequent admin ops
+                    // surface a clean re-auth message instead of silently using a
+                    // token the server has invalidated.
+                    Log.w(TAG, "Keep-alive: admin credentials rejected — clearing cached token")
+                    cachedToken = ""
+                    break
                 } catch (e: Exception) {
                     // Non-fatal: network may be temporarily unavailable.
-                    // We still have the old cached token; next cycle will retry.
+                    // Keep the old cached token; next cycle will retry.
                     Log.w(TAG, "Keep-alive refresh failed (will retry): ${e.message}")
                 }
                 delay(REFRESH_INTERVAL_MS)
@@ -207,6 +219,12 @@ class AdminTokenProvider @Inject constructor(
                   "A System Administrator must log in or set them in Admin Settings.")
         }
 
+        // Track whether every reachable endpoint actively rejected our creds
+        // vs simply being unreachable. Only the former invalidates the cached
+        // token — network blips must not log the user out.
+        var sawAnyAuthFailure   = false
+        var sawAnyNetworkFailure = false
+
         listOf(
             "${AppConfig.BASE_URL}/api/collections/_superusers/auth-with-password",
             "${AppConfig.BASE_URL}/api/admins/auth-with-password"           // PB < 0.23 fallback
@@ -219,6 +237,7 @@ class AdminTokenProvider @Inject constructor(
 
                 val res     = http.newCall(Request.Builder().url(url).post(body).build()).execute()
                 val resBody = res.body?.string() ?: ""
+                val code    = res.code
                 val ok      = res.isSuccessful
                 res.close()
 
@@ -229,10 +248,22 @@ class AdminTokenProvider @Inject constructor(
                         Log.d(TAG, "Admin token refreshed ✅ via $url")
                         return t
                     }
+                } else if (code == 401 || code == 403) {
+                    sawAnyAuthFailure = true
                 }
             } catch (e: Exception) {
+                sawAnyNetworkFailure = true
                 Log.w(TAG, "Admin auth attempt failed for $url: ${e.message}")
             }
+        }
+        // If at least one endpoint cleanly rejected us AND no endpoint was
+        // unreachable, the stored credentials are the problem (revoked /
+        // password changed). Surface that distinctly so the keep-alive loop
+        // can stop and clear the stale token.
+        if (sawAnyAuthFailure && !sawAnyNetworkFailure) {
+            throw AuthRejectedException(
+                "Admin credentials rejected by server. Re-authenticate to continue."
+            )
         }
         error("Could not obtain admin token — verify admin credentials in Admin Settings.")
     }

@@ -15,6 +15,8 @@ import com.example.ritik_2.localdatabase.RoleEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.json.JSONArray
@@ -58,6 +60,12 @@ class RoleManagementViewModel @Inject constructor(
     val state: StateFlow<RoleManagementUiState> = _state.asStateFlow()
 
     private var sanitizedCompany = ""
+
+    // Serialises every role mutation (create / delete / change-user-role /
+    // edit-permissions) for this admin's session so a double-tap or two
+    // overlapping edits cannot interleave their GET/PATCH cycles and
+    // clobber each other on availableRoles or role permissions.
+    private val roleMutationMutex = Mutex()
 
     init { load() }
 
@@ -148,7 +156,7 @@ class RoleManagementViewModel @Inject constructor(
 
     fun createRole(roleName: String, initialPermissions: List<String> = emptyList()) {
         if (roleName.isBlank()) return
-        viewModelScope.launch {
+        viewModelScope.launch { roleMutationMutex.withLock {
             _state.update { it.copy(isLoading = true) }
             try {
                 val roleId   = "${sanitizedCompany}_$roleName"
@@ -189,7 +197,7 @@ class RoleManagementViewModel @Inject constructor(
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
-        }
+        } }
     }
 
     // ── Delete role ───────────────────────────────────────────────────────────
@@ -203,7 +211,7 @@ class RoleManagementViewModel @Inject constructor(
             _state.update { it.copy(error = "Cannot delete '${role.name}' — ${role.userCount} users assigned. Move them first.") }
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch { roleMutationMutex.withLock {
             _state.update { it.copy(isLoading = true) }
             try {
                 db.roleDao().delete(role.id)
@@ -223,14 +231,14 @@ class RoleManagementViewModel @Inject constructor(
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, error = e.message) }
             }
-        }
+        } }
     }
 
     // ── Change user role ──────────────────────────────────────────────────────
 
     fun changeUserRole(user: UserProfile, newRole: String, onDone: (String, String, String) -> Unit) {
         if (user.role == newRole) return
-        viewModelScope.launch {
+        viewModelScope.launch { roleMutationMutex.withLock {
             _state.update { it.copy(isLoading = true) }
             try {
                 val roleEntity = db.roleDao().getById("${sanitizedCompany}_$newRole")
@@ -290,7 +298,7 @@ class RoleManagementViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false,
                     error = "Role change failed: ${e.message}") }
             }
-        }
+        } }
     }
 
     // ── Permissions editing ───────────────────────────────────────────────────
@@ -314,7 +322,7 @@ class RoleManagementViewModel @Inject constructor(
     fun savePermissions() {
         val role  = _state.value.editingPermRole ?: return
         val perms = _state.value.editingPermissions.toList()
-        viewModelScope.launch {
+        viewModelScope.launch { roleMutationMutex.withLock {
             _state.update { it.copy(isLoading = true) }
             try {
                 val permsJson = Json.encodeToString(perms)
@@ -407,7 +415,7 @@ class RoleManagementViewModel @Inject constructor(
                 _state.update { it.copy(isLoading = false,
                     error = "Failed to save permissions: ${e.message}") }
             }
-        }
+        } }
     }
 
     fun cancelEditingPermissions() {

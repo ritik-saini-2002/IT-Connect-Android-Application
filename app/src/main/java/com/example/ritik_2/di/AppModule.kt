@@ -35,8 +35,11 @@ object AppModule {
     fun provideOkHttpClient(): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(PrivateNetworkInterceptor())
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            // Keep connect/read short so a single unreachable endpoint cannot
+            // cumulatively burn 60s+ on the login path (sequential probes).
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            // Writes (uploads) keep a generous timeout for slow LANs.
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
 
