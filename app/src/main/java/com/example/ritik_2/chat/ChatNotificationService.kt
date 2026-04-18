@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.SyncManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -28,6 +29,7 @@ private const val TAG = "ChatNotifService"
 class ChatNotificationService : Service() {
 
     @Inject lateinit var syncManager: SyncManager
+    @Inject lateinit var authRepo  : AuthRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var userId   = ""
@@ -36,7 +38,7 @@ class ChatNotificationService : Service() {
     private var currentCall: Call? = null
 
     private val sseClient = OkHttpClient.Builder()
-        .connectTimeout(1330, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .build()
 
@@ -141,10 +143,9 @@ class ChatNotificationService : Service() {
     // ── Single SSE session ────────────────────────────────────────────────────
 
     private suspend fun doConnect() = withContext(Dispatchers.IO) {
-        val token = try {
-            syncManager.getAdminToken()
-        } catch (e: Exception) {
-            Log.w(TAG, "Cannot get token: ${e.message}")
+        val token = authRepo.getSession()?.token.orEmpty()
+        if (token.isBlank()) {
+            Log.w(TAG, "Cannot get user token — no active session")
             return@withContext
         }
 

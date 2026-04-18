@@ -47,6 +47,7 @@ fun MainScreen(
     onCardClick              : (Int) -> Unit,
     onProfileClick           : () -> Unit,
     onNotificationClick      : () -> Unit,       // ← NEW
+    roleSyncing              : Boolean = false,
     showCompleteProfileBanner: Boolean = false
 ) {
     val userProfile = uiState.userProfile
@@ -118,6 +119,20 @@ fun MainScreen(
                 }
             ) { paddingValues ->
                 Box(Modifier.fillMaxSize().padding(paddingValues)) {
+
+                    // Thin top bar — foreground role_definitions sync in progress.
+                    AnimatedVisibility(
+                        visible  = roleSyncing,
+                        enter    = fadeIn(),
+                        exit     = fadeOut(),
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    ) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color    = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(0.15f)
+                        )
+                    }
 
                     AnimatedVisibility(
                         visible = isLoading && userProfile == null,
@@ -199,6 +214,7 @@ fun MainScreen(
                                     Spacer(Modifier.height(8.dp))
                                     UserProfileCard(
                                         profile        = userProfile,
+                                        isLoading      = isLoading,
                                         onProfileClick = onProfileClick,
                                         onLogout       = onLogout
                                     )
@@ -240,10 +256,12 @@ fun MainScreen(
 @Composable
 fun UserProfileCard(
     profile       : UserProfileData?,
+    isLoading     : Boolean = false,
     onProfileClick: () -> Unit,
     onLogout      : () -> Unit
 ) {
-    val name        = profile?.name        ?: "Loading..."
+    val showSpinner = profile == null && isLoading
+    val name        = profile?.name        ?: if (showSpinner) "" else "Loading..."
     val email       = profile?.email       ?: ""
     val role        = profile?.role        ?: ""
     val department  = profile?.department  ?: ""
@@ -282,26 +300,41 @@ fun UserProfileCard(
                             .background(MaterialTheme.colorScheme.primary.copy(0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        val initials = name.split(" ").take(2)
-                            .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
-                            .joinToString("")
-                        if (initials.isNotBlank())
-                            Text(initials,
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary)
-                        else
-                            Icon(Icons.Default.Person, "Profile",
-                                Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
+                        if (showSpinner) {
+                            CircularProgressIndicator(
+                                modifier    = Modifier.size(32.dp),
+                                color       = MaterialTheme.colorScheme.primary,
+                                strokeWidth = 3.dp
+                            )
+                        } else {
+                            val initials = name.split(" ").take(2)
+                                .mapNotNull { it.firstOrNull()?.uppercaseChar()?.toString() }
+                                .joinToString("")
+                            if (initials.isNotBlank())
+                                Text(initials,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary)
+                            else
+                                Icon(Icons.Default.Person, "Profile",
+                                    Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
 
             Spacer(Modifier.height(14.dp))
-            Text(name, style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                textAlign = TextAlign.Center)
+            if (showSpinner) {
+                Text("Loading profile…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(0.75f),
+                    textAlign = TextAlign.Center)
+            } else {
+                Text(name, style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    textAlign = TextAlign.Center)
+            }
 
             if (designation.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))

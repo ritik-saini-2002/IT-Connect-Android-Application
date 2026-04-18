@@ -53,6 +53,9 @@ private const val HOLD_MS       = 550L
 private const val DTAP_MS       = 230L
 private const val SCROLL_MIN_PX = 4f
 private const val DRAG_MIN_PX   = 6f
+// Minimum centroid travel (px) for 3-/4-finger gesture to count as a swipe.
+// Anything under this on release fires the corresponding "tap" gesture instead.
+private const val MULTI_SWIPE_MIN_PX = 60f
 
 // ── Theme-aware glass colors ───────────────────────────────
 data class GlassColors(
@@ -734,7 +737,7 @@ fun LiveToggleButton(c: GlassColors, isOn: Boolean, onToggle: (Boolean) -> Unit,
 // ─────────────────────────────────────────────────────────────────────────────
 //  LAPTOP TOUCHPAD — with optional scroll slider (circle dot) on right edge
 // ─────────────────────────────────────────────────────────────────────────────
-private enum class TouchState { IDLE, ONE_FINGER, TWO_FINGER, THREE_FINGER, DRAGGING }
+private enum class TouchState { IDLE, ONE_FINGER, TWO_FINGER, THREE_FINGER, FOUR_FINGER, DRAGGING }
 
 @Composable
 fun LaptopTouchpad(
@@ -755,6 +758,13 @@ fun LaptopTouchpad(
     var p1x by remember { mutableFloatStateOf(0f) }; var p1y by remember { mutableFloatStateOf(0f) }
     var p2x by remember { mutableFloatStateOf(0f) }; var p2y by remember { mutableFloatStateOf(0f) }
     var totalMoveX by remember { mutableFloatStateOf(0f) }; var totalMoveY by remember { mutableFloatStateOf(0f) }
+
+    // Centroid of 3-/4-finger touch at press. Used on release to pick
+    // between tap and directional swipe for Windows Precision Touchpad gestures.
+    var multiStartCx by remember { mutableFloatStateOf(0f) }
+    var multiStartCy by remember { mutableFloatStateOf(0f) }
+    var multiLastCx by remember { mutableFloatStateOf(0f) }
+    var multiLastCy by remember { mutableFloatStateOf(0f) }
 
     var holdJob by remember { mutableStateOf<Job?>(null) }
     var tapJob by remember { mutableStateOf<Job?>(null) }
@@ -850,6 +860,14 @@ fun LaptopTouchpad(
                                                 }
                                             }
                                             2 -> { holdJob?.cancel(); state = TouchState.TWO_FINGER; p1x = pressed[0].position.x; p1y = pressed[0].position.y; p2x = pressed[1].position.x; p2y = pressed[1].position.y; scrollAccX = 0f; scrollAccY = 0f; pinchStartDist = kotlin.math.hypot((p2x - p1x).toDouble(), (p2y - p1y).toDouble()).toFloat(); pinchAccum = 0f }
+                                            3, 4 -> {
+                                                holdJob?.cancel()
+                                                state = if (count == 3) TouchState.THREE_FINGER else TouchState.FOUR_FINGER
+                                                val cx = pressed.sumOf { it.position.x.toDouble() }.toFloat() / count
+                                                val cy = pressed.sumOf { it.position.y.toDouble() }.toFloat() / count
+                                                multiStartCx = cx; multiStartCy = cy
+                                                multiLastCx  = cx; multiLastCy  = cy
+                                            }
                                             else -> { holdJob?.cancel(); state = TouchState.THREE_FINGER }
                                         }
                                     }
@@ -863,6 +881,14 @@ fun LaptopTouchpad(
                                                 if (moved && state == TouchState.ONE_FINGER) holdJob?.cancel()
                                                 if ((abs(dx) > 0.3f || abs(dy) > 0.3f) && moved) vm.sendMouseDelta(dx, dy)
                                                 p1x = first.position.x; p1y = first.position.y
+                                            }
+                                            TouchState.THREE_FINGER, TouchState.FOUR_FINGER -> {
+                                                // Track centroid travel; Release decides swipe vs tap.
+                                                if (pressed.isNotEmpty()) {
+                                                    val n   = pressed.size
+                                                    multiLastCx = pressed.sumOf { it.position.x.toDouble() }.toFloat() / n
+                                                    multiLastCy = pressed.sumOf { it.position.y.toDouble() }.toFloat() / n
+                                                }
                                             }
                                             TouchState.TWO_FINGER -> {
                                                 if (pressed.size < 2) { state = TouchState.ONE_FINGER } else {
@@ -918,7 +944,22 @@ fun LaptopTouchpad(
                                                 resetAll()
                                             }
                                             TouchState.TWO_FINGER -> { if (!movedFar && !didScroll) { vm.sendMouseClick("right"); haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onFeedback("Right click") }; resetAll() }
-                                            TouchState.THREE_FINGER -> { if (!movedFar) { vm.sendMouseClick("middle"); haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onFeedback("Middle click") }; resetAll() }
+                                            TouchState.THREE_FINGER, TouchState.FOUR_FINGER -> {
+                                                // Windows Precision Touchpad: tap or 4-way swipe
+                                                val n  = if (state == TouchState.THREE_FINGER) 3 else 4
+                                                val dx = multiLastCx - multiStartCx
+                                                val dy = multiLastCy - multiStartCy
+                                                val absDx = abs(dx); val absDy = abs(dy)
+                                                val gesture = when {
+                                                    absDx < MULTI_SWIPE_MIN_PX && absDy < MULTI_SWIPE_MIN_PX -> "${n}finger-tap"
+                                                    absDx > absDy -> if (dx > 0) "${n}finger-swipe-right" else "${n}finger-swipe-left"
+                                                    else          -> if (dy > 0) "${n}finger-swipe-down"  else "${n}finger-swipe-up"
+                                                }
+                                                vm.sendGesture(gesture)
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onFeedback(gesture.replace("finger", "-finger ").replace("-", " ").trim())
+                                                resetAll()
+                                            }
                                             else -> resetAll()
                                         }
                                     }

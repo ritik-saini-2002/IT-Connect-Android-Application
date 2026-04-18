@@ -76,8 +76,15 @@ class PocketBaseDataSource @Inject constructor(
             val isActive = record.optBoolean("isActive", true)
             if (!isActive) { authTokenRef.set(""); error("Account disabled.") }
 
-            // ── Step 1: Fetch user_access_control for role + permissions ──────
-            val access = fetchAccessControl(uid).getOrNull()
+            // ── Steps 1+3 in parallel ─────────────────────────────────────────
+            // fetchAccessControl (user_access_control lookup) and the PB
+            // superuser probe are independent HTTPs — running them concurrently
+            // shaves one full round-trip off the login critical path.
+            val (access, isSuperuser) = coroutineScope {
+                val accessDeferred     = async(Dispatchers.IO) { fetchAccessControl(uid).getOrNull() }
+                val superuserDeferred  = async(Dispatchers.IO) { checkIsPocketBaseSuperuser(email, password) }
+                accessDeferred.await() to superuserDeferred.await()
+            }
 
             // ── Step 2: Determine role ────────────────────────────────────────
             // Priority order:
@@ -89,17 +96,9 @@ class PocketBaseDataSource @Inject constructor(
                 else                                  -> ""
             }
 
-            // ── Step 3: Auto-detect System_Administrator / seed admin token ──────
-            //
-            // Authenticate against _superusers (+ legacy /api/admins fallback) using
-            // the same credentials the user just entered. On success:
-            //  a) Role is confirmed / assigned to System_Administrator.
-            //  b) The returned SUPERUSER token is seeded into adminTokenProvider so
-            //     admin operations (SyncManager, refreshAllCollections, etc.) work
-            //     for the rest of the session without separate credential setup.
-            //
-            // For non-SA users this always fails gracefully (no extra side-effects).
-            val isSuperuser = checkIsPocketBaseSuperuser(email, password)
+            // ── Step 3 (post-process): Auto-detect System_Administrator ──────
+            // adminTokenProvider was already seeded inside checkIsPocketBaseSuperuser()
+            // when isSuperuser == true.
             if (isSuperuser) {
                 if (role != Permissions.ROLE_SYSTEM_ADMIN) {
                     role = Permissions.ROLE_SYSTEM_ADMIN
@@ -136,7 +135,11 @@ class PocketBaseDataSource @Inject constructor(
             )
 
             Log.d(tag, "Login ✅  uid=$uid  role=$role")
-            cacheUserLocally(uid, record, access, overrideRole = role)
+            // Off-load Room write — login coroutine must not block on disk I/O.
+            bgScope.launch {
+                try { cacheUserLocally(uid, record, access, overrideRole = role) }
+                catch (e: Exception) { Log.w(tag, "bg cacheUserLocally: ${e.message}") }
+            }
             session
         }
 
@@ -856,6 +859,8 @@ class PocketBaseDataSource @Inject constructor(
     }
 
     private fun fetchAccessControl(userId: String): Result<AccessControlRecord> {
+        if (userId.isBlank())
+            return Result.failure(IllegalArgumentException("fetchAccessControl: blank userId"))
         return try {
             val token = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
             val res   = http.newCall(Request.Builder()

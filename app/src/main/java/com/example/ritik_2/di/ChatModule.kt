@@ -1,5 +1,6 @@
 package com.example.ritik_2.di
 
+import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.chat.ChatRepository
 import com.example.ritik_2.core.SyncManager
 import dagger.Module
@@ -14,6 +15,8 @@ object ChatModule {
 
     @Provides
     @Singleton
-    fun provideChatRepository(syncManager: SyncManager): ChatRepository =
-        ChatRepository(syncManager)
+    fun provideChatRepository(
+        syncManager: SyncManager,
+        authRepo   : AuthRepository
+    ): ChatRepository = ChatRepository(syncManager, authRepo)
 }

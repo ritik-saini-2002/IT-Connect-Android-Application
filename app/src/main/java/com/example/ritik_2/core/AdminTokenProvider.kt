@@ -196,6 +196,71 @@ class AdminTokenProvider @Inject constructor(
         return refreshTokenSync()
     }
 
+    /**
+     * Refresh the admin token whenever the user returns to MainActivity.
+     *
+     * The app is one-time-login; the 9-minute keep-alive loop can lapse while
+     * the process is backgrounded (Android may freeze coroutines in Doze).
+     * Calling this on every MainActivity resume guarantees a fresh token for
+     * the sync operations that kick off immediately afterwards.
+     *
+     * Strategy (fire-and-forget, silent on failure):
+     *  1. If we hold a cached token, hit `/api/collections/_superusers/auth-refresh`
+     *     with it — returns a new token without needing the password.
+     *  2. If (1) fails (token expired server-side, or endpoint rejects), fall
+     *     back to password-based refresh via [refreshTokenInternal] if
+     *     credentials are stored.
+     *  3. If neither path works (non-SA user with no admin creds), no-op —
+     *     the user doesn't need an admin token anyway.
+     */
+    suspend fun refreshOnResume(): Boolean = withContext(Dispatchers.IO) {
+        tokenMutex.withLock {
+            val current = cachedToken
+            if (current.isNotBlank() && tryAuthRefresh(current)) {
+                return@withLock true
+            }
+            if (hasCredentials()) {
+                try {
+                    refreshTokenInternal()
+                    return@withLock true
+                } catch (e: Exception) {
+                    Log.w(TAG, "refreshOnResume: password-based refresh failed: ${e.message}")
+                }
+            }
+            false
+        }
+    }
+
+    /** Attempt auth-refresh against both the new and legacy admin endpoints. */
+    private fun tryAuthRefresh(currentToken: String): Boolean {
+        listOf(
+            "${AppConfig.BASE_URL}/api/collections/_superusers/auth-refresh",
+            "${AppConfig.BASE_URL}/api/admins/auth-refresh"    // PB < 0.23 fallback
+        ).forEach { url ->
+            try {
+                val res = http.newCall(Request.Builder()
+                    .url(url)
+                    .addHeader("Authorization", "Bearer $currentToken")
+                    .post("{}".toRequestBody("application/json".toMediaType()))
+                    .build()).execute()
+                val body = res.body?.string() ?: ""
+                val ok   = res.isSuccessful
+                res.close()
+                if (ok) {
+                    val t = JSONObject(body).optString("token")
+                    if (t.isNotEmpty()) {
+                        cachedToken = t
+                        Log.d(TAG, "Admin token refreshed via auth-refresh ✅")
+                        return true
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "auth-refresh attempt failed for $url: ${e.message}")
+            }
+        }
+        return false
+    }
+
     // ── Internal refresh ──────────────────────────────────────────────────────
 
     /** Coroutine-safe refresh (called from keep-alive loop). */

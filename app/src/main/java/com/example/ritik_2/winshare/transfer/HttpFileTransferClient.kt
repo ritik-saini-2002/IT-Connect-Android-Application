@@ -50,11 +50,11 @@ class HttpFileTransferClient(
     private val baseUrl = "http://$host:$port"
 
     // ── OkHttp client ─────────────────────────────────────────────────────────
-    // • connect timeout: 30 s (fail fast if PC is unreachable)
+    // • connect timeout: 10 s (fail fast if PC is unreachable)
     // • read/write timeout: 0 = disabled (necessary for files > a few hundred MB)
     // • default connection pool: 5 connections, 5 min keep-alive
     private val http = OkHttpClient.Builder()
-        .connectTimeout(1330, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .writeTimeout(0, TimeUnit.SECONDS)
         .build()

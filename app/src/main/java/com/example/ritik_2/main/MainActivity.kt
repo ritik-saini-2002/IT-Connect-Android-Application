@@ -29,6 +29,7 @@ import com.example.ritik_2.auth.SessionStatus
 import com.example.ritik_2.chat.ChatActivity
 import com.example.ritik_2.chat.ChatNotificationService
 import com.example.ritik_2.contact.ContactActivity
+import com.example.ritik_2.core.AdminTokenProvider
 import com.example.ritik_2.core.AppLaunchGate
 import com.example.ritik_2.core.ConnectivityMonitor
 import com.example.ritik_2.core.PermissionGuard
@@ -56,9 +57,10 @@ class MainActivity : FragmentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
-    @Inject lateinit var authRepository: AuthRepository
-    @Inject lateinit var connectMonitor: ConnectivityMonitor
-    @Inject lateinit var syncManager   : SyncManager
+    @Inject lateinit var authRepository    : AuthRepository
+    @Inject lateinit var connectMonitor    : ConnectivityMonitor
+    @Inject lateinit var syncManager       : SyncManager
+    @Inject lateinit var adminTokenProvider: AdminTokenProvider
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,6 +77,7 @@ class MainActivity : FragmentActivity() {
                 val uiState         by viewModel.uiState.collectAsStateWithLifecycle()
                 val serverReachable by connectMonitor.serverReachable.collectAsStateWithLifecycle()
                 val pendingCount    by viewModel.pendingCount.collectAsStateWithLifecycle()
+                val roleSyncing     by viewModel.roleSyncing.collectAsStateWithLifecycle()
 
                 var bannerReady by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { delay(5_000); bannerReady = true }
@@ -114,6 +117,7 @@ class MainActivity : FragmentActivity() {
                         onCardClick               = { id -> handleCardClick(id) },
                         onProfileClick            = { handleProfileClick() },
                         onNotificationClick       = { handleNotificationClick() },
+                        roleSyncing               = roleSyncing,
                         showCompleteProfileBanner = showProfileBanner
                     )
 
@@ -161,6 +165,10 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             connectMonitor.probeNow()
             checkActiveStatus()
+            // Refresh admin token on every MainActivity resume — the user got a
+            // one-time login, so the keep-alive loop can lapse while the app
+            // was backgrounded. No-op for users without admin credentials.
+            adminTokenProvider.refreshOnResume()
         }
     }
 

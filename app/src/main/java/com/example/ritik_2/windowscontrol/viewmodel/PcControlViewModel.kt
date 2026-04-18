@@ -931,6 +931,26 @@ class PcControlViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    /**
+     * Sends a Windows Precision Touchpad gesture to the agent.
+     * See [com.example.ritik_2.windowscontrol.network.PcControlApiClient.sendGesture]
+     * for accepted type strings (e.g. "3finger-swipe-up", "4finger-tap").
+     */
+    fun sendGesture(type: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.sendGesture(type) }
+            catch (e: Exception) { android.util.Log.e("PcControl","sendGesture($type): ${e.message}") }
+        }
+    }
+
+    /** Pushes a string to the PC clipboard. Used by ClipboardSyncManager. */
+    fun pushClipboard(text: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { input.setClipboard(text) }
+            catch (e: Exception) { android.util.Log.e("PcControl","pushClipboard: ${e.message}") }
+        }
+    }
+
     fun sendText(text: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try { input.typeText(text) }

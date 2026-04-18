@@ -65,9 +65,14 @@ class MainViewModel @Inject constructor(
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
 
+    // Foreground role_definitions sync — drives the thin top progress bar.
+    private val _roleSyncing = MutableStateFlow(false)
+    val roleSyncing: StateFlow<Boolean> = _roleSyncing.asStateFlow()
+
     init {
         load()
         checkPending()
+        syncRoleDefinitionsForeground()
     }
 
     fun reload() {
@@ -126,6 +131,28 @@ class MainViewModel @Inject constructor(
     private fun checkPending() {
         viewModelScope.launch {
             _pendingCount.value = syncManager.pendingCount()
+        }
+    }
+
+    /**
+     * Pulls the latest role_definitions for the current user's company so
+     * permission-gated tiles render with up-to-date role templates before the
+     * user taps into anything. Runs on the IO dispatcher via SyncManager and
+     * exposes [roleSyncing] for a thin progress bar in the UI.
+     */
+    private fun syncRoleDefinitionsForeground() {
+        viewModelScope.launch {
+            val session = authRepository.getSession() ?: return@launch
+            val sc = try {
+                db.userDao().getById(session.userId)?.sanitizedCompanyName
+            } catch (_: Exception) { null } ?: return@launch
+            if (sc.isBlank()) return@launch
+            _roleSyncing.value = true
+            try {
+                syncManager.syncRoleDefinitions(sc)
+            } finally {
+                _roleSyncing.value = false
+            }
         }
     }
 

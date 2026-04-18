@@ -7,6 +7,7 @@ import com.example.ritik_2.core.PrivateNetworkInterceptor
 import com.example.ritik_2.windowscontrol.PcControlSettings
 import com.example.ritik_2.windowscontrol.data.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -508,6 +509,53 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
                 }
             } catch (e: Exception) { PcNetworkResult(false, error = e.message) }
         }
+
+    // ── Clipboard sync ──────────────────────────────────────────────────────
+    suspend fun getClipboard(): PcNetworkResult<String> = withContext(Dispatchers.IO) {
+        val r = get("/clipboard")
+        if (!r.success || r.data == null)
+            return@withContext PcNetworkResult<String>(success = false, error = r.error ?: "get failed")
+        try {
+            val value = JsonParser.parseString(r.data).asJsonObject.get("value")?.asString ?: ""
+            PcNetworkResult(success = true, data = value)
+        } catch (e: Exception) {
+            PcNetworkResult(success = false, error = "Parse: ${e.message}")
+        }
+    }
+
+    /**
+     * Streams PC clipboard changes as a Flow of UTF-8 strings. Emits the
+     * initial snapshot, then one string per change. Uses [httpTransfer] so
+     * the SSE connection can stay open indefinitely (readTimeout = 0).
+     */
+    fun streamClipboard(): kotlinx.coroutines.flow.Flow<String> =
+        kotlinx.coroutines.flow.flow {
+            val req = baseRequest("/clipboard/stream")
+                .header("Accept", "text/event-stream")
+                .get().build()
+            val call = httpTransfer.newCall(req)
+            val resp = call.execute()
+            try {
+                if (!resp.isSuccessful) return@flow
+                val src = resp.body?.source() ?: return@flow
+                val buf = StringBuilder()
+                while (true) {
+                    val line = src.readUtf8Line() ?: break
+                    if (line.startsWith("data:")) {
+                        buf.append(line.removePrefix("data:").trim())
+                    } else if (line.isEmpty() && buf.isNotEmpty()) {
+                        try {
+                            val value = JsonParser.parseString(buf.toString())
+                                .asJsonObject.get("value")?.asString ?: ""
+                            emit(value)
+                        } catch (_: Exception) { /* skip malformed frame */ }
+                        buf.clear()
+                    }
+                }
+            } finally {
+                resp.close(); call.cancel()
+            }
+        }.flowOn(Dispatchers.IO)
 }
 
 // ── Browse client ─────────────────────────────────────────────────────────────
@@ -902,6 +950,17 @@ class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings)
 
     suspend fun setBrightness(level: Int): PcNetworkResult<String> =
         post("/system/brightness/set", mapOf("level" to level))
+
+    // ── Windows Precision Touchpad gestures ─────────────────────────────────
+    // Accepted types (see GESTURE_MAP in agent_v10.py):
+    //   3finger-tap | 3finger-swipe-{up,down,left,right}
+    //   4finger-tap | 4finger-swipe-{up,down,left,right}
+    //   zoom-in | zoom-out | zoom-reset
+    suspend fun sendGesture(type: String): PcNetworkResult<String> =
+        post("/input/gesture", mapOf("type" to type))
+
+    suspend fun setClipboard(text: String): PcNetworkResult<String> =
+        post("/clipboard", mapOf("value" to text))
 }
 
 // ── Phase 2.1 — conditional cert pinning ────────────────────────────────────

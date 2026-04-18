@@ -15,9 +15,9 @@ object PocketBaseInitializer {
     private const val TAG = "PBInitializer"
 
     private val http = OkHttpClient.Builder()
-        .connectTimeout(1330, TimeUnit.SECONDS)
-        .readTimeout(1330, TimeUnit.SECONDS)
-        .writeTimeout(1330, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     suspend fun initialize() {
@@ -44,6 +44,15 @@ object PocketBaseInitializer {
         ensureBaseCollection(token, "companies_metadata",  companiesFields())
         ensureBaseCollection(token, "user_access_control", accessControlFields())
         ensureBaseCollection(token, "user_search_index",   searchIndexFields())
+        ensureBaseCollection(token, "role_definitions",    roleDefinitionsFields())
+
+        // Unique index on (sanitizedCompanyName, roleName) — prevents duplicate
+        // role templates when multiple clients seed concurrently on first run.
+        ensureIndexes(
+            token, "role_definitions",
+            listOf("CREATE UNIQUE INDEX IF NOT EXISTS idx_role_defs_company_role " +
+                    "ON role_definitions (sanitizedCompanyName, roleName)")
+        )
 
         // chat_rooms and chat_messages rules are managed manually in PocketBase UI.
         // Do NOT call openRules() on them here.
@@ -203,6 +212,50 @@ object PocketBaseInitializer {
         }
     }
 
+    // Ensure PocketBase-level unique indexes exist on the collection.
+    // Skips any index whose definition is already present (matched on normalized text).
+    private fun ensureIndexes(token: String, name: String, desired: List<String>) {
+        if (desired.isEmpty()) return
+        try {
+            val getRes  = http.newCall(req("GET",
+                "${AppConfig.BASE_URL}/api/collections/$name", token)).execute()
+            val getBody = getRes.body?.string() ?: ""
+            val ok      = getRes.isSuccessful
+            getRes.close()
+            if (!ok) {
+                Log.w(TAG, "ensureIndexes '$name': cannot fetch collection, skipping")
+                return
+            }
+            val col      = JSONObject(getBody)
+            val existing = col.optJSONArray("indexes") ?: JSONArray()
+            val existSet = (0 until existing.length())
+                .map { existing.optString(it).replace("\\s+".toRegex(), " ").trim() }
+                .toMutableSet()
+
+            val toAdd = desired.filter { sql ->
+                sql.replace("\\s+".toRegex(), " ").trim() !in existSet
+            }
+            if (toAdd.isEmpty()) { Log.d(TAG, "✅ '$name' indexes OK"); return }
+
+            val merged = JSONArray()
+            for (i in 0 until existing.length()) merged.put(existing.optString(i))
+            toAdd.forEach { merged.put(it) }
+
+            val body = JSONObject().put("indexes", merged).toString()
+            val res  = http.newCall(req("PATCH",
+                "${AppConfig.BASE_URL}/api/collections/$name", token, body)).execute()
+            val code = res.code
+            val rb   = res.body?.string() ?: ""
+            res.close()
+            if (code in 200..299)
+                Log.d(TAG, "✅ '$name' indexes patched (+${toAdd.size})")
+            else
+                Log.e(TAG, "❌ '$name' index PATCH failed: HTTP $code $rb")
+        } catch (e: Exception) {
+            Log.w(TAG, "ensureIndexes '$name': ${e.message}")
+        }
+    }
+
     // Opens all API rules to null (admin token bypasses these anyway)
     private fun openRules(token: String, name: String) {
         try {
@@ -282,6 +335,13 @@ object PocketBaseInitializer {
         f("isActive",               "bool"),
         f("documentPath",           "text"),
         f("needsProfileCompletion", "bool")
+    )
+
+    private fun roleDefinitionsFields(): List<JSONObject> = listOf(
+        f("sanitizedCompanyName", "text", required = true),
+        f("roleName",             "text", required = true),
+        f("permissions",          "json"),
+        f("isBuiltIn",            "bool")
     )
 
     private fun searchIndexFields(): List<JSONObject> = listOf(

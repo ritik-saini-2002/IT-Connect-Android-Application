@@ -7,6 +7,8 @@ import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.SyncManager
 import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
+import com.example.ritik_2.localdatabase.AppDatabase
+import com.example.ritik_2.localdatabase.UserEntity
 import com.example.ritik_2.main.UserProfileData
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,7 +31,8 @@ data class ProfileUiState(
 class ProfileViewModel @Inject constructor(
     private val dataSource    : AppDataSource,
     private val authRepository: AuthRepository,
-    private val syncManager   : SyncManager
+    private val syncManager   : SyncManager,
+    private val db            : AppDatabase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
@@ -37,13 +40,28 @@ class ProfileViewModel @Inject constructor(
 
     fun loadProfile(userId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            // Cache-first: render Room immediately so the screen never shows a
+            // blank spinner while waiting on the network.
+            val cached = try { db.userDao().getById(userId) } catch (_: Exception) { null }
+            if (cached != null) {
+                _uiState.update {
+                    it.copy(isLoading = false, profile = cached.toUiModel(), error = null)
+                }
+            } else {
+                _uiState.update { it.copy(isLoading = true, error = null) }
+            }
+
+            // Refresh from network in background — keep whatever we showed
+            // from cache on failure.
             dataSource.getUserProfile(userId)
                 .onSuccess { profile ->
                     _uiState.update { it.copy(isLoading = false, profile = profile.toUiModel()) }
                 }
                 .onFailure { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
+                    if (cached == null)
+                        _uiState.update { it.copy(isLoading = false, error = e.message) }
+                    else
+                        _uiState.update { it.copy(isLoading = false) }
                 }
         }
     }
@@ -89,6 +107,38 @@ class ProfileViewModel @Inject constructor(
         }
     }
 }
+
+// Extension: UserEntity (Room) → UserProfileData — used for cache-first rendering
+fun UserEntity.toUiModel() = UserProfileData(
+    id                       = id,
+    name                     = name,
+    email                    = email,
+    role                     = role,
+    department               = department,
+    designation              = designation,
+    imageUrl                 = imageUrl,
+    phoneNumber              = phoneNumber,
+    companyName              = companyName,
+    address                  = address,
+    employeeId               = employeeId,
+    reportingTo              = reportingTo,
+    salary                   = salary,
+    experience               = experience,
+    completedProjects        = completedProjects,
+    activeProjects           = activeProjects,
+    pendingTasks             = pendingTasks,
+    completedTasks           = completedTasks,
+    totalComplaints          = totalComplaints,
+    resolvedComplaints       = resolvedComplaints,
+    pendingComplaints        = pendingComplaints,
+    isActive                 = isActive,
+    documentPath             = documentPath,
+    permissions              = permissions,
+    emergencyContactName     = emergencyContactName,
+    emergencyContactPhone    = emergencyContactPhone,
+    emergencyContactRelation = emergencyContactRelation,
+    needsProfileCompletion   = needsProfileCompletion
+)
 
 // Extension: UserProfile → UserProfileData
 // UserProfileData is now defined in MainViewModel.kt (same package: com.example.ritik_2.main)

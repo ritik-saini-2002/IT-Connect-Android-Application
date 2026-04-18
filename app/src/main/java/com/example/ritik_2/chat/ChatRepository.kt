@@ -1,6 +1,7 @@
 package com.example.ritik_2.chat
 
 import android.util.Log
+import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.AppConfig
 import com.example.ritik_2.core.SyncManager
 import kotlinx.coroutines.*
@@ -26,26 +27,32 @@ private const val CHUNK_SIZE_BYTES      = 5  * 1024 * 1024    // 5 MB per chunk
 
 @Singleton
 class ChatRepository @Inject constructor(
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val authRepo  : AuthRepository
 ) {
+    // Every chat operation authenticates as the logged-in user, not as admin.
+    // PocketBase API rules on chat_rooms/chat_messages/users must permit the
+    // operation for @request.auth.id — otherwise the call will 403 silently.
+    private fun userToken(): String = authRepo.getSession()?.token.orEmpty()
+
     // SSE client — readTimeout(0) keeps the connection open indefinitely.
     private val sseClient = OkHttpClient.Builder()
-        .connectTimeout(1330, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
         .build()
 
-    // Regular client for short requests
+    // Regular client for short requests + file uploads
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(1330, TimeUnit.SECONDS)
-        .readTimeout(1320, TimeUnit.SECONDS)
-        .writeTimeout(13300, TimeUnit.SECONDS)   // 5 min for large files
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(300, TimeUnit.SECONDS)   // 5 min — for large file uploads
         .build()
 
     // ── Rooms ─────────────────────────────────────────────────────────────────
 
     suspend fun getRooms(userId: String, sanitizedCompany: String = ""): List<ChatRoom> = withContext(Dispatchers.IO) {
         try {
-            val token = syncManager.getAdminToken()
+            val token = userToken()
             // Include rooms where user is a member, plus company-wide broadcast rooms
             val filter = if (sanitizedCompany.isNotBlank())
                 "(members~'$userId'||type='broadcast'%26%26companyName='$sanitizedCompany')"
@@ -65,7 +72,7 @@ class ChatRepository @Inject constructor(
         companyName: String
     ): ChatRoom? = withContext(Dispatchers.IO) {
         try {
-            val token = syncManager.getAdminToken()
+            val token = userToken()
             val res   = syncManager.pbGet(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records" +
                         "?filter=(type='direct'%26%26members~'$myId'%26%26members~'$otherId')&perPage=1",
@@ -96,7 +103,7 @@ class ChatRepository @Inject constructor(
         companyName: String, avatarBytes: ByteArray? = null
     ): ChatRoom? = withContext(Dispatchers.IO) {
         try {
-            val token    = syncManager.getAdminToken()
+            val token    = userToken()
             val allIds   = (listOf(creatorId) + memberIds).distinct()
             val allNames = (listOf(creatorName) + memberNames).distinct()
 
@@ -129,7 +136,7 @@ class ChatRepository @Inject constructor(
     suspend fun updateGroupInfo(roomId: String, name: String, avatarBytes: ByteArray?): ChatRoom? =
         withContext(Dispatchers.IO) {
             try {
-                val token = syncManager.getAdminToken()
+                val token = userToken()
                 if (avatarBytes != null) {
                     val mpBody = MultipartBody.Builder()
                         .setType(MultipartBody.FORM)
@@ -159,7 +166,7 @@ class ChatRepository @Inject constructor(
         currentAvatars: List<String>, newAvatars: List<String>
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val token = syncManager.getAdminToken()
+            val token = userToken()
             syncManager.pbPatch(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records/$roomId", token,
                 JSONObject().apply {
@@ -177,7 +184,7 @@ class ChatRepository @Inject constructor(
         removeId: String
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val token     = syncManager.getAdminToken()
+            val token     = userToken()
             val idx       = currentMembers.indexOf(removeId)
             val newIds    = currentMembers.filterIndexed { i, _ -> i != idx }
             val newNames  = currentNames.filterIndexed   { i, _ -> i != idx }
@@ -202,7 +209,7 @@ class ChatRepository @Inject constructor(
         creatorName: String
     ): ChatRoom? = withContext(Dispatchers.IO) {
         try {
-            val token = syncManager.getAdminToken()
+            val token = userToken()
             // Check if a broadcast room already exists for this company
             val res = syncManager.pbGet(
                 "${AppConfig.BASE_URL}/api/collections/$COL_ROOMS/records" +
@@ -238,7 +245,7 @@ class ChatRepository @Inject constructor(
     suspend fun getMessages(roomId: String, page: Int = 1): List<ChatMessage> =
         withContext(Dispatchers.IO) {
             try {
-                val token = syncManager.getAdminToken()
+                val token = userToken()
                 val res   = syncManager.pbGet(
                     "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records" +
                             "?filter=(roomId='$roomId')&sort=-sentAt&perPage=50&page=$page", token)
@@ -254,7 +261,7 @@ class ChatRepository @Inject constructor(
     suspend fun checkFileNameConflict(roomId: String, fileName: String): ChatMessage? =
         withContext(Dispatchers.IO) {
             try {
-                val token = syncManager.getAdminToken()
+                val token = userToken()
                 val res   = syncManager.pbGet(
                     "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records" +
                             "?filter=(roomId='$roomId'%26%26fileName='${fileName.replace("'", "\\'")}')&perPage=1",
@@ -287,7 +294,7 @@ class ChatRepository @Inject constructor(
         onProgress     : ((Long, Long) -> Unit)? = null
     ): ChatMessage? = withContext(Dispatchers.IO) {
         try {
-            val token    = syncManager.getAdminToken()
+            val token    = userToken()
             val now      = System.currentTimeMillis()
             val safeMime = fileMime.ifBlank { "application/octet-stream" }
             val res: String
@@ -519,7 +526,7 @@ class ChatRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             if (System.currentTimeMillis() - sentAt > 5 * 60_000L) return@withContext false
             try {
-                val token = syncManager.getAdminToken()
+                val token = userToken()
                 syncManager.pbPatch(
                     "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records/$messageId",
                     token,
@@ -535,7 +542,7 @@ class ChatRepository @Inject constructor(
         try {
             syncManager.pbDelete(
                 "${AppConfig.BASE_URL}/api/collections/$COL_MESSAGES/records/$messageId",
-                syncManager.getAdminToken())
+                userToken())
             true
         } catch (e: Exception) { false }
     }
@@ -566,8 +573,8 @@ class ChatRepository @Inject constructor(
     }.flowOn(Dispatchers.IO)
 
     private fun rawSseFlow(roomId: String): Flow<ChatMessage> = callbackFlow {
-        val token = try { syncManager.getAdminToken() }
-        catch (e: Exception) { close(e); return@callbackFlow }
+        val token = userToken()
+        if (token.isBlank()) { close(IllegalStateException("No user session for chat SSE")); return@callbackFlow }
 
         // Step 1: get a realtime client ID
         val clientId = try {
@@ -673,7 +680,7 @@ class ChatRepository @Inject constructor(
     suspend fun getCompanyMembers(sanitizedCompany: String): List<ChatMember> =
         withContext(Dispatchers.IO) {
             try {
-                val token = syncManager.getAdminToken()
+                val token = userToken()
                 val res   = syncManager.pbGet(
                     "${AppConfig.BASE_URL}/api/collections/users/records" +
                             "?filter=(sanitizedCompanyName='$sanitizedCompany'%26%26isActive=true)" +
@@ -697,7 +704,7 @@ class ChatRepository @Inject constructor(
 
     suspend fun getMemberProfile(userId: String): ChatMember? = withContext(Dispatchers.IO) {
         try {
-            val token = syncManager.getAdminToken()
+            val token = userToken()
             val o     = JSONObject(syncManager.pbGet(
                 "${AppConfig.BASE_URL}/api/collections/users/records/$userId", token))
             ChatMember(
