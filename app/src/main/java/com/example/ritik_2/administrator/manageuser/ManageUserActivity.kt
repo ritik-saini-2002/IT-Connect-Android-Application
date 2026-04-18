@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.model.UserProfile
 import com.example.ritik_2.data.source.AppDataSource
 import com.example.ritik_2.drawer.AppDrawerWrapper
@@ -47,9 +48,9 @@ class ManageUserActivity : ComponentActivity() {
                     PermissionGuard.canAccessAdminPanel(role, dba) &&
                             (dba || PermissionGuard.isSystemAdmin(role) ||
                                     perms.any { it in listOf(
-                                        "modify_user", "delete_user",
-                                        "view_all_users", "modify_team_user",
-                                        "manage_employees") })
+                                        Permissions.PERM_MODIFY_USER, Permissions.PERM_DELETE_USER,
+                                        Permissions.PERM_VIEW_ALL_USERS, Permissions.PERM_MODIFY_TEAM_USER,
+                                        Permissions.PERM_MANAGE_EMPLOYEES) })
                 },
                 deniedMessage = "User Management — admin access required"))
             return

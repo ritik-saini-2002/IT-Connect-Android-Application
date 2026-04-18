@@ -11,6 +11,77 @@ object Permissions {
     const val ROLE_EMPLOYEE     = "Employee"
     const val ROLE_INTERN       = "Intern"
 
+    // ── Permission key constants ──────────────────────────────────────────────
+    // Use these instead of bare string literals at every call site. A typo
+    // against a const fails to compile, whereas a typo in a raw string like
+    // `"acces_admin_panel"` silently breaks the gate.
+
+    // User management
+    const val PERM_CREATE_USER                  = "create_user"
+    const val PERM_DELETE_USER                  = "delete_user"
+    const val PERM_MODIFY_USER                  = "modify_user"
+    const val PERM_VIEW_ALL_USERS               = "view_all_users"
+    // Role & company
+    const val PERM_MANAGE_ROLES                 = "manage_roles"
+    const val PERM_MANAGE_COMPANIES             = "manage_companies"
+    const val PERM_MANAGE_PERMISSIONS           = "manage_permissions"
+    // Data & analytics
+    const val PERM_VIEW_ANALYTICS               = "view_analytics"
+    const val PERM_VIEW_REPORTS                 = "view_reports"
+    const val PERM_EXPORT_DATA                  = "export_data"
+    const val PERM_ACCESS_ALL_DATA              = "access_all_data"
+    // Admin
+    const val PERM_SYSTEM_SETTINGS              = "system_settings"
+    const val PERM_ACCESS_ADMIN_PANEL           = "access_admin_panel"
+    const val PERM_DATABASE_MANAGER             = "database_manager"
+    // Team
+    const val PERM_VIEW_TEAM_USERS              = "view_team_users"
+    const val PERM_MODIFY_TEAM_USER             = "modify_team_user"
+    const val PERM_VIEW_TEAM_ANALYTICS          = "view_team_analytics"
+    const val PERM_ASSIGN_PROJECTS              = "assign_projects"
+    const val PERM_ASSIGN_TASKS                 = "assign_tasks"
+    const val PERM_APPROVE_REQUESTS             = "approve_requests"
+    const val PERM_VIEW_TEAM_PERFORMANCE        = "view_team_performance"
+    const val PERM_APPROVE_LEAVE                = "approve_leave"
+    // HR
+    const val PERM_MANAGE_EMPLOYEES             = "manage_employees"
+    const val PERM_ACCESS_PERSONAL_DATA         = "access_personal_data"
+    const val PERM_GENERATE_REPORTS             = "generate_reports"
+    const val PERM_VIEW_HR_ANALYTICS            = "view_hr_analytics"
+    // Profile
+    const val PERM_VIEW_PROFILE                 = "view_profile"
+    const val PERM_EDIT_PROFILE                 = "edit_profile"
+    const val PERM_EDIT_BASIC_PROFILE           = "edit_basic_profile"
+    // Projects & tasks
+    const val PERM_VIEW_ASSIGNED_PROJECTS       = "view_assigned_projects"
+    const val PERM_VIEW_ASSIGNED_TASKS          = "view_assigned_tasks"
+    const val PERM_SUBMIT_REPORTS               = "submit_reports"
+    // Complaints
+    const val PERM_SUBMIT_COMPLAINTS            = "submit_complaints"
+    const val PERM_VIEW_OWN_COMPLAINTS          = "view_own_complaints"
+    const val PERM_VIEW_TEAM_COMPLAINTS         = "view_team_complaints"
+    const val PERM_VIEW_DEPARTMENT_COMPLAINTS   = "view_department_complaints"
+    const val PERM_VIEW_ALL_COMPLAINTS          = "view_all_complaints"
+    const val PERM_RESOLVE_COMPLAINTS           = "resolve_complaints"
+    // Super-role exclusives
+    const val PERM_VIEW_ALL_COMPANIES           = "view_all_companies"
+    const val PERM_MANAGE_ALL_COMPANIES         = "manage_all_companies"
+    const val PERM_EDIT_SYSTEM_ADMINISTRATOR    = "edit_system_administrator"
+    const val PERM_GRANT_REVOKE_ANY_PERMISSION  = "grant_revoke_any_permission"
+    const val PERM_MANAGE_SYSTEM_SETTINGS       = "manage_system_settings"
+    const val PERM_VIEW_AUDIT_LOGS              = "view_audit_logs"
+    // Feature-level access gates (dashboard tiles)
+    const val PERM_ACCESS_SERVER_CONNECT        = "access_server_connect"
+    const val PERM_ACCESS_WINDOWS_CONTROL       = "access_windows_control"
+    const val PERM_ACCESS_NAGIOS                = "access_nagios"
+    const val PERM_ACCESS_KNOWLEDGE_BASE        = "access_knowledge_base"
+    // Windows Control sub-feature gates
+    const val PERM_WINDOWS_CONTROL_TOUCHPAD         = "windows_control_touchpad"
+    const val PERM_WINDOWS_CONTROL_FILE_BROWSER     = "windows_control_file_browser"
+    const val PERM_WINDOWS_CONTROL_APP_DIRECTORY    = "windows_control_app_directory"
+    const val PERM_WINDOWS_CONTROL_ADMIN_SETTINGS   = "windows_control_admin_settings"
+    const val PERM_WINDOWS_CONTROL_ADD_STEP         = "windows_control_add_step"
+
     /**
      * Default permissions used ONLY in SyncManager.seedRoleDefinitions() as a one-time bootstrap.
      * All other code must use DB lookup from RoleEntity.permissions instead.
@@ -20,51 +91,51 @@ object Permissions {
     fun forRole(role: String): List<String> = when (role) {
         ROLE_SYSTEM_ADMIN -> ALL_PERMISSIONS
         ROLE_ADMIN -> listOf(
-            "create_user", "delete_user", "modify_user", "view_all_users",
-            "manage_roles", "view_analytics", "system_settings", "manage_companies",
-            "access_all_data", "export_data", "manage_permissions", "access_admin_panel",
-            "submit_complaints", "view_all_complaints", "resolve_complaints",
+            PERM_CREATE_USER, PERM_DELETE_USER, PERM_MODIFY_USER, PERM_VIEW_ALL_USERS,
+            PERM_MANAGE_ROLES, PERM_VIEW_ANALYTICS, PERM_SYSTEM_SETTINGS, PERM_MANAGE_COMPANIES,
+            PERM_ACCESS_ALL_DATA, PERM_EXPORT_DATA, PERM_MANAGE_PERMISSIONS, PERM_ACCESS_ADMIN_PANEL,
+            PERM_SUBMIT_COMPLAINTS, PERM_VIEW_ALL_COMPLAINTS, PERM_RESOLVE_COMPLAINTS,
             // Feature access
-            "access_server_connect", "access_windows_control",
-            "access_nagios", "access_knowledge_base",
+            PERM_ACCESS_SERVER_CONNECT, PERM_ACCESS_WINDOWS_CONTROL,
+            PERM_ACCESS_NAGIOS, PERM_ACCESS_KNOWLEDGE_BASE,
             // Windows Control sub-features
-            "windows_control_touchpad", "windows_control_file_browser",
-            "windows_control_app_directory", "windows_control_admin_settings",
-            "windows_control_add_step"
+            PERM_WINDOWS_CONTROL_TOUCHPAD, PERM_WINDOWS_CONTROL_FILE_BROWSER,
+            PERM_WINDOWS_CONTROL_APP_DIRECTORY, PERM_WINDOWS_CONTROL_ADMIN_SETTINGS,
+            PERM_WINDOWS_CONTROL_ADD_STEP
         )
         ROLE_MANAGER -> listOf(
-            "view_team_users", "modify_team_user", "view_team_analytics",
-            "assign_projects", "approve_requests", "view_reports",
-            "submit_complaints", "view_department_complaints", "resolve_complaints",
-            "access_admin_panel",
+            PERM_VIEW_TEAM_USERS, PERM_MODIFY_TEAM_USER, PERM_VIEW_TEAM_ANALYTICS,
+            PERM_ASSIGN_PROJECTS, PERM_APPROVE_REQUESTS, PERM_VIEW_REPORTS,
+            PERM_SUBMIT_COMPLAINTS, PERM_VIEW_DEPARTMENT_COMPLAINTS, PERM_RESOLVE_COMPLAINTS,
+            PERM_ACCESS_ADMIN_PANEL,
             // Feature access
-            "access_server_connect", "access_nagios", "access_knowledge_base"
+            PERM_ACCESS_SERVER_CONNECT, PERM_ACCESS_NAGIOS, PERM_ACCESS_KNOWLEDGE_BASE
         )
         ROLE_HR -> listOf(
-            "view_all_users", "modify_user", "view_hr_analytics",
-            "manage_employees", "access_personal_data", "generate_reports",
-            "submit_complaints", "view_all_complaints", "resolve_complaints",
-            "access_admin_panel",
+            PERM_VIEW_ALL_USERS, PERM_MODIFY_USER, PERM_VIEW_HR_ANALYTICS,
+            PERM_MANAGE_EMPLOYEES, PERM_ACCESS_PERSONAL_DATA, PERM_GENERATE_REPORTS,
+            PERM_SUBMIT_COMPLAINTS, PERM_VIEW_ALL_COMPLAINTS, PERM_RESOLVE_COMPLAINTS,
+            PERM_ACCESS_ADMIN_PANEL,
             // Feature access
-            "access_server_connect", "access_knowledge_base"
+            PERM_ACCESS_SERVER_CONNECT, PERM_ACCESS_KNOWLEDGE_BASE
         )
         ROLE_TEAM_LEAD -> listOf(
-            "view_team_users", "assign_tasks", "view_team_performance",
-            "approve_leave", "submit_complaints", "view_team_complaints",
+            PERM_VIEW_TEAM_USERS, PERM_ASSIGN_TASKS, PERM_VIEW_TEAM_PERFORMANCE,
+            PERM_APPROVE_LEAVE, PERM_SUBMIT_COMPLAINTS, PERM_VIEW_TEAM_COMPLAINTS,
             // Feature access
-            "access_server_connect", "access_knowledge_base"
+            PERM_ACCESS_SERVER_CONNECT, PERM_ACCESS_KNOWLEDGE_BASE
         )
         ROLE_EMPLOYEE -> listOf(
-            "view_profile", "edit_profile", "view_assigned_projects",
-            "submit_reports", "submit_complaints", "view_own_complaints",
+            PERM_VIEW_PROFILE, PERM_EDIT_PROFILE, PERM_VIEW_ASSIGNED_PROJECTS,
+            PERM_SUBMIT_REPORTS, PERM_SUBMIT_COMPLAINTS, PERM_VIEW_OWN_COMPLAINTS,
             // Feature access
-            "access_knowledge_base"
+            PERM_ACCESS_KNOWLEDGE_BASE
         )
         ROLE_INTERN -> listOf(
-            "view_profile", "edit_basic_profile",
-            "view_assigned_tasks", "submit_complaints"
+            PERM_VIEW_PROFILE, PERM_EDIT_BASIC_PROFILE,
+            PERM_VIEW_ASSIGNED_TASKS, PERM_SUBMIT_COMPLAINTS
         )
-        else -> listOf("view_profile")
+        else -> listOf(PERM_VIEW_PROFILE)
     }
 
     /**
@@ -74,44 +145,44 @@ object Permissions {
      */
     val ALL_PERMISSIONS: List<String> = listOf(
         // User management
-        "create_user", "delete_user", "modify_user", "view_all_users",
+        PERM_CREATE_USER, PERM_DELETE_USER, PERM_MODIFY_USER, PERM_VIEW_ALL_USERS,
         // Role & company
-        "manage_roles", "manage_companies", "manage_permissions",
+        PERM_MANAGE_ROLES, PERM_MANAGE_COMPANIES, PERM_MANAGE_PERMISSIONS,
         // Data & analytics
-        "view_analytics", "view_reports", "export_data", "access_all_data",
+        PERM_VIEW_ANALYTICS, PERM_VIEW_REPORTS, PERM_EXPORT_DATA, PERM_ACCESS_ALL_DATA,
         // Admin
-        "system_settings", "access_admin_panel", "database_manager",
+        PERM_SYSTEM_SETTINGS, PERM_ACCESS_ADMIN_PANEL, PERM_DATABASE_MANAGER,
         // Team
-        "view_team_users", "modify_team_user", "view_team_analytics",
-        "assign_projects", "assign_tasks", "approve_requests",
-        "view_team_performance", "approve_leave",
+        PERM_VIEW_TEAM_USERS, PERM_MODIFY_TEAM_USER, PERM_VIEW_TEAM_ANALYTICS,
+        PERM_ASSIGN_PROJECTS, PERM_ASSIGN_TASKS, PERM_APPROVE_REQUESTS,
+        PERM_VIEW_TEAM_PERFORMANCE, PERM_APPROVE_LEAVE,
         // HR
-        "manage_employees", "access_personal_data", "generate_reports",
-        "view_hr_analytics",
+        PERM_MANAGE_EMPLOYEES, PERM_ACCESS_PERSONAL_DATA, PERM_GENERATE_REPORTS,
+        PERM_VIEW_HR_ANALYTICS,
         // Profile
-        "view_profile", "edit_profile", "edit_basic_profile",
+        PERM_VIEW_PROFILE, PERM_EDIT_PROFILE, PERM_EDIT_BASIC_PROFILE,
         // Projects & tasks
-        "view_assigned_projects", "view_assigned_tasks",
-        "submit_reports",
+        PERM_VIEW_ASSIGNED_PROJECTS, PERM_VIEW_ASSIGNED_TASKS,
+        PERM_SUBMIT_REPORTS,
         // Complaints
-        "submit_complaints", "view_own_complaints",
-        "view_team_complaints", "view_department_complaints",
-        "view_all_complaints", "resolve_complaints",
+        PERM_SUBMIT_COMPLAINTS, PERM_VIEW_OWN_COMPLAINTS,
+        PERM_VIEW_TEAM_COMPLAINTS, PERM_VIEW_DEPARTMENT_COMPLAINTS,
+        PERM_VIEW_ALL_COMPLAINTS, PERM_RESOLVE_COMPLAINTS,
         // Super-role exclusives
-        "view_all_companies", "manage_all_companies",
-        "edit_system_administrator", "grant_revoke_any_permission",
-        "manage_system_settings", "view_audit_logs",
+        PERM_VIEW_ALL_COMPANIES, PERM_MANAGE_ALL_COMPANIES,
+        PERM_EDIT_SYSTEM_ADMINISTRATOR, PERM_GRANT_REVOKE_ANY_PERMISSION,
+        PERM_MANAGE_SYSTEM_SETTINGS, PERM_VIEW_AUDIT_LOGS,
         // Feature-level access gates (dashboard tiles)
-        "access_server_connect",    // Windows SMB file share
-        "access_windows_control",   // PC remote control / touchpad
-        "access_nagios",            // Nagios server monitor
-        "access_knowledge_base",    // MAC / network lookup tool
+        PERM_ACCESS_SERVER_CONNECT,    // Windows SMB file share
+        PERM_ACCESS_WINDOWS_CONTROL,   // PC remote control / touchpad
+        PERM_ACCESS_NAGIOS,            // Nagios server monitor
+        PERM_ACCESS_KNOWLEDGE_BASE,    // MAC / network lookup tool
         // Windows Control sub-feature gates (require access_windows_control + sub-key)
-        "windows_control_touchpad",
-        "windows_control_file_browser",
-        "windows_control_app_directory",
-        "windows_control_admin_settings",
-        "windows_control_add_step"
+        PERM_WINDOWS_CONTROL_TOUCHPAD,
+        PERM_WINDOWS_CONTROL_FILE_BROWSER,
+        PERM_WINDOWS_CONTROL_APP_DIRECTORY,
+        PERM_WINDOWS_CONTROL_ADMIN_SETTINGS,
+        PERM_WINDOWS_CONTROL_ADD_STEP
     )
 
     /**

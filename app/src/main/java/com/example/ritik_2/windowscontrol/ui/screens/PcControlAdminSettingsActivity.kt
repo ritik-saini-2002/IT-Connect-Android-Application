@@ -13,6 +13,7 @@ import androidx.fragment.app.FragmentActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
@@ -47,7 +48,7 @@ class PcControlAdminSettingsActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         if (!requirePermission(authRepository,
                 rule = { role, perms, dba ->
-                    PermissionGuard.canAccessWindowsControlSub("windows_control_admin_settings", role, perms, dba)
+                    PermissionGuard.canAccessWindowsControlSub(Permissions.PERM_WINDOWS_CONTROL_ADMIN_SETTINGS, role, perms, dba)
                 },
                 deniedMessage = "Admin Settings — access not granted")) return
         enableEdgeToEdge()

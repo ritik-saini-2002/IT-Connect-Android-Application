@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.Ritik_2Theme
 import com.example.ritik_2.windowscontrol.PcControlMain
 import com.example.ritik_2.windowscontrol.data.*
@@ -59,7 +60,7 @@ class PcAddStepActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (!requirePermission(authRepository,
                 rule = { role, perms, dba ->
-                    PermissionGuard.canAccessWindowsControlSub("windows_control_add_step", role, perms, dba)
+                    PermissionGuard.canAccessWindowsControlSub(Permissions.PERM_WINDOWS_CONTROL_ADD_STEP, role, perms, dba)
                 },
                 deniedMessage = "Add Step — access not granted")) return
         if (!PcControlMain.isInitialized) PcControlMain.init(this)

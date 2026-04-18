@@ -273,7 +273,7 @@ class ManageUserViewModel @Inject constructor(
                 val perms        = when {
                     role == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
                     roleEntity != null && roleEntity.permissions.isNotEmpty() -> roleEntity.permissions
-                    else -> listOf("view_profile")
+                    else -> listOf(Permissions.PERM_VIEW_PROFILE)
                 }
                 val permsJson    = Json.encodeToString(perms)
                 val documentPath = "users/$sc/$sd/$role"
@@ -378,7 +378,7 @@ class ManageUserViewModel @Inject constructor(
                 val newPerms    = when {
                     newRole == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
                     roleEntity2 != null && roleEntity2.permissions.isNotEmpty() -> roleEntity2.permissions
-                    else -> listOf("view_profile")
+                    else -> listOf(Permissions.PERM_VIEW_PROFILE)
                 }
                 val permsJson = Json.encodeToString(newPerms)
                 val newPath   = "users/${user.companyName}/${user.deptName}/$newRole/${user.id}"
@@ -486,8 +486,8 @@ class ManageUserViewModel @Inject constructor(
         // who was demoted mid-session is blocked here instead of acting on stale
         // role information.
         val USER_MOD_PERMS = setOf(
-            "modify_user", "delete_user", "view_all_users",
-            "modify_team_user", "manage_employees"
+            Permissions.PERM_MODIFY_USER, Permissions.PERM_DELETE_USER, Permissions.PERM_VIEW_ALL_USERS,
+            Permissions.PERM_MODIFY_TEAM_USER, Permissions.PERM_MANAGE_EMPLOYEES
         )
         return editorPerms.any { it in USER_MOD_PERMS }
     }

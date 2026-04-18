@@ -20,6 +20,7 @@ import androidx.core.content.FileProvider
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
@@ -46,9 +47,9 @@ class ReportsActivity : ComponentActivity() {
                     PermissionGuard.canAccessAdminPanel(role, dba) &&
                             (dba || PermissionGuard.isSystemAdmin(role) ||
                                     perms.any { it in listOf(
-                                        "view_reports", "view_analytics",
-                                        "view_team_analytics", "view_hr_analytics",
-                                        "generate_reports", "export_data") })
+                                        Permissions.PERM_VIEW_REPORTS, Permissions.PERM_VIEW_ANALYTICS,
+                                        Permissions.PERM_VIEW_TEAM_ANALYTICS, Permissions.PERM_VIEW_HR_ANALYTICS,
+                                        Permissions.PERM_GENERATE_REPORTS, Permissions.PERM_EXPORT_DATA) })
                 },
                 deniedMessage = "Reports — analytics access required"))
             return

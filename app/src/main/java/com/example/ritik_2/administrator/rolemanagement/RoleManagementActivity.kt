@@ -8,6 +8,7 @@ import androidx.activity.viewModels
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -26,7 +27,8 @@ class RoleManagementActivity : ComponentActivity() {
                     PermissionGuard.canAccessAdminPanel(role, dba) &&
                             (dba || PermissionGuard.isSystemAdmin(role) ||
                                     perms.any { it in listOf(
-                                        "manage_roles", "manage_permissions") })
+                                        Permissions.PERM_MANAGE_ROLES,
+                                        Permissions.PERM_MANAGE_PERMISSIONS) })
                 },
                 deniedMessage = "Role Management — admin access required"))
             return
@@ -39,7 +41,7 @@ class RoleManagementActivity : ComponentActivity() {
         val canManagePermissions =
             authRepository.isDbAdmin() ||
                 PermissionGuard.isSystemAdmin(session?.role ?: "") ||
-                "grant_revoke_any_permission" in (session?.permissions ?: emptyList())
+                Permissions.PERM_GRANT_REVOKE_ANY_PERMISSION in (session?.permissions ?: emptyList())
 
         setContent {
             ITConnectTheme {

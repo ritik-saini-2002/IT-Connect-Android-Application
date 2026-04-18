@@ -14,6 +14,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
@@ -33,7 +34,7 @@ class PcControlTouchpadActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (!requirePermission(authRepository,
                 rule = { role, perms, dba ->
-                    PermissionGuard.canAccessWindowsControlSub("windows_control_touchpad", role, perms, dba)
+                    PermissionGuard.canAccessWindowsControlSub(Permissions.PERM_WINDOWS_CONTROL_TOUCHPAD, role, perms, dba)
                 },
                 deniedMessage = "Touchpad — access not granted")) return
         enableEdgeToEdge()

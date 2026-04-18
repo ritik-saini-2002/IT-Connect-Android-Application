@@ -13,6 +13,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
@@ -32,7 +33,7 @@ class PcControlAppDirectoryActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (!requirePermission(authRepository,
                 rule = { role, perms, dba ->
-                    PermissionGuard.canAccessWindowsControlSub("windows_control_app_directory", role, perms, dba)
+                    PermissionGuard.canAccessWindowsControlSub(Permissions.PERM_WINDOWS_CONTROL_APP_DIRECTORY, role, perms, dba)
                 },
                 deniedMessage = "App Directory — access not granted")) return
         enableEdgeToEdge()

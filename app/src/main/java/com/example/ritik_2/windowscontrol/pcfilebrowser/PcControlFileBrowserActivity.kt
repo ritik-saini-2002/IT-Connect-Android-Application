@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.data.*
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
@@ -67,7 +68,7 @@ class PcControlFileBrowserActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (!requirePermission(authRepository,
                 rule = { role, perms, dba ->
-                    PermissionGuard.canAccessWindowsControlSub("windows_control_file_browser", role, perms, dba)
+                    PermissionGuard.canAccessWindowsControlSub(Permissions.PERM_WINDOWS_CONTROL_FILE_BROWSER, role, perms, dba)
                 },
                 deniedMessage = "File Browser — access not granted")) return
         enableEdgeToEdge()

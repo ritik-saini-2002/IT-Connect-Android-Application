@@ -89,7 +89,7 @@ object PermissionGuard {
         if (isSystemAdmin(targetRole) && !isSystemAdmin(editorRole)) return emptySet()
 
         // Permission-based override — if the user was explicitly granted full edit
-        if ("access_all_data" in editorPermissions) return ALL_FIELDS
+        if (Permissions.PERM_ACCESS_ALL_DATA in editorPermissions) return ALL_FIELDS
 
         if (editorId == targetId) return SELF_EDITABLE_FIELDS
 
@@ -200,7 +200,7 @@ object PermissionGuard {
         role       : String,
         permissions: List<String>,
         isDbAdmin  : Boolean = false
-    ): Boolean = isDbAdmin || isSystemAdmin(role) || "database_manager" in permissions
+    ): Boolean = isDbAdmin || isSystemAdmin(role) || Permissions.PERM_DATABASE_MANAGER in permissions
 
     fun canAccessAdminPanel(
         role    : String,
@@ -238,19 +238,19 @@ object PermissionGuard {
         if (isDbAdmin || isSystemAdmin(role)) return true
 
         return when (featureId) {
-            1 -> "submit_complaints" in permissions
+            1 -> Permissions.PERM_SUBMIT_COMPLAINTS in permissions
             2 -> permissions.any { it in listOf(
-                    "view_all_complaints",
-                    "view_department_complaints",
-                    "view_team_complaints"
+                    Permissions.PERM_VIEW_ALL_COMPLAINTS,
+                    Permissions.PERM_VIEW_DEPARTMENT_COMPLAINTS,
+                    Permissions.PERM_VIEW_TEAM_COMPLAINTS
                 )}
-            3 -> canAccessAdminPanel(role, isDbAdmin) || "access_admin_panel" in permissions
-            4 -> "access_server_connect"  in permissions
-            5 -> "access_knowledge_base"  in permissions
-            6 -> "access_windows_control" in permissions
+            3 -> canAccessAdminPanel(role, isDbAdmin) || Permissions.PERM_ACCESS_ADMIN_PANEL in permissions
+            4 -> Permissions.PERM_ACCESS_SERVER_CONNECT  in permissions
+            5 -> Permissions.PERM_ACCESS_KNOWLEDGE_BASE  in permissions
+            6 -> Permissions.PERM_ACCESS_WINDOWS_CONTROL in permissions
             7 -> true   // Chats — all users
             8 -> true   // Help & Support — all users
-            9 -> "access_nagios" in permissions
+            9 -> Permissions.PERM_ACCESS_NAGIOS in permissions
             else -> false
         }
     }
@@ -267,7 +267,7 @@ object PermissionGuard {
         isDbAdmin    : Boolean = false
     ): Boolean {
         if (isDbAdmin || isSystemAdmin(role)) return true
-        return "access_windows_control" in permissions && subPermission in permissions
+        return Permissions.PERM_ACCESS_WINDOWS_CONTROL in permissions && subPermission in permissions
     }
 
     /**
@@ -308,8 +308,9 @@ object PermissionGuard {
 
     /** Permissions that only System_Administrator can grant/revoke. */
     private val SYSTEM_ONLY_PERMISSIONS: Set<String> = setOf(
-        "database_manager", "view_all_companies", "manage_all_companies",
-        "edit_system_administrator", "grant_revoke_any_permission",
-        "manage_system_settings", "view_audit_logs"
+        Permissions.PERM_DATABASE_MANAGER,
+        Permissions.PERM_VIEW_ALL_COMPANIES, Permissions.PERM_MANAGE_ALL_COMPANIES,
+        Permissions.PERM_EDIT_SYSTEM_ADMINISTRATOR, Permissions.PERM_GRANT_REVOKE_ANY_PERMISSION,
+        Permissions.PERM_MANAGE_SYSTEM_SETTINGS, Permissions.PERM_VIEW_AUDIT_LOGS
     )
 }

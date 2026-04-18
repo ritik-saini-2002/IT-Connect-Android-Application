@@ -93,7 +93,7 @@ fun AdministratorPanelScreen(
                 Icons.Default.AccountTree, Color(0xFF00897B)))
 
             // Role management — Administrator and above
-            if (isAdmin || "manage_roles" in permissions) {
+            if (isAdmin || Permissions.PERM_MANAGE_ROLES in permissions) {
                 add(AdminFunction("role_management", "Role Management",
                     "Change user roles and update permissions",
                     Icons.Default.AdminPanelSettings, Color(0xFFF44336),
@@ -110,7 +110,7 @@ fun AdministratorPanelScreen(
             }
 
             // Company settings — Administrator and above
-            if (isAdmin || "manage_companies" in permissions) {
+            if (isAdmin || Permissions.PERM_MANAGE_COMPANIES in permissions) {
                 add(AdminFunction("company_settings", "Company Settings",
                     "Manage company information and branding",
                     Icons.Default.Business, Color(0xFFFF9800),

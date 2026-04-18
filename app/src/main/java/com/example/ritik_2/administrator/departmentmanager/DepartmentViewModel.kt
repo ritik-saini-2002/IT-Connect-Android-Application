@@ -280,7 +280,7 @@ class DepartmentViewModel @Inject constructor(
                 val newPerms  = when {
                     newRole == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
                     roleEntity != null && roleEntity.permissions.isNotEmpty() -> roleEntity.permissions
-                    else -> listOf("view_profile")
+                    else -> listOf(Permissions.PERM_VIEW_PROFILE)
                 }
                 val permsJson = Json.encodeToString(newPerms)
 

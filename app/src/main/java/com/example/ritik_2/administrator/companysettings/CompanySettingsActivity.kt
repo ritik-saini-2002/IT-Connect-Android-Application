@@ -8,6 +8,7 @@ import androidx.activity.viewModels
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.core.requirePermission
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -25,7 +26,7 @@ class CompanySettingsActivity : ComponentActivity() {
                 rule = { role, perms, dba ->
                     PermissionGuard.canAccessAdminPanel(role, dba) &&
                             (dba || PermissionGuard.isSystemAdmin(role) ||
-                                    "manage_companies" in perms)
+                                    Permissions.PERM_MANAGE_COMPANIES in perms)
                 },
                 deniedMessage = "Company Settings — admin access required"))
             return

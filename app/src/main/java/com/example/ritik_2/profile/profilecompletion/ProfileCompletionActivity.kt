@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.administrator.manageuser.ManageUserActivity
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.theme.ITConnectTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -92,8 +93,8 @@ class ProfileCompletionActivity : ComponentActivity() {
         val editorPermissions = session?.permissions ?: emptyList()
         val isAdmin   = PermissionGuard.isSystemAdmin(editorRole)
                 || isDbAdmin
-                || "access_all_data" in editorPermissions
-                || editorRole == com.example.ritik_2.data.model.Permissions.ROLE_ADMIN
+                || Permissions.PERM_ACCESS_ALL_DATA in editorPermissions
+                || editorRole == Permissions.ROLE_ADMIN
         val isManager = PermissionGuard.canEditProfile(
             editorRole = editorRole, targetRole = targetRole,
             editorId   = sessionId,  targetId   = userId, isDbAdmin = false

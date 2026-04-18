@@ -33,6 +33,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ritik_2.core.PermissionGuard
 import com.example.ritik_2.data.model.AuthSession
+import com.example.ritik_2.data.model.Permissions
 import com.example.ritik_2.data.model.UserProfile
 
 // ── Drawer destination ────────────────────────────────────────────────────────
@@ -68,19 +69,19 @@ val drawerItems = listOf(
     DrawerItem("admin_panel",  "Admin Panel",     Icons.Default.AdminPanelSettings,
         requiredPermission = "admin_panel", section = "admin"),
     DrawerItem("manage_users", "Manage Users",    Icons.Default.ManageAccounts,
-        requiredPermission = "view_all_users", section = "admin"),
+        requiredPermission = Permissions.PERM_VIEW_ALL_USERS, section = "admin"),
     DrawerItem("create_user",  "Create User",     Icons.Default.PersonAdd,
-        requiredPermission = "create_user", section = "admin"),
+        requiredPermission = Permissions.PERM_CREATE_USER, section = "admin"),
     DrawerItem("roles",        "Role Management", Icons.Default.Security,
-        requiredPermission = "manage_roles", section = "admin"),
+        requiredPermission = Permissions.PERM_MANAGE_ROLES, section = "admin"),
     DrawerItem("departments",  "Departments",     Icons.Default.Groups,
         requiredPermission = "manage_departments", section = "admin"),
     DrawerItem("database",     "Database",        Icons.Default.Storage,
-        requiredPermission = "database_manager", section = "admin"),
+        requiredPermission = Permissions.PERM_DATABASE_MANAGER, section = "admin"),
     DrawerItem("company",      "Company Settings",Icons.Default.Business,
         requiredPermission = "company_settings", section = "admin"),
     DrawerItem("reports",      "Reports",         Icons.Default.Assessment,
-        requiredPermission = "view_reports", section = "admin"),
+        requiredPermission = Permissions.PERM_VIEW_REPORTS, section = "admin"),
 
     // ── Settings & Logout ──
     DrawerItem("settings",     "Settings",        Icons.Default.Settings,        section = "main"),

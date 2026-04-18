@@ -102,7 +102,7 @@ class RoleManagementViewModel @Inject constructor(
                 name        = r.name,
                 userCount   = userEntities.count { it.role == r.name },
                 isCustom    = r.isCustom,
-                permissions = r.permissions.ifEmpty { listOf("view_profile") }
+                permissions = r.permissions.ifEmpty { listOf(Permissions.PERM_VIEW_PROFILE) }
             )
         }
 
@@ -160,7 +160,7 @@ class RoleManagementViewModel @Inject constructor(
             _state.update { it.copy(isLoading = true) }
             try {
                 val roleId   = "${sanitizedCompany}_$roleName"
-                val perms    = initialPermissions.ifEmpty { listOf("view_profile") }
+                val perms    = initialPermissions.ifEmpty { listOf(Permissions.PERM_VIEW_PROFILE) }
                 val company  = db.companyDao().getByName(sanitizedCompany)?.originalName
                     ?: sanitizedCompany
 
@@ -245,7 +245,7 @@ class RoleManagementViewModel @Inject constructor(
                 val newPerms   = when {
                     newRole == Permissions.ROLE_SYSTEM_ADMIN -> Permissions.ALL_PERMISSIONS
                     roleEntity != null && roleEntity.permissions.isNotEmpty() -> roleEntity.permissions
-                    else -> listOf("view_profile")
+                    else -> listOf(Permissions.PERM_VIEW_PROFILE)
                 }
                 val permsJson = Json.encodeToString(newPerms)
                 val newPath   = "users/$sanitizedCompany/${user.sanitizedDept}/$newRole/${user.id}"

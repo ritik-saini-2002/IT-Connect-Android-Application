@@ -195,7 +195,7 @@ class AdministratorPanelActivity : ComponentActivity() {
 
         when (id) {
             "create_user" -> {
-                if ("create_user" in perms || isDbAdmin)
+                if (Permissions.PERM_CREATE_USER in perms || isDbAdmin)
                     startActivity(Intent(this, CreateUserActivity::class.java))
                 else toast("You don't have permission to create users.")
             }
@@ -207,7 +207,7 @@ class AdministratorPanelActivity : ComponentActivity() {
                 startActivity(Intent(this, DepartmentActivity::class.java))
             }
             "role_management" -> {
-                if ("manage_roles" in perms || isDbAdmin)
+                if (Permissions.PERM_MANAGE_ROLES in perms || isDbAdmin)
                     startActivity(Intent(this, RoleManagementActivity::class.java))
                 else toast("You need the 'manage_roles' permission.")
             }
@@ -219,7 +219,7 @@ class AdministratorPanelActivity : ComponentActivity() {
                 else toast("Database Manager requires System_Administrator role or 'database_manager' permission.")
             }
             "company_settings" -> {
-                if ("manage_companies" in perms || isDbAdmin)
+                if (Permissions.PERM_MANAGE_COMPANIES in perms || isDbAdmin)
                     startActivity(Intent(this, CompanySettingsActivity::class.java))
                 else toast("You need the 'manage_companies' permission.")
             }
