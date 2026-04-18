@@ -11,11 +11,19 @@ import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.requirePermission
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class PcControlTouchpadActivity : ComponentActivity() {
+
+    @Inject lateinit var authRepository: AuthRepository
 
     private val viewModel: PcControlViewModel by viewModels {
         PcControlViewModelFactory(applicationContext)
@@ -23,6 +31,11 @@ class PcControlTouchpadActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!requirePermission(authRepository,
+                rule = { role, perms, dba ->
+                    PermissionGuard.canAccessWindowsControlSub("windows_control_touchpad", role, perms, dba)
+                },
+                deniedMessage = "Touchpad — access not granted")) return
         enableEdgeToEdge()
         applyFullscreen()
         applyRotationPolicy()

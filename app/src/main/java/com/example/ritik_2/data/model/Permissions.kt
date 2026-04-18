@@ -26,7 +26,11 @@ object Permissions {
             "submit_complaints", "view_all_complaints", "resolve_complaints",
             // Feature access
             "access_server_connect", "access_windows_control",
-            "access_nagios", "access_knowledge_base"
+            "access_nagios", "access_knowledge_base",
+            // Windows Control sub-features
+            "windows_control_touchpad", "windows_control_file_browser",
+            "windows_control_app_directory", "windows_control_admin_settings",
+            "windows_control_add_step"
         )
         ROLE_MANAGER -> listOf(
             "view_team_users", "modify_team_user", "view_team_analytics",
@@ -101,7 +105,13 @@ object Permissions {
         "access_server_connect",    // Windows SMB file share
         "access_windows_control",   // PC remote control / touchpad
         "access_nagios",            // Nagios server monitor
-        "access_knowledge_base"     // MAC / network lookup tool
+        "access_knowledge_base",    // MAC / network lookup tool
+        // Windows Control sub-feature gates (require access_windows_control + sub-key)
+        "windows_control_touchpad",
+        "windows_control_file_browser",
+        "windows_control_app_directory",
+        "windows_control_admin_settings",
+        "windows_control_add_step"
     )
 
     /**

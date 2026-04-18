@@ -10,11 +10,19 @@ import androidx.compose.material3.Surface
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.requirePermission
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class PcControlAppDirectoryActivity : ComponentActivity() {
+
+    @Inject lateinit var authRepository: AuthRepository
 
     private val viewModel: PcControlViewModel by viewModels {
         PcControlViewModelFactory(applicationContext)
@@ -22,6 +30,11 @@ class PcControlAppDirectoryActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!requirePermission(authRepository,
+                rule = { role, perms, dba ->
+                    PermissionGuard.canAccessWindowsControlSub("windows_control_app_directory", role, perms, dba)
+                },
+                deniedMessage = "App Directory — access not granted")) return
         enableEdgeToEdge()
         applyFullscreen()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR

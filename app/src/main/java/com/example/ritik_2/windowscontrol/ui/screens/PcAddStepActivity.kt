@@ -29,19 +29,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.requirePermission
 import com.example.ritik_2.theme.Ritik_2Theme
 import com.example.ritik_2.windowscontrol.PcControlMain
 import com.example.ritik_2.windowscontrol.data.*
 import com.example.ritik_2.windowscontrol.pcfilebrowser.PcControlFileBrowserActivity
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import javax.inject.Inject
 
 // ─────────────────────────────────────────────────────────────
 //  ACTIVITY SHELL
 // ─────────────────────────────────────────────────────────────
 
+@AndroidEntryPoint
 class PcAddStepActivity : ComponentActivity() {
+
+    @Inject lateinit var authRepository: AuthRepository
 
     companion object {
         const val EXTRA_STEP_JSON = "extra_step_json"
@@ -49,6 +57,11 @@ class PcAddStepActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!requirePermission(authRepository,
+                rule = { role, perms, dba ->
+                    PermissionGuard.canAccessWindowsControlSub("windows_control_add_step", role, perms, dba)
+                },
+                deniedMessage = "Add Step — access not granted")) return
         if (!PcControlMain.isInitialized) PcControlMain.init(this)
         setContent {
             Ritik_2Theme {

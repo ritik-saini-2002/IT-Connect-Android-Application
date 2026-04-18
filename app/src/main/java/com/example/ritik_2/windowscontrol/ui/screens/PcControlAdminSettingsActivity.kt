@@ -10,9 +10,14 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.FragmentActivity
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.requirePermission
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Hosts PcControlAdminSettingsUI in its own Activity so the master-key admin
@@ -29,7 +34,10 @@ import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
  * `BiometricPrompt`, which requires a FragmentActivity host to stage its
  * internal fragment.
  */
+@AndroidEntryPoint
 class PcControlAdminSettingsActivity : FragmentActivity() {
+
+    @Inject lateinit var authRepository: AuthRepository
 
     private val viewModel: PcControlViewModel by viewModels {
         PcControlViewModelFactory(applicationContext)
@@ -37,6 +45,11 @@ class PcControlAdminSettingsActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!requirePermission(authRepository,
+                rule = { role, perms, dba ->
+                    PermissionGuard.canAccessWindowsControlSub("windows_control_admin_settings", role, perms, dba)
+                },
+                deniedMessage = "Admin Settings — access not granted")) return
         enableEdgeToEdge()
         applyFullscreen()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT

@@ -3,7 +3,7 @@
 **Branch:** `claude/flamboyant-gagarin-ccef2c`
 **Worktree:** `.claude/worktrees/flamboyant-gagarin-ccef2c/`
 **Last update:** 2026-04-18
-**Status:** Phase 1 + Phase 2 complete and committed on this branch. Phase 3 not started.
+**Status:** Phase 1 + Phase 2 + Phase 3 item 1 complete and committed on this branch.
 
 This document is the source of truth for any follow-up agent on the audit & permission work stream. (See `HANDOFF.md` in this same folder for the unrelated windowscontrol feature roadmap — different scope, different agent.) Read this end-to-end before touching anything in the audit / permissions area — the bug list, design decisions, and the *why* behind each choice are captured here. Memory files in `~/.claude/projects/.../memory/` mirror the high-level decisions.
 
@@ -83,13 +83,7 @@ Memory file: `~/.claude/projects/C--Users-LBS-StudioProjects-IT-Connect-Android-
 Tracked in priority order. Each can ship independently.
 
 ### High value
-1. **Per-sub-feature permission keys for Windows Control.** Right now `access_windows_control` gates the parent screen but not Touchpad / FileBrowser / AppDirectory / AdminSettings / AddStep. Add keys like `windows_control_touchpad`, `windows_control_file_browser`, etc. to `Permissions.ALL_PERMISSIONS` and wire `requirePermission` into each sub-Activity's onCreate. Files:
-   - `app/src/main/java/com/example/ritik_2/windowscontrol/PcControlActivity.kt`
-   - `app/src/main/java/com/example/ritik_2/windowscontrol/pctouchpad/PcControlTouchpadActivity.kt`
-   - `app/src/main/java/com/example/ritik_2/windowscontrol/pcfilebrowser/PcControlFileBrowserActivity.kt`
-   - `app/src/main/java/com/example/ritik_2/windowscontrol/pccontrolappdirectory/PcControlAppDirectoryActivity.kt`
-   - `app/src/main/java/com/example/ritik_2/windowscontrol/ui/screens/PcControlAdminSettingsActivity.kt`
-   - `app/src/main/java/com/example/ritik_2/windowscontrol/ui/screens/PcAddStepActivity.kt`
+1. ~~**Per-sub-feature permission keys for Windows Control.**~~ **DONE.** Added `windows_control_touchpad`, `windows_control_file_browser`, `windows_control_app_directory`, `windows_control_admin_settings`, `windows_control_add_step` to `Permissions.ALL_PERMISSIONS` + `forRole(ROLE_ADMIN)`. Added `PermissionGuard.canAccessWindowsControlSub()`. Wired `@AndroidEntryPoint` + `requirePermission` into all 6 windowscontrol Activities (including parent `PcControlActivity`).
 2. **Permission key constants instead of literal strings.** Audit Medium: `Permissions.kt` defines string keys but call sites in `RoleManagementViewModel`, `PermissionGuard`, etc. use bare literals. A single typo anywhere breaks the gate silently. Add `const val PERM_X = "x"` for every key in `Permissions.kt` and replace literals project-wide.
 3. **Cross-process ETag/optimistic concurrency** for role mutations. Phase 1's mutex only covers same-session. Two admins on different devices can still clobber each other's role changes. Either implement client-side compare-and-set (re-fetch + diff before PATCH) or add server-side `updatedAt` validation in PocketBase rules.
 

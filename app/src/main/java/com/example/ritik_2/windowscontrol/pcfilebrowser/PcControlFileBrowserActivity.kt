@@ -21,11 +21,16 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.viewModels
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.core.requirePermission
 import com.example.ritik_2.theme.ITConnectTheme
 import com.example.ritik_2.windowscontrol.data.*
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModel.BrowserLevelState
 import com.example.ritik_2.windowscontrol.viewmodel.PcControlViewModelFactory
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
@@ -44,7 +49,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+@AndroidEntryPoint
 class PcControlFileBrowserActivity : ComponentActivity() {
+
+    @Inject lateinit var authRepository: AuthRepository
+
     private val viewModel: PcControlViewModel by viewModels {
         PcControlViewModelFactory(applicationContext)
     }
@@ -56,6 +65,11 @@ class PcControlFileBrowserActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!requirePermission(authRepository,
+                rule = { role, perms, dba ->
+                    PermissionGuard.canAccessWindowsControlSub("windows_control_file_browser", role, perms, dba)
+                },
+                deniedMessage = "File Browser — access not granted")) return
         enableEdgeToEdge()
         applyFullscreen()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR

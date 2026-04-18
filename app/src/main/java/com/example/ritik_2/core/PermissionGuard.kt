@@ -256,6 +256,21 @@ object PermissionGuard {
     }
 
     /**
+     * Gate for Windows Control sub-features (Touchpad, File Browser, etc.).
+     * Requires both the parent gate AND the specific sub-feature permission.
+     * System_Administrator and DB admin bypass unconditionally.
+     */
+    fun canAccessWindowsControlSub(
+        subPermission: String,
+        role         : String,
+        permissions  : List<String>,
+        isDbAdmin    : Boolean = false
+    ): Boolean {
+        if (isDbAdmin || isSystemAdmin(role)) return true
+        return "access_windows_control" in permissions && subPermission in permissions
+    }
+
+    /**
      * Human-readable name for each feature tile — used in "Access Denied" messages.
      */
     fun featureName(featureId: Int): String = when (featureId) {
