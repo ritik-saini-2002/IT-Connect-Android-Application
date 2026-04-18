@@ -41,12 +41,26 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
     // HTTPS flows through unconditionally; pinning (Phase 2.1) then guards
     // chain integrity. Order: pinning-gate → HTTPS or LAN-only HTTP.
 
+    // Operations client — used by every input action (mouse, keyboard, click,
+    // scroll, plan execute). Real-time priority: an action must never queue
+    // behind another action nor behind any background concern. We give it a
+    // dedicated Dispatcher with generous per-host capacity so burst inputs
+    // (touch samples, key repeat) run concurrently instead of serializing
+    // behind OkHttp's default 5-per-host cap. The server-side mouse handler
+    // is idempotent and order-preserving at the OS (user32 SendInput)
+    // level, so concurrent in-flight requests are safe.
+    private val opsDispatcher = Dispatcher().apply {
+        maxRequests        = 128
+        maxRequestsPerHost = 64
+    }
+
     protected val http = OkHttpClient.Builder()
         .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
         .socketFactory(tunedSocketFactory())
+        .dispatcher(opsDispatcher)
         .addInterceptor(PrivateNetworkInterceptor())
         .applyPinning(settings)
         .build()
@@ -56,6 +70,7 @@ abstract class PcBaseClient(protected val settings: PcControlSettings) {
         .readTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
         .writeTimeout(PING_TIMEOUT, TimeUnit.SECONDS)
         .retryOnConnectionFailure(false)
+        .dispatcher(opsDispatcher)
         .addInterceptor(PrivateNetworkInterceptor())
         .applyPinning(settings)
         .build()
@@ -149,6 +164,7 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
     }
 
     suspend fun executePlan(plan: PcPlan): PcNetworkResult<PcExecuteResponse> {
+        LiveStreamGate.bump()
         val stepsArray = JsonParser.parseString(plan.stepsJson).asJsonArray
         val payload    = com.google.gson.JsonObject().apply {
             addProperty("planName", plan.planName)
@@ -160,8 +176,10 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
         else PcNetworkResult(false, error = result.error)
     }
 
-    suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> =
-        post("/quick", gson.toJsonTree(step).asJsonObject)
+    suspend fun executeQuickStep(step: PcStep): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/quick", gson.toJsonTree(step).asJsonObject)
+    }
 
     suspend fun getProcesses(): PcNetworkResult<List<String>> {
         val r = get("/processes")
@@ -754,40 +772,83 @@ class PcControlBrowseClient(settings: PcControlSettings) : PcBaseClient(settings
     }
 }
 
+/**
+ * Realtime-priority gate. The live-view stream is *passive tracking only* —
+ * every operation (mouse, keyboard, click, scroll, plan step, app launch)
+ * takes strict precedence.
+ *
+ * Every input path calls [bump] the instant the user touches a control.
+ * The MJPEG reader in `LiveScreenBackground` polls [isInputActive] on each
+ * frame boundary and discards frames (skipping decode + render) while the
+ * gate is hot. Net effect: the moment the user starts interacting, the
+ * stream stops consuming CPU on the phone and the socket drain rate
+ * collapses to whatever the OS kernel accepts — the radio immediately has
+ * headroom for outbound input POSTs, so operations land at network RTT.
+ *
+ * When the gate cools (no input for [QUIET_MS]), the reader resumes
+ * decoding and the user sees the updated desktop catch up.
+ */
+object LiveStreamGate {
+    const val QUIET_MS: Long = 200L
+    @Volatile private var lastInputAt: Long = 0L
+
+    fun bump() { lastInputAt = android.os.SystemClock.elapsedRealtime() }
+    fun isInputActive(): Boolean =
+        android.os.SystemClock.elapsedRealtime() - lastInputAt < QUIET_MS
+}
+
 // ── Input client ──────────────────────────────────────────────────────────────
 class PcControlInputClient(settings: PcControlSettings) : PcBaseClient(settings) {
 
-    suspend fun moveMouse(dx: Float, dy: Float) =
-        post("/input/mouse/move", mapOf("dx" to dx, "dy" to dy))
+    suspend fun moveMouse(dx: Float, dy: Float): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/mouse/move", mapOf("dx" to dx, "dy" to dy))
+    }
 
-    suspend fun clickMouse(button: String = "left", double: Boolean = false) =
-        post("/input/mouse/click", mapOf("button" to button, "double" to double))
+    suspend fun clickMouse(button: String = "left", double: Boolean = false): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/mouse/click", mapOf("button" to button, "double" to double))
+    }
 
-    suspend fun scrollMouse(amount: Int, horizontal: Boolean = false) =
-        post("/input/mouse/scroll", mapOf("amount" to amount, "horizontal" to horizontal))
+    suspend fun scrollMouse(amount: Int, horizontal: Boolean = false): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/mouse/scroll", mapOf("amount" to amount, "horizontal" to horizontal))
+    }
 
-    suspend fun mouseButtonDown(button: String = "left") =
-        post("/input/mouse/down", mapOf("button" to button))
+    suspend fun mouseButtonDown(button: String = "left"): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/mouse/down", mapOf("button" to button))
+    }
 
-    suspend fun mouseButtonUp(button: String = "left") =
-        post("/input/mouse/up", mapOf("button" to button))
+    suspend fun mouseButtonUp(button: String = "left"): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/mouse/up", mapOf("button" to button))
+    }
 
-    suspend fun pressKey(key: String) =
-        post("/input/keyboard/key", mapOf("value" to key))
+    suspend fun pressKey(key: String): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/keyboard/key", mapOf("value" to key))
+    }
 
-    suspend fun typeText(text: String) =
-        post("/input/keyboard/type", mapOf("value" to text))
+    suspend fun typeText(text: String): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/keyboard/type", mapOf("value" to text))
+    }
 
     // ── NEW: Key hold / release for functional keyboard bar ──────────────
     // Calls agent v10 /input/keyboard/hold and /input/keyboard/release endpoints.
     // Used for modifier keys (Shift, Ctrl, Alt, Win, AltGr) that stay pressed
     // until explicitly released.
 
-    suspend fun holdKey(keyName: String) =
-        post("/input/keyboard/hold", mapOf("value" to keyName))
+    suspend fun holdKey(keyName: String): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/keyboard/hold", mapOf("value" to keyName))
+    }
 
-    suspend fun releaseKey(keyName: String) =
-        post("/input/keyboard/release", mapOf("value" to keyName))
+    suspend fun releaseKey(keyName: String): PcNetworkResult<String> {
+        LiveStreamGate.bump()
+        return post("/input/keyboard/release", mapOf("value" to keyName))
+    }
 
     // ── NEW: App minimize / restore ──────────────────────────────────────
     // Calls agent v10 /app/minimize and /app/restore endpoints.

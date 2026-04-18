@@ -371,7 +371,18 @@ fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
             // Wi-Fi roam) reconnects automatically while `isOn` stays true.
             while (true) {
                 try {
-                    api.streamScreen(width = 1024, quality = 30, fps = 30) { jpeg ->
+                    // Tracker-grade defaults: this stream is *passive observation*,
+                    // not a remote-desktop primary. Keeping it at ~150 KB/sec means
+                    // it cannot saturate Wi-Fi even on a weak 2.4 GHz link, so
+                    // action POSTs (mouse/key/plan) always have bandwidth.
+                    api.streamScreen(width = 854, quality = 25, fps = 15) { jpeg ->
+                        // Realtime gate: if any operation (mouse, key, plan step)
+                        // fired in the last LiveStreamGate.QUIET_MS ms, drop this
+                        // frame on the floor — no decode, no render. CPU and GC
+                        // are 100% available for input. The stream itself stays
+                        // connected so it resumes instantly once input idles.
+                        if (com.example.ritik_2.windowscontrol.network.LiveStreamGate.isInputActive())
+                            return@streamScreen
                         // trySend is non-blocking; if channel is full (capacity=1)
                         // BufferOverflow.DROP_OLDEST evicts the previous entry.
                         jpegs.trySend(jpeg)
