@@ -23,8 +23,9 @@ android {
         val props = com.android.build.gradle.internal.cxx.configure
             .gradleLocalProperties(rootDir, providers)
 
-        buildConfigField("String", "PB_HOST",             "\"${props.getProperty("pb.host",             "192.168.7.28")}\"")
+        buildConfigField("String", "PB_HOST",             "\"${props.getProperty("pb.host",             "192.168.7.247")}\"")
         buildConfigField("String", "PB_PORT",             "\"${props.getProperty("pb.port",             "5005")}\"")
+        buildConfigField("String", "PB_PATH",             "\"${props["pb.path"]}\"")
         // Admin credentials removed from BuildConfig — they must not ship in the APK.
         // Admin token is obtained server-side or via authenticated System_Administrator login.
 
@@ -54,8 +55,8 @@ android {
             signingConfig = signingConfigs.getByName("itconnect")
         }
         release {
-            isMinifyEnabled   = true
-            isShrinkResources = true
+            isMinifyEnabled   = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

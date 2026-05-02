@@ -10,9 +10,12 @@ import javax.inject.Singleton
 class PocketBaseClientProvider @Inject constructor() {
     val client: PocketbaseClient by lazy {
         PocketbaseClient({
-            protocol = URLProtocol.HTTP
-            host     = AppConfig.PB_HOST
-            port     = AppConfig.PB_PORT
+            protocol     = URLProtocol.HTTP
+            host         = AppConfig.PB_HOST
+            port         = AppConfig.PB_PORT
+            pathSegments = AppConfig.PB_PATH
+                .split("/")
+                .filter { it.isNotBlank() }
         })
     }
 }
