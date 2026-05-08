@@ -223,7 +223,7 @@ fun PcControlTouchpadUI(viewModel: PcControlViewModel) {
         // ── Volume Slider Popup ──────────────────────────────────────────────
         if (showVolumeSlider) {
             SystemSliderPopup(
-                title = "🔊 Volume",
+                title = "Volume",
                 value = volumeLevel.value.coerceIn(0, 100),
                 onValueChange = { viewModel.setVolume(it) },
                 onDismiss = { showVolumeSlider = false }
@@ -378,7 +378,7 @@ fun LiveScreenBackground(isOn: Boolean, modifier: Modifier = Modifier) {
                     // not a remote-desktop primary. Keeping it at ~150 KB/sec means
                     // it cannot saturate Wi-Fi even on a weak 2.4 GHz link, so
                     // action POSTs (mouse/key/plan) always have bandwidth.
-                    api.streamScreen(width = 854, quality = 25, fps = 15) { jpeg ->
+                    api.streamScreen(width = 2560, quality = 75, fps = 60) { jpeg ->
                         // Realtime gate: if any operation (mouse, key, plan step)
                         // fired in the last LiveStreamGate.QUIET_MS ms, drop this
                         // frame on the floor — no decode, no render. CPU and GC
@@ -533,11 +533,11 @@ private fun LandscapeLayout(
                         GlassButton(c, "↓", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseScroll(-3); onFeedback("Scroll ↓") }
                     }
                     Row(Modifier.fillMaxWidth().height(28.dp), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                        GlassButton(c, if (zoomLocked) "🔒 Zoom" else "🔓 Zoom", Modifier.weight(1f).fillMaxHeight(),
+                        GlassButton(c, if (zoomLocked) "Zoom" else "Zoom", Modifier.weight(1f).fillMaxHeight(),
                             tintColor = if (zoomLocked) c.danger else null) {
                             onZoomLockToggle(); onFeedback(if (zoomLocked) "Zoom unlocked" else "Zoom locked")
                         }
-                        GlassButton(c, if (touchpadLocked) "🔒 Pad" else "🔓 Pad", Modifier.weight(1f).fillMaxHeight(),
+                        GlassButton(c, if (touchpadLocked) "Pad" else "Pad", Modifier.weight(1f).fillMaxHeight(),
                             tintColor = if (touchpadLocked) c.danger else null) {
                             onTouchpadLockToggle(); onFeedback(if (touchpadLocked) "Pad unlocked" else "Pad locked")
                         }
@@ -554,7 +554,7 @@ private fun LandscapeLayout(
                             }
                             GlassButton(c, "▼", arrowMod) { vm.sendKey("DOWN") }
                             Spacer(Modifier.height(2.dp))
-                            GlassButton(c, if (showUrlBar) "× URL" else "🌐 URL", Modifier.fillMaxWidth().height(28.dp), if (showUrlBar) c.accent else null, onClick = onToggleUrlBar)
+                            GlassButton(c, if (showUrlBar) "× URL" else "URL", Modifier.fillMaxWidth().height(28.dp), if (showUrlBar) c.accent else null, onClick = onToggleUrlBar)
                             LiveToggleButton(c = c, isOn = liveScreenOn, onToggle = onLiveToggle, modifier = Modifier.fillMaxWidth().height(28.dp))
                         }
                     }
@@ -642,11 +642,11 @@ fun PortraitLayout(
                 GlassButton(c, "L", Modifier.weight(1f).fillMaxHeight(), c.accent) { vm.sendMouseClick("left"); onFeedback("L Click") }
                 GlassScrollWheel(c = c, vm = vm, onFeedback = onFeedback)
                 GlassButton(c, "R", Modifier.weight(1f).fillMaxHeight()) { vm.sendMouseClick("right"); onFeedback("R Click") }
-                GlassButton(c, if (zoomLocked) "🔒Z" else "Z", Modifier.width(42.dp).fillMaxHeight(),
+                GlassButton(c, if (zoomLocked) "Z" else "Z", Modifier.width(42.dp).fillMaxHeight(),
                     tintColor = if (zoomLocked) c.danger else null) {
                     onZoomLockToggle(); onFeedback(if (zoomLocked) "Zoom unlocked" else "Zoom locked")
                 }
-                GlassButton(c, if (touchpadLocked) "🔒P" else "P", Modifier.width(42.dp).fillMaxHeight(),
+                GlassButton(c, if (touchpadLocked) "P" else "P", Modifier.width(42.dp).fillMaxHeight(),
                     tintColor = if (touchpadLocked) c.danger else null) {
                     onTouchpadLockToggle(); onFeedback(if (touchpadLocked) "Pad unlocked" else "Pad locked")
                 }
@@ -728,7 +728,7 @@ fun LiveToggleButton(c: GlassColors, isOn: Boolean, onToggle: (Boolean) -> Unit,
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 if (isOn) { Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFEF4444).copy(pulseAlpha))); Spacer(Modifier.height(1.dp)) }
-                Text(if (isOn) "LIVE\nOFF" else "🖥\nLIVE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = if (isOn) Color(0xFFEF4444) else c.textSecondary, textAlign = TextAlign.Center, lineHeight = 10.sp)
+                Text(if (isOn) "LIVE\nOFF" else "LIVE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = if (isOn) Color(0xFFEF4444) else c.textSecondary, textAlign = TextAlign.Center, lineHeight = 10.sp)
             }
         }
     }

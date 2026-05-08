@@ -269,9 +269,9 @@ class PcControlApiClient(settings: PcControlSettings) : PcBaseClient(settings) {
      * @param fps     target frames per second, 1..30 (agent clamps)
      */
     suspend fun streamScreen(
-        width  : Int = 1366,
-        quality: Int = 40,
-        fps    : Int = 30,
+        width  : Int = 2560,
+        quality: Int = 75,
+        fps    : Int = 60,
         onFrame: suspend (ByteArray) -> Unit,
     ) = withContext(Dispatchers.IO) {
         val host = settings.pcIpAddress
