@@ -9,7 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.auth.AuthState
-import com.example.ritik_2.auth.LoginViewModel
+import com.example.ritik_2.login.LoginViewModel
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.registration.RegistrationActivity

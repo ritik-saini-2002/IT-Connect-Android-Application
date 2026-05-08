@@ -1,7 +1,9 @@
-package com.example.ritik_2.auth
+package com.example.ritik_2.login
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.auth.AuthState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
