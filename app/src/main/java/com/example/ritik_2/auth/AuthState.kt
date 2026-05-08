@@ -5,4 +5,6 @@ sealed class AuthState {
     object Loading : AuthState()
     data class Success(val needsProfileCompletion: Boolean = false) : AuthState()
     data class Error(val message: String) : AuthState()
+    object OtpSent : AuthState()
+    object OtpVerified : AuthState()
 }

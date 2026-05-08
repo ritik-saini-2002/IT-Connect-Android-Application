@@ -50,6 +50,30 @@ class LoginViewModel @Inject constructor(
         }
     }
 
+    // LoginViewModel.kt — add these below sendPasswordReset()
+
+    fun sendOtp(email: String) {
+        viewModelScope.launch {
+            _resetState.value = AuthState.Loading
+            _resetState.value = authRepository.sendOtp(email.trim())
+                .fold(
+                    onSuccess = { AuthState.OtpSent },
+                    onFailure = { AuthState.Error(it.message ?: "Failed to send OTP") }
+                )
+        }
+    }
+
+    fun verifyOtpAndResetPassword(email: String, otp: String, newPassword: String) {
+        viewModelScope.launch {
+            _resetState.value = AuthState.Loading
+            _resetState.value = authRepository.verifyOtpAndResetPassword(email.trim(), otp.trim(), newPassword)
+                .fold(
+                    onSuccess = { AuthState.Success() },
+                    onFailure = { AuthState.Error(it.message ?: "Reset failed") }
+                )
+        }
+    }
+
     fun resetLoginState() { _loginState.value = AuthState.Idle }
     fun resetResetState()  { _resetState.value = AuthState.Idle }
 

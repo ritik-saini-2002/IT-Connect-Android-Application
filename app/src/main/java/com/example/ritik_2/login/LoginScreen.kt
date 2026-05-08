@@ -47,8 +47,11 @@ fun LoginScreen(
     onContactClick       : () -> Unit               = {},
     // ✅ NEW — optional ViewModel state (null-safe so Preview still works)
     loginState           : StateFlow<AuthState>?    = null,
-    resetState           : StateFlow<AuthState>?    = null
-) {
+    resetState           : StateFlow<AuthState>?    = null,
+    onVerifyOtpAndResetPassword: (String, String, String) -> Unit = { _, _, _ -> }
+
+
+    ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
@@ -281,15 +284,16 @@ fun LoginScreen(
         }
     }
 
+    // Inside LoginScreen composable — update the dialog call
+
     if (showForgotPasswordDialog) {
         ModernForgotPasswordDialog(
-            onDismiss       = { showForgotPasswordDialog = false },
-            onSendResetLink = { resetEmail ->
-                onForgotPasswordClick(resetEmail)
-                showForgotPasswordDialog = false
+            onDismiss                   = { showForgotPasswordDialog = false },
+            onSendOtp                   = { email -> onForgotPasswordClick(email) },
+            onVerifyOtpAndResetPassword = { email, otp, newPass ->
+                onVerifyOtpAndResetPassword(email, otp, newPass)
             },
-            // ✅ isSending driven by real ViewModel reset state
-            isSending = resetAuthState is AuthState.Loading
+            resetState = resetAuthState ?: AuthState.Idle
         )
     }
     // ✅ Removed: broken LaunchedEffect(isLoading) with hardcoded 1500ms delay
@@ -403,13 +407,31 @@ fun EnhancedLoginPasswordField(
     )
 }
 
+// LoginScreen.kt — replace ModernForgotPasswordDialog entirely
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModernForgotPasswordDialog(
-    onDismiss      : () -> Unit,
-    onSendResetLink: (String) -> Unit,
-    isSending      : Boolean = false   // ✅ NEW param — driven by ViewModel
+    onDismiss                   : () -> Unit,
+    onSendOtp                   : (String) -> Unit,
+    onVerifyOtpAndResetPassword : (String, String, String) -> Unit,
+    resetState                  : AuthState = AuthState.Idle
 ) {
-    var email by remember { mutableStateOf("") }
+    // Step 1 = email entry, Step 2 = OTP entry, Step 3 = new password
+    var step            by remember { mutableStateOf(1) }
+    var email           by remember { mutableStateOf("") }
+    var otp             by remember { mutableStateOf("") }
+    var newPassword     by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    val isLoading = resetState is AuthState.Loading
+
+    // Auto-advance when OTP is sent successfully
+    LaunchedEffect(resetState) {
+        if (resetState is AuthState.OtpSent  && step == 1) step = 2
+        if (resetState is AuthState.Success  && step == 3) onDismiss()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -417,53 +439,273 @@ fun ModernForgotPasswordDialog(
         shape            = RoundedCornerShape(20.dp),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                Icon(
+                    imageVector = when (step) {
+                        2    -> Icons.Default.Pin
+                        3    -> Icons.Default.Lock
+                        else -> Icons.Default.Key
+                    },
+                    contentDescription = null,
+                    tint     = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Reset Password", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Text(
+                    text = when (step) {
+                        2    -> "Enter OTP"
+                        3    -> "New Password"
+                        else -> "Reset Password"
+                    },
+                    fontWeight = FontWeight.Bold,
+                    color      = MaterialTheme.colorScheme.onSurface
+                )
             }
         },
         text = {
             Column {
-                Text("Enter your email address and we'll send you a link to reset your password.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // ── Step progress indicator ──────────────────────────────
+                Row(
+                    modifier            = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    repeat(3) { i ->
+                        Box(
+                            modifier = Modifier
+                                .size(if (step == i + 1) 12.dp else 8.dp)
+                                .background(
+                                    color = if (step >= i + 1) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outline,
+                                    shape = CircleShape
+                                )
+                        )
+                        if (i < 2) Spacer(modifier = Modifier.width(6.dp))
+                    }
+                }
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = email, onValueChange = { email = it },
-                    label = { Text("Email Address") },
-                    placeholder = { Text("Enter your email") },
-                    leadingIcon = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+
+                when (step) {
+                    // ── Step 1: Email ────────────────────────────────────
+                    1 -> {
+                        Text(
+                            "Enter your registered email. We'll send a 6-digit OTP.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value           = email,
+                            onValueChange   = { email = it },
+                            label           = { Text("Email Address") },
+                            placeholder     = { Text("Enter your email") },
+                            leadingIcon     = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) },
+                            modifier        = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+                            singleLine = true,
+                            colors     = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                    }
+
+                    // ── Step 2: OTP ──────────────────────────────────────
+                    2 -> {
+                        Text(
+                            "A 6-digit OTP was sent to $email. Enter it below.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value           = otp,
+                            onValueChange   = { if (it.length <= 6) otp = it },
+                            label           = { Text("OTP Code") },
+                            placeholder     = { Text("Enter 6-digit OTP") },
+                            leadingIcon     = { Icon(Icons.Default.Pin, null, tint = MaterialTheme.colorScheme.primary) },
+                            modifier        = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            singleLine = true,
+                            colors     = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(
+                            onClick = { onSendOtp(email) },
+                            enabled = !isLoading
+                        ) { Text("Resend OTP", color = MaterialTheme.colorScheme.primary) }
+                    }
+
+                    // ── Step 3: New Password ─────────────────────────────
+                    3 -> {
+                        Text(
+                            "OTP verified! Set your new password.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value                = newPassword,
+                            onValueChange        = { newPassword = it },
+                            label                = { Text("New Password") },
+                            placeholder          = { Text("Min 8 characters") },
+                            leadingIcon          = { Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingIcon         = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                        null, tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            },
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            modifier        = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+                            singleLine      = true,
+                            colors          = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value                = confirmPassword,
+                            onValueChange        = { confirmPassword = it },
+                            label                = { Text("Confirm Password") },
+                            placeholder          = { Text("Re-enter password") },
+                            leadingIcon          = { Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary) },
+                            isError              = confirmPassword.isNotEmpty() && confirmPassword != newPassword,
+                            supportingText       = {
+                                if (confirmPassword.isNotEmpty() && confirmPassword != newPassword)
+                                    Text("Passwords do not match", color = MaterialTheme.colorScheme.error)
+                            },
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            modifier        = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                            singleLine      = true,
+                            colors          = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            )
+                        )
+                    }
+                }
+
+                // ── Error message ────────────────────────────────────────
+                if (resetState is AuthState.Error) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text  = resetState.message,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 13.sp
                     )
-                )
+                }
             }
         },
         confirmButton = {
             Button(
-                onClick  = { if (email.isNotBlank()) onSendResetLink(email) },
-                colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                shape    = RoundedCornerShape(12.dp),
-                enabled  = !isSending && email.isNotBlank()
+                onClick = {
+                    when (step) {
+                        1 -> if (email.isNotBlank()) onSendOtp(email)
+                        2 -> if (otp.length == 6)   step = 3   // just advance; verify on submit
+                        3 -> if (newPassword.length >= 8 && newPassword == confirmPassword)
+                            onVerifyOtpAndResetPassword(email, otp, newPassword)
+                    }
+                },
+                colors  = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                shape   = RoundedCornerShape(12.dp),
+                enabled = !isLoading && when (step) {
+                    1    -> email.isNotBlank()
+                    2    -> otp.length == 6
+                    else -> newPassword.length >= 8 && newPassword == confirmPassword
+                }
             ) {
-                if (isSending) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        color    = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
                 } else {
-                    Text("Send Link", color = MaterialTheme.colorScheme.onPrimary)
+                    Text(
+                        text  = when (step) { 1 -> "Send OTP"; 2 -> "Next"; else -> "Reset Password" },
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss,
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+            TextButton(
+                onClick = onDismiss,
+                colors  = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
             ) { Text("Cancel") }
         }
     )
 }
+
+//@Composable
+//fun ModernForgotPasswordDialog(
+//    onDismiss      : () -> Unit,
+//    onSendResetLink: (String) -> Unit,
+//    isSending      : Boolean = false   // ✅ NEW param — driven by ViewModel
+//) {
+//    var email by remember { mutableStateOf("") }
+//
+//    AlertDialog(
+//        onDismissRequest = onDismiss,
+//        containerColor   = MaterialTheme.colorScheme.surface,
+//        shape            = RoundedCornerShape(20.dp),
+//        title = {
+//            Row(verticalAlignment = Alignment.CenterVertically) {
+//                Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+//                Spacer(modifier = Modifier.width(8.dp))
+//                Text("Reset Password", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+//            }
+//        },
+//        text = {
+//            Column {
+//                Text("Enter your email address and we'll send you a link to reset your password.",
+//                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+//                Spacer(modifier = Modifier.height(16.dp))
+//                OutlinedTextField(
+//                    value = email, onValueChange = { email = it },
+//                    label = { Text("Email Address") },
+//                    placeholder = { Text("Enter your email") },
+//                    leadingIcon = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) },
+//                    modifier = Modifier.fillMaxWidth(),
+//                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+//                    singleLine = true,
+//                    colors = OutlinedTextFieldDefaults.colors(
+//                        focusedBorderColor   = MaterialTheme.colorScheme.primary,
+//                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+//                    )
+//                )
+//            }
+//        },
+//        confirmButton = {
+//            Button(
+//                onClick  = { if (email.isNotBlank()) onSendResetLink(email) },
+//                colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+//                shape    = RoundedCornerShape(12.dp),
+//                enabled  = !isSending && email.isNotBlank()
+//            ) {
+//                if (isSending) {
+//                    CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary,
+//                        modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+//                } else {
+//                    Text("Send Link", color = MaterialTheme.colorScheme.onPrimary)
+//                }
+//            }
+//        },
+//        dismissButton = {
+//            TextButton(onClick = onDismiss,
+//                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+//            ) { Text("Cancel") }
+//        }
+//    )
+//}
 
 @Preview(showBackground = true)
 @Composable

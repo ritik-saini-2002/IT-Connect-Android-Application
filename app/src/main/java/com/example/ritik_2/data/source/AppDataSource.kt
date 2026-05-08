@@ -10,6 +10,9 @@ interface AppDataSource {
     suspend fun login(email: String, password: String): AuthSession
     suspend fun logout()
     suspend fun sendPasswordReset(email: String): Result<Unit>
+    suspend fun sendOtp(email: String): Result<Unit>
+    suspend fun verifyOtpAndResetPassword(email: String, otp: String, newPassword: String): Result<Unit>
+
     suspend fun createUser(email: String, password: String, name: String, adminToken: String = ""): String
     suspend fun restoreSession(token: String)   // ← must return Unit, nothing else
 

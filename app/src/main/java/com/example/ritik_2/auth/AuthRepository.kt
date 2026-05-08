@@ -158,12 +158,20 @@ class AuthRepository @Inject constructor(
     suspend fun sendPasswordReset(email: String): Result<Unit> =
         dataSource.sendPasswordReset(email)
 
+    // AuthRepository.kt
+
+    suspend fun sendOtp(email: String): Result<Unit> =
+        dataSource.sendOtp(email)
+
+    suspend fun verifyOtpAndResetPassword(email: String, otp: String, newPassword: String): Result<Unit> =
+        dataSource.verifyOtpAndResetPassword(email, otp, newPassword)
+
     suspend fun logout() {
         try { dataSource.logout() } catch (_: Exception) {}
         adminTokenProvider.stopKeepAlive()   // stop background refresh, clear cached token
         sessionManager.clear()
         syncManager.setUserToken("")
-        Log.d(TAG, "Logged out ✅")
+        Log.d(TAG, "Logged out")
     }
 
     fun getSession() = sessionManager.get()

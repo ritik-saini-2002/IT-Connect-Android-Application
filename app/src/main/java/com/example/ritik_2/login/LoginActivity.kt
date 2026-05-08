@@ -9,7 +9,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import com.example.ritik_2.auth.AuthState
-import com.example.ritik_2.login.LoginViewModel
 import com.example.ritik_2.contact.ContactActivity
 import com.example.ritik_2.main.MainActivity
 import com.example.ritik_2.registration.RegistrationActivity
@@ -31,33 +30,40 @@ class LoginActivity : ComponentActivity() {
         setContent {
             ITConnectTheme {
                 LoginScreen(
-                    onLoginClick          = { email, pw -> viewModel.login(email, pw) },
-                    onRegisterClick       = { startActivity(Intent(this, RegistrationActivity::class.java)) },
-                    onForgotPasswordClick = { email -> viewModel.sendPasswordReset(email) },
-                    onInfoClick           = { startActivity(Intent(this, ContactActivity::class.java)) },
-                    onPcControlClick      = { startActivity(Intent(this, PcControlActivity::class.java)) },
-                    onContactClick        = { startActivity(Intent(this, ContactActivity::class.java)) },
-                    loginState            = viewModel.loginState,
-                    resetState            = viewModel.resetState
+                    onLoginClick                = { email, pw -> viewModel.login(email, pw) },
+                    onRegisterClick             = { startActivity(Intent(this, RegistrationActivity::class.java)) },
+                    onForgotPasswordClick       = { email -> viewModel.sendOtp(email) },
+                    onVerifyOtpAndResetPassword = { email, otp, newPass ->
+                        viewModel.verifyOtpAndResetPassword(email, otp, newPass)
+                    },
+                    onInfoClick      = { startActivity(Intent(this, ContactActivity::class.java)) },
+                    onPcControlClick = { startActivity(Intent(this, PcControlActivity::class.java)) },
+                    onContactClick   = { startActivity(Intent(this, ContactActivity::class.java)) },
+                    loginState       = viewModel.loginState,
+                    resetState       = viewModel.resetState
                 )
             }
         }
     }
 
     private fun observeState() {
+        // ── Login state — only handles login events ──────────────────────
         lifecycleScope.launch {
             viewModel.loginState.collect { state ->
                 when (state) {
-                    is AuthState.Success -> navigateToMain()
+                    is AuthState.Success -> navigateToMain()   // ← was missing!
                     is AuthState.Error   -> toast(state.message)
                     else -> {}
                 }
             }
         }
+
+        // ── Reset state — only handles OTP/reset events ──────────────────
         lifecycleScope.launch {
             viewModel.resetState.collect { state ->
                 when (state) {
-                    is AuthState.Success -> toast("Reset link sent! Check your inbox.")
+                    is AuthState.OtpSent -> { /* dialog advances itself via LaunchedEffect */ }
+                    is AuthState.Success -> toast("Password reset successfully! Please log in.")
                     is AuthState.Error   -> toast(state.message)
                     else -> {}
                 }
@@ -65,8 +71,6 @@ class LoginActivity : ComponentActivity() {
         }
     }
 
-    // Login never knows needsProfileCompletion — SplashActivity handles that.
-    // Here we just clear the back stack and go to MainActivity.
     private fun navigateToMain() {
         startActivity(Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
