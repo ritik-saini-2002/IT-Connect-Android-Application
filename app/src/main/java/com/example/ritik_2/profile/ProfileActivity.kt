@@ -31,17 +31,28 @@ class ProfileActivity : ComponentActivity() {
         val targetUserId = intent.getStringExtra("targetUserId") ?: userId
         viewModel.loadProfile(userId)
 
-        val session     = authRepository.getSession()
-        val sessionRole = session?.role    ?: ""
-        val sessionId   = session?.userId  ?: ""
-        val isDbAdmin   = authRepository.isDbAdmin()
-        val canEdit = PermissionGuard.canEditProfile(
+        val session          = authRepository.getSession()
+        val sessionRole      = session?.role        ?: ""
+        val sessionId        = session?.userId      ?: ""
+        val sessionPerms     = session?.permissions ?: emptyList()
+        val isDbAdmin        = authRepository.isDbAdmin()
+        val targetRole       = intent.getStringExtra("targetRole") ?: ""
+
+        // Role-based gate (hierarchy check)
+        val canEditByRole = PermissionGuard.canEditProfile(
             editorRole = sessionRole,
-            targetRole = intent.getStringExtra("targetRole") ?: "",
+            targetRole = targetRole,
             editorId   = sessionId,
             targetId   = userId,
             isDbAdmin  = isDbAdmin
         )
+        // Permission-based gate — own profile: edit_profile / edit_basic_profile grants access
+        val canEditByPermission = (sessionId == userId) &&
+                (com.example.ritik_2.data.model.Permissions.PERM_EDIT_PROFILE       in sessionPerms ||
+                        com.example.ritik_2.data.model.Permissions.PERM_EDIT_BASIC_PROFILE in sessionPerms)
+
+        val canEdit = canEditByRole || canEditByPermission
+
         // Admins/sysadmin who can edit the profile can also manage permissions.
         // Users cannot edit their own permissions (self-escalation guard).
         val canManagePermissions = canEdit && sessionId != userId
@@ -74,15 +85,19 @@ class ProfileActivity : ComponentActivity() {
                             resolvedComplaints = p.resolvedComplaints,
                             isLoading             = uiState.isLoading,
                             canEdit               = canEdit,
-                            permissions           = p.permissions,
-                            canManagePermissions  = canManagePermissions,
+//                            permissions           = p.permissions,
+//                            canManagePermissions  = canManagePermissions,
                             onSavePermissions     = { updated ->
                                 viewModel.updateUserPermissions(userId, updated)
                             },
                             onEditClick           = {
                                 startActivity(
                                     ProfileCompletionActivity.createIntent(
-                                        this, userId, isEditMode = true
+                                        context        = this,
+                                        userId         = userId,
+                                        isEditMode     = true,
+                                        targetUserRole = targetRole,
+                                        editorRole     = sessionRole
                                     )
                                 )
                             },

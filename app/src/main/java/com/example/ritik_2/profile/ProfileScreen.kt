@@ -46,8 +46,12 @@ fun ProfileScreen(
     resolvedComplaints  : Int,
     isLoading           : Boolean,
     canEdit             : Boolean          = false,
-    permissions         : List<String>     = emptyList(),
-    canManagePermissions: Boolean          = false,
+//    permissions         : List<String>     = emptyList(),
+//    canManagePermissions: Boolean          = false,
+    // Permissions the EDITOR holds — used to scope the dialog checklist.
+    // Only permissions within this list can be granted/revoked in the dialog.
+    // Pass emptyList() for read-only viewers; pass ALL_PERMISSIONS for sysadmin.
+    editorPermissions   : List<String>     = emptyList(),
     onSavePermissions   : (List<String>) -> Unit = {},
     onLogoutClick       : () -> Unit,
     onEditClick         : () -> Unit,
@@ -76,16 +80,16 @@ fun ProfileScreen(
                         MaterialTheme.colorScheme.background
                     )))
             ) {
-                IconButton(
-                    onClick  = onBackClick,
-                    modifier = Modifier.padding(top = 8.dp, start = 4.dp).align(Alignment.TopStart)
-                ) {
-                    Icon(Icons.Default.ArrowBack, "Back",
-                        tint = MaterialTheme.colorScheme.onPrimary)
-                }
+//                IconButton(
+//                    onClick  = onBackClick,
+//                    modifier = Modifier.padding(top = 8.dp, start = 4.dp).align(Alignment.TopStart)
+//                ) {
+//                    Icon(Icons.Default.ArrowBack, "Back",
+//                        tint = MaterialTheme.colorScheme.onPrimary)
+//                }
 
                 Column(
-                    modifier            = Modifier.align(Alignment.Center).padding(top = 16.dp),
+                    modifier            = Modifier.align(Alignment.Center).padding(top = 30.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
@@ -131,19 +135,19 @@ fun ProfileScreen(
                     Text(name,
                         style      = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color      = MaterialTheme.colorScheme.onPrimary)
+                        color      = MaterialTheme.colorScheme.inverseSurface)
                     Text(designation,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f))
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.85f))
                     Spacer(Modifier.height(8.dp))
                     Surface(
                         shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
+                        color = MaterialTheme.colorScheme.inversePrimary.copy(alpha = 0.2f)
                     ) {
                         Text(role,
                             modifier   = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                            style      = MaterialTheme.typography.labelSmall,
-                            color      = MaterialTheme.colorScheme.onPrimary,
+                            style      = MaterialTheme.typography.bodyMedium,
+                            color      = MaterialTheme.colorScheme.inverseOnSurface,
                             fontWeight = FontWeight.SemiBold)
                     }
                 }
@@ -230,17 +234,19 @@ fun ProfileScreen(
 
                 Spacer(Modifier.height(8.dp))
 
-                PermissionsCard(
-                    granted              = permissions,
-                    canManagePermissions = canManagePermissions,
-                    onManageClick        = { showPermissionsDialog = true }
-                )
+                // Permissions card — visible to everyone (read-only for most,
+                // editable for admins/sysadmin via canManagePermissions).
+                // The dialog only shows permissions the EDITOR holds, so a regular
+                // admin can't grant permissions they don't have themselves.
+//                PermissionsCard(
+//                    granted              = permissions,
+//                    canManagePermissions = canManagePermissions,
+//                    onManageClick        = { showPermissionsDialog = true }
+//                )
 
                 Spacer(Modifier.height(8.dp))
 
                 // ── Action buttons ────────────────────────────────────────────
-                // Edit button: only shown if canEdit = true (Administrator/Manager/HR)
-                // Logout button: always shown (user can always log out)
                 if (canEdit) {
                     Row(
                         Modifier.fillMaxWidth(),
@@ -255,7 +261,7 @@ fun ProfileScreen(
                         ) {
                             Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Edit Profile", fontWeight = FontWeight.SemiBold)
+                            Text("Explore and Edit Profile", fontWeight = FontWeight.SemiBold)
                         }
 
                         OutlinedButton(
@@ -273,7 +279,6 @@ fun ProfileScreen(
                         }
                     }
                 } else {
-                    // Non-admin roles: only logout, full width
                     OutlinedButton(
                         onClick  = onLogoutClick,
                         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -293,19 +298,26 @@ fun ProfileScreen(
             }
         }
 
-        if (showPermissionsDialog) {
-            PermissionsEditDialog(
-                granted            = permissions,
-                readOnly           = !canManagePermissions,
-                onDismiss          = { showPermissionsDialog = false },
-                onSave             = { updated ->
-                    onSavePermissions(updated)
-                    showPermissionsDialog = false
-                }
-            )
-        }
+        // ── Permissions dialog ────────────────────────────────────────────────
+        // Shows only when the user taps "Manage Permissions" on the card above.
+        // The checklist is scoped to editorPermissions — a regular admin cannot
+        // tick permissions they don't own themselves.
+//        if (showPermissionsDialog) {
+//            PermissionsEditDialog(
+//                granted           = permissions,
+//                readOnly          = !canManagePermissions,
+//                editorPermissions = editorPermissions,
+//                onDismiss         = { showPermissionsDialog = false },
+//                onSave            = { updated ->
+//                    onSavePermissions(updated)
+//                    showPermissionsDialog = false
+//                }
+//            )
+//        }
     }
 }
+
+// ── Permissions card (summary) ────────────────────────────────────────────────
 
 @Composable
 private fun PermissionsCard(
@@ -347,58 +359,75 @@ private fun PermissionsCard(
     }
 }
 
-@Composable
-private fun PermissionsEditDialog(
-    granted  : List<String>,
-    readOnly : Boolean,
-    onDismiss: () -> Unit,
-    onSave   : (List<String>) -> Unit
-) {
-    val selected = remember { mutableStateListOf<String>().apply { addAll(granted) } }
+// ── Permissions edit/view dialog ──────────────────────────────────────────────
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (readOnly) "Permissions" else "Manage Permissions") },
-        text = {
-            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
-                Permissions.ALL_PERMISSIONS.forEach { perm ->
-                    val isGranted = selected.contains(perm)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked  = isGranted,
-                            onCheckedChange = { checked ->
-                                if (readOnly) return@Checkbox
-                                if (checked) selected.add(perm) else selected.remove(perm)
-                            },
-                            enabled  = !readOnly
-                        )
-                        Text(
-                            perm,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (isGranted) MaterialTheme.colorScheme.onSurface
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            if (!readOnly) {
-                TextButton(onClick = { onSave(selected.toList()) }) { Text("Save") }
-            } else {
-                TextButton(onClick = onDismiss) { Text("Close") }
-            }
-        },
-        dismissButton = if (!readOnly) {
-            { TextButton(onClick = onDismiss) { Text("Cancel") } }
-        } else null
-    )
-}
+//@Composable
+//private fun PermissionsEditDialog(
+//    granted          : List<String>,
+//    readOnly         : Boolean,
+//    // Permissions the editor holds. When not readOnly, only these can be toggled.
+//    // Ignored when readOnly = true (viewer sees all, changes nothing).
+//    editorPermissions: List<String> = emptyList(),
+//    onDismiss        : () -> Unit,
+//    onSave           : (List<String>) -> Unit
+//) {
+//    val selected = remember { mutableStateListOf<String>().apply { addAll(granted) } }
+//
+//    // Decide which permissions to show in the list:
+//    // - Read-only view: show ALL permissions so the viewer can see the full picture
+//    // - Edit mode: show only permissions the editor holds (can't grant what you don't have)
+//    val displayList = if (readOnly) Permissions.ALL_PERMISSIONS
+//    else editorPermissions.filter { it in Permissions.ALL_PERMISSIONS }
+//
+//    AlertDialog(
+//        onDismissRequest = onDismiss,
+//        title = { Text(if (readOnly) "Permissions (view only)" else "Manage Permissions") },
+//        text = {
+//            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+//                if (!readOnly) {
+//                    Text(
+//                        "You can only grant permissions you hold yourself.",
+//                        style  = MaterialTheme.typography.bodySmall,
+//                        color  = MaterialTheme.colorScheme.onSurfaceVariant,
+//                        modifier = Modifier.padding(bottom = 8.dp)
+//                    )
+//                }
+//                displayList.forEach { perm ->
+//                    val isGranted = selected.contains(perm)
+//                    Row(
+//                        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+//                        verticalAlignment = Alignment.CenterVertically
+//                    ) {
+//                        Checkbox(
+//                            checked  = isGranted,
+//                            onCheckedChange = { checked ->
+//                                if (readOnly) return@Checkbox
+//                                if (checked) selected.add(perm) else selected.remove(perm)
+//                            },
+//                            enabled  = !readOnly
+//                        )
+//                        Text(
+//                            perm.replace("_", " ").replaceFirstChar { it.uppercase() },
+//                            style = MaterialTheme.typography.bodyMedium,
+//                            color = if (isGranted) MaterialTheme.colorScheme.onSurface
+//                            else MaterialTheme.colorScheme.onSurfaceVariant
+//                        )
+//                    }
+//                }
+//            }
+//        },
+//        confirmButton = {
+//            if (!readOnly) {
+//                TextButton(onClick = { onSave(selected.toList()) }) { Text("Save") }
+//            } else {
+//                TextButton(onClick = onDismiss) { Text("Close") }
+//            }
+//        },
+//        dismissButton = if (!readOnly) {
+//            { TextButton(onClick = onDismiss) { Text("Cancel") } }
+//        } else null
+//    )
+//}
 
 // ── Reusable composables ──────────────────────────────────────────────────────
 

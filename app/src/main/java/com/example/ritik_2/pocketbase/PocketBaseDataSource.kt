@@ -592,26 +592,34 @@ class PocketBaseDataSource @Inject constructor(
         }
 
     override suspend fun updateUserProfile(
-        userId: String, fields: Map<String, Any>
+        userId    : String,
+        fields    : Map<String, Any>,
+        userToken : String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val token  = getAdminToken()
-            val body   = JSONObject(fields as Map<*, *>).toString()
-            val res    = http.newCall(Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
-                .addHeader("Authorization", "Bearer $token")
-                .patch(body.toRequestBody("application/json".toMediaType())).build()).execute()
-            val code   = res.code; res.close()
+            // Use the user's own token if provided (self-edit).
+            // Fall back to admin token only when editing another user (admin action).
+            val token = if (userToken.isNotBlank()) userToken else getAdminToken()
+
+            val body = JSONObject(fields as Map<*, *>).toString()
+            val res  = http.newCall(
+                Request.Builder()
+                    .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
+                    .addHeader("Authorization", "Bearer $token")
+                    .patch(body.toRequestBody("application/json".toMediaType()))
+                    .build()
+            ).execute()
+            val code = res.code; res.close()
+
             if (code in 200..299) {
-                // Update local cache
                 val cached = try { db.userDao().getById(userId) } catch (_: Exception) { null }
                 if (cached != null) {
                     val updated = applyFieldsToEntity(cached, fields)
-                    kotlinx.coroutines.runBlocking { db.userDao().upsert(updated) }
+                    db.userDao().upsert(updated)
                 }
-                // Sync access control if role or permissions changed
                 if ("role" in fields || "permissions" in fields) {
-                    syncAccessControlRecord(userId, fields, token)
+                    // Role/permission sync always needs admin token
+                    syncAccessControlRecord(userId, fields, getAdminToken())
                 }
                 Result.success(Unit)
             } else {

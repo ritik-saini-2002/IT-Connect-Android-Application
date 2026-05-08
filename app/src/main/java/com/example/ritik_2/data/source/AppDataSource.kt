@@ -21,8 +21,23 @@ interface AppDataSource {
 
     // ── User ──────────────────────────────────────────────────
     suspend fun getUserProfile(userId: String): Result<UserProfile>
-    suspend fun updateUserProfile(userId: String, fields: Map<String, Any>): Result<Unit>
-    suspend fun uploadProfileImage(userId: String, bytes: ByteArray, filename: String, token: String = ""): Result<String>
+
+    // AppDataSource.kt
+
+    suspend fun updateUserProfile(
+        userId    : String,
+        fields    : Map<String, Any>,
+        userToken : String = ""          // ← ADD THIS
+    ): Result<Unit>
+
+    suspend fun uploadProfileImage(
+        userId    : String,
+        bytes     : ByteArray,
+        filename  : String,
+        token     : String = ""          // already exists, just document intent:
+        // pass userToken for self-edit, leave blank for admin-edit
+    ): Result<String>
+
 
     // ── Registration ──────────────────────────────────────────
     suspend fun registerUser(request: RegistrationRequest): Result<String>

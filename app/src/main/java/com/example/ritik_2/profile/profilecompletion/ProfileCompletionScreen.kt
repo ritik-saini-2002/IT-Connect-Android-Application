@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ritik_2.core.PermissionGuard
+import com.example.ritik_2.data.model.Permissions
 
 private data class FormState(
     val address                  : String = "",
@@ -65,29 +66,48 @@ private fun FormState.toSaveData(existingImageUrl: String) = ProfileSaveData(
     companyName              = companyName
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ProfileCompletionScreen(
-    viewModel       : ProfileCompletionViewModel,
-    onImagePickClick: () -> Unit,
-    onSaveProfile   : (ProfileSaveData) -> Unit,
-    onNavigateBack  : () -> Unit,
-    isEditMode      : Boolean = false,
-    isAdmin         : Boolean = false,
-    isManager       : Boolean = false,   // Manager or HR editing another user
-    userId          : String  = "",
+    viewModel            : ProfileCompletionViewModel,
+    onImagePickClick     : () -> Unit,
+    onSaveProfile        : (ProfileSaveData) -> Unit,
+    onSavePermissions    : (List<String>) -> Unit = {},
+    onNavigateBack       : () -> Unit,
+    isEditMode           : Boolean    = false,
+    isAdmin              : Boolean    = false,
+    isManager            : Boolean    = false,   // Manager or HR editing another user
+    isSelfEdit           : Boolean    = false,   // true when editor == target
+    userId               : String     = "",
+    editableFields       : Set<String> = PermissionGuard.ALL_FIELDS,
+    canManagePermissions : Boolean    = false,
+    editorPermissions    : List<String> = emptyList(),
     /**
      * Permission-based per-field gate. Only fields whose key is in this set
      * are exposed for editing in the admin branch — even if [isAdmin] is true.
      * Computed by the launching Activity from [PermissionGuard.editableFields].
      * Defaults to ALL_FIELDS so legacy callers keep their previous behaviour.
      */
-    editableFields  : Set<String> = PermissionGuard.ALL_FIELDS
 ) {
     val uiState    by viewModel.uiState.collectAsState()
     val scrollState = rememberLazyListState()
     var form       by remember { mutableStateOf(FormState()) }
     val isEditing   = uiState.isEditing
+
+    // Permissions panel state — only initialised when canManagePermissions is true
+    var showPermissionsPanel by remember { mutableStateOf(false) }
+    var pendingPerms by remember(uiState.userProfile) {
+        mutableStateOf(uiState.userProfile?.permissions ?: emptyList())
+    }
+    // The set of permissions this editor is allowed to grant — their own perms
+    // minus system-only ones (already enforced server-side, but guard in UI too)
+    val grantablePerms = remember(editorPermissions) {
+        com.example.ritik_2.data.model.Permissions.ALL_PERMISSIONS.filter { perm ->
+            // Sysadmin / grant_revoke_any sees all; others see only their own perms
+            com.example.ritik_2.data.model.Permissions.PERM_GRANT_REVOKE_ANY_PERMISSION in editorPermissions ||
+                    perm in editorPermissions
+        }
+    }
 
     // Determine screen title
     val title = when {
@@ -291,31 +311,33 @@ fun ProfileCompletionScreen(
                     PCCard("Account Info", Icons.Default.Person) {
                         when {
                             isAdmin && isEditing -> {
-                                // Admin branch — but each field is still gated by
-                                // editableFields so a permission revoke (e.g. taking
-                                // away "edit_role") drops the field even within the
-                                // admin section.
+                                // Admin branch — each field gated by editableFields.
+                                // company/dept/role are LOCKED when editing own profile
+                                // (isSelfEdit) to prevent self-escalation.
                                 if ("name" in editableFields)
-                                    PCField(form.name,        { form = form.copy(name = it) },
-                                        "Full Name",   Icons.Default.Person)
+                                    PCField(form.name, { form = form.copy(name = it) },
+                                        "Full Name", Icons.Default.Person)
                                 if ("phoneNumber" in editableFields)
                                     PCField(form.phoneNumber, { form = form.copy(phoneNumber = it) },
-                                        "Phone",       Icons.Default.Phone, KeyboardType.Phone)
+                                        "Phone", Icons.Default.Phone, KeyboardType.Phone)
                                 if ("designation" in editableFields)
                                     PCField(form.designation, { form = form.copy(designation = it) },
                                         "Designation", Icons.Default.Badge)
-                                if ("role" in editableFields)
-                                    PCField(form.role,        { form = form.copy(role = it) },
-                                        "Role",        Icons.Default.ManageAccounts)
-                                if ("companyName" in editableFields)
+                                // role, companyName, department locked for own-profile
+                                if ("role" in editableFields && !isSelfEdit)
+                                    PCField(form.role, { form = form.copy(role = it) },
+                                        "Role", Icons.Default.ManageAccounts)
+                                else ReadOnlyRow("Role", form.role, Icons.Default.ManageAccounts)
+                                if ("companyName" in editableFields && !isSelfEdit)
                                     PCField(form.companyName, { form = form.copy(companyName = it) },
-                                        "Company",     Icons.Default.Business)
-                                if ("department" in editableFields)
-                                    PCField(form.department,  { form = form.copy(department = it) },
-                                        "Department",  Icons.Default.Groups)
+                                        "Company", Icons.Default.Business)
+                                else ReadOnlyRow("Company", form.companyName, Icons.Default.Business)
+                                if ("department" in editableFields && !isSelfEdit)
+                                    PCField(form.department, { form = form.copy(department = it) },
+                                        "Department", Icons.Default.Groups)
+                                else ReadOnlyRow("Department", form.department, Icons.Default.Groups)
                             }
                             isManager && isEditing -> {
-                                // Manager/HR can edit designation and department
                                 uiState.userProfile?.let { p ->
                                     ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
                                     ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
@@ -325,11 +347,24 @@ fun ProfileCompletionScreen(
                                 }
                                 PCField(form.designation, { form = form.copy(designation = it) },
                                     "Designation", Icons.Default.Badge)
-                                PCField(form.department,  { form = form.copy(department = it) },
-                                    "Department",  Icons.Default.Groups)
+                                PCField(form.department, { form = form.copy(department = it) },
+                                    "Department", Icons.Default.Groups)
+                            }
+                            isSelfEdit && isEditing -> {
+                                // Own-profile: phone is editable; name/role/company/dept/designation locked
+                                uiState.userProfile?.let { p ->
+                                    ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
+                                    ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
+                                    ReadOnlyRow("Designation", p.designation, Icons.Default.Badge)
+                                    ReadOnlyRow("Role",        p.role,        Icons.Default.ManageAccounts)
+                                    ReadOnlyRow("Company",     p.companyName, Icons.Default.Business)
+                                    ReadOnlyRow("Department",  p.department,  Icons.Default.Groups)
+                                }
+                                if ("phoneNumber" in editableFields)
+                                    PCField(form.phoneNumber, { form = form.copy(phoneNumber = it) },
+                                        "Phone", Icons.Default.Phone, KeyboardType.Phone)
                             }
                             else -> {
-                                // Read-only view or own-profile non-admin
                                 uiState.userProfile?.let { p ->
                                     ReadOnlyRow("Full Name",   p.name,        Icons.Default.Person)
                                     ReadOnlyRow("Email",       p.email,       Icons.Default.Email)
@@ -462,6 +497,151 @@ fun ProfileCompletionScreen(
                     }
                 }
 
+                // ── Permissions Panel ────────────────────────────────────────
+                // Visible only to users who can grant/revoke permissions on this target.
+                // Shows only permissions within the editor's own permission set.
+                if (canManagePermissions && isEditMode) {
+                    item {
+                        Card(
+                            modifier  = Modifier.fillMaxWidth(),
+                            shape     = RoundedCornerShape(14.dp),
+                            colors    = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(2.dp)
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                // Header row with toggle
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    verticalAlignment     = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Security, null,
+                                            tint     = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Permissions",
+                                            style      = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (showPermissionsPanel) {
+                                            TextButton(onClick = {
+                                                onSavePermissions(pendingPerms)
+                                                showPermissionsPanel = false
+                                            }) {
+                                                Text("Save", fontWeight = FontWeight.Bold)
+                                            }
+                                            IconButton(onClick = {
+                                                // Reset to original on cancel
+                                                pendingPerms = uiState.userProfile?.permissions ?: emptyList()
+                                                showPermissionsPanel = false
+                                            }) {
+                                                Icon(Icons.Default.Close, "Cancel",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        } else {
+                                            IconButton(onClick = { showPermissionsPanel = true }) {
+                                                Icon(Icons.Default.Edit, "Edit permissions",
+                                                    tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (showPermissionsPanel) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        "You can only grant permissions you hold yourself.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+
+                                    // Group permissions into readable categories
+                                    val grouped = grantablePerms.groupBy { perm ->
+                                        when {
+                                            perm.startsWith("windows_control_") -> "Windows Control"
+                                            perm.startsWith("access_")          -> "Feature Access"
+                                            perm.startsWith("view_")            -> "View"
+                                            perm.startsWith("manage_")          -> "Manage"
+                                            perm.startsWith("edit_")            -> "Edit"
+                                            perm.startsWith("submit_")          -> "Submit"
+                                            perm.startsWith("resolve_")         -> "Resolve"
+                                            perm.startsWith("approve_")         -> "Approve"
+                                            perm.startsWith("generate_")        -> "Generate"
+                                            perm.startsWith("assign_")          -> "Assign"
+                                            perm.startsWith("grant_")           -> "Grant"
+                                            perm.startsWith("export_")          -> "Export"
+                                            else                                 -> "Other"
+                                        }
+                                    }
+                                    grouped.forEach { (category, perms) ->
+                                        Text(category,
+                                            style      = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color      = MaterialTheme.colorScheme.primary,
+                                            modifier   = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                                        perms.forEach { perm ->
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Checkbox(
+                                                    checked         = perm in pendingPerms,
+                                                    onCheckedChange = { checked ->
+                                                        pendingPerms = if (checked)
+                                                            (pendingPerms + perm).distinct()
+                                                        else
+                                                            pendingPerms - perm
+                                                    }
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    perm.replace("_", " ")
+                                                        .replaceFirstChar { it.uppercase() },
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // Collapsed — show current permissions as chips
+                                    val currentPerms = uiState.userProfile?.permissions ?: emptyList()
+                                    if (currentPerms.isEmpty()) {
+                                        Text("No permissions assigned",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 6.dp))
+                                    } else {
+                                        Spacer(Modifier.height(6.dp))
+                                        androidx.compose.foundation.layout.FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement   = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            currentPerms.forEach { perm ->
+                                                SuggestionChip(
+                                                    onClick = {},
+                                                    label   = {
+                                                        Text(
+                                                            perm.replace("_", " "),
+                                                            style = MaterialTheme.typography.labelSmall
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Error
                 // Error
                 uiState.error?.let { err ->
                     item {
@@ -470,13 +650,33 @@ fun ProfileCompletionScreen(
                                 containerColor = MaterialTheme.colorScheme.errorContainer),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Row(Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Error, null,
-                                    tint = MaterialTheme.colorScheme.onErrorContainer)
+                            Row(
+                                Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Info,          // ← softer icon than Error
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                )
                                 Spacer(Modifier.width(10.dp))
-                                Text(err,
-                                    color = MaterialTheme.colorScheme.onErrorContainer)
+                                Column {
+                                    Text(
+                                        err,
+                                        color      = MaterialTheme.colorScheme.onErrorContainer,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    // Only show the "contact admin" sub-line for permission errors
+                                    if (err.contains("administrator", ignoreCase = true)) {
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            "Contact your Administrator to update this information.",
+                                            color    = MaterialTheme.colorScheme.onErrorContainer,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Normal
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

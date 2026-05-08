@@ -75,22 +75,28 @@ class ProfileCompletionActivity : ComponentActivity() {
             finish(); return
         }
 
-        val session     = authRepository.getSession()
-        val sessionRole = session?.role  ?: ""
-        val sessionId   = session?.userId ?: ""
-        val isDbAdmin   = authRepository.isDbAdmin()
-        val editorRole  = editorRoleArg.ifBlank { sessionRole }
+        val session           = authRepository.getSession()
+        val sessionRole       = session?.role        ?: ""
+        val sessionId         = session?.userId      ?: ""
+        val isDbAdmin         = authRepository.isDbAdmin()
+        val editorRole        = editorRoleArg.ifBlank { sessionRole }
+        // Declare FIRST — used by both canEdit and isAdmin checks below
+        val editorPermissions = session?.permissions ?: emptyList()
 
-        val canEdit = PermissionGuard.canEditProfile(
+        val canEditByRole = PermissionGuard.canEditProfile(
             editorRole = editorRole,
             targetRole = targetRole,
             editorId   = sessionId,
             targetId   = userId,
             isDbAdmin  = isDbAdmin
         )
+        // Own-profile: PERM_EDIT_PROFILE or PERM_EDIT_BASIC_PROFILE is sufficient
+        val canEditByPermission = (sessionId == userId) &&
+                (Permissions.PERM_EDIT_PROFILE       in editorPermissions ||
+                        Permissions.PERM_EDIT_BASIC_PROFILE in editorPermissions)
+        val canEdit = canEditByRole || canEditByPermission
 
         // Permission-based: isAdmin means editor can write all fields.
-        val editorPermissions = session?.permissions ?: emptyList()
         val isAdmin   = PermissionGuard.isSystemAdmin(editorRole)
                 || isDbAdmin
                 || Permissions.PERM_ACCESS_ALL_DATA in editorPermissions
@@ -100,6 +106,9 @@ class ProfileCompletionActivity : ComponentActivity() {
             editorId   = sessionId,  targetId   = userId, isDbAdmin = false
         ) && !isAdmin
         val editingOther = sessionId != userId
+
+        val selfUserToken = if (!editingOther) session?.token ?: "" else ""
+
 
         // Per-field permission gate. Fed into ProfileCompletionScreen so each
         // sensitive input renders only when the editor is allowed to write that
@@ -115,11 +124,21 @@ class ProfileCompletionActivity : ComponentActivity() {
             editorPermissions = editorPermissions
         )
 
+        // Block only when editing ANOTHER user without permission.
+        // Own-profile users are handled by canEditByPermission above and must not be blocked here.
         if (isEditMode && editingOther && !canEdit) {
             Toast.makeText(this,
                 "You don't have permission to edit this user", Toast.LENGTH_SHORT).show()
             finish(); return
         }
+
+        // Permission panel: only users who can grant/revoke may see or change permissions.
+        // Self-escalation is blocked (cannot edit your own permissions).
+        val canManagePermissions = editingOther && (
+                isDbAdmin ||
+                        PermissionGuard.isSystemAdmin(editorRole) ||
+                        (editorRole == Permissions.ROLE_ADMIN && !PermissionGuard.isSystemAdmin(targetRole))
+                )
 
         viewModel.loadUser(userId, isEditMode)
         observeState(userId, isEditMode)
@@ -147,26 +166,37 @@ class ProfileCompletionActivity : ComponentActivity() {
                 }
 
                 ProfileCompletionScreen(
-                    viewModel        = viewModel,
-                    onImagePickClick = {
-                        // Launch picker with allowed MIME types only
+                    viewModel             = viewModel,
+                    onImagePickClick      = {
                         imageLauncher.launch(ELIGIBLE_IMAGE_MIME_TYPES)
                     },
-                    onSaveProfile    = { data ->
+                    onSaveProfile         = { data ->
                         viewModel.saveProfile(
-                            userId     = userId,
-                            data       = data,
-                            imageBytes = viewModel.uiState.value.pendingImageBytes,
-                            isAdmin    = isAdmin,
-                            isManager  = isManager && editingOther
+                            userId         = userId,
+                            data           = data,
+                            imageBytes     = viewModel.uiState.value.pendingImageBytes,
+                            isAdmin        = isAdmin,
+                            isManager      = isManager && editingOther,
+                            editableFields = editableFields,
+                            userToken      = selfUserToken
                         )
                     },
-                    onNavigateBack   = { finish() },
-                    isEditMode       = isEditMode,
-                    isAdmin          = isAdmin,
-                    isManager        = isManager && editingOther,
-                    userId           = userId,
-                    editableFields   = editableFields
+                    onSavePermissions     = { updated ->
+                        viewModel.updateUserPermissions(
+                            targetUserId      = userId,
+                            perms             = updated,
+                            editorPermissions = editorPermissions
+                        )
+                    },
+                    onNavigateBack        = { finish() },
+                    isEditMode            = isEditMode,
+                    isAdmin               = isAdmin,
+                    isManager             = isManager && editingOther,
+                    isSelfEdit            = !editingOther,
+                    userId                = userId,
+                    editableFields        = editableFields,
+                    canManagePermissions  = canManagePermissions,
+                    editorPermissions     = editorPermissions
                 )
             }
         }
