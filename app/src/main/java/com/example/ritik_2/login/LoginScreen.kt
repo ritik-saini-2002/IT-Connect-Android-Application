@@ -39,22 +39,27 @@ import kotlin.math.sin
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun LoginScreen(
-    onLoginClick         : (String, String) -> Unit = { _, _ -> },
-    onRegisterClick      : () -> Unit               = {},
-    onForgotPasswordClick: (String) -> Unit         = {},
-    onInfoClick          : () -> Unit               = {},
-    onPcControlClick     : () -> Unit               = {},
-    onContactClick       : () -> Unit               = {},
-    // ✅ NEW — optional ViewModel state (null-safe so Preview still works)
-    loginState           : StateFlow<AuthState>?    = null,
-    resetState           : StateFlow<AuthState>?    = null,
-    onVerifyOtpAndResetPassword: (String, String, String) -> Unit = { _, _, _ -> }
+    onLoginClick                : (String, String) -> Unit = { _, _ -> },
+    otpLoginState  : StateFlow<AuthState>? = null,
+    onSendLoginOtp : (String) -> Unit      = {},
+    onLoginWithOtp : (String, String) -> Unit = { _, _ -> },
+    onRegisterClick             : () -> Unit               = {},
+    onForgotPasswordClick       : (String) -> Unit         = {},
+    onVerifyOtpAndResetPassword : (String, String, String) -> Unit = { _, _, _ -> },
+    onInfoClick                 : () -> Unit               = {},
+    onPcControlClick            : () -> Unit               = {},
+    onContactClick              : () -> Unit               = {},
+    loginState                  : StateFlow<AuthState>?    = null,
+    resetState                  : StateFlow<AuthState>?    = null,
+    onVerifyOtp                 : (String, String) -> Unit         = { _, _ -> },   // ← ADD
+    onResetPassword             : (String, String, String) -> Unit = { _, _, _ -> } // ← ADD
+) {
 
-
-    ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
+    var showOtpLoginDialog by remember { mutableStateOf(false) }
+    val otpLoginAuthState = otpLoginState?.collectAsState()?.value
     var showForgotPasswordDialog by remember { mutableStateOf(false) }
 
     // ✅ Collect state — isLoading driven by real ViewModel state now
@@ -81,19 +86,6 @@ fun LoginScreen(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             ) { focusManager.clearFocus() }
     ) {
-        IconButton(
-            onClick = onInfoClick,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 50.dp, end = 20.dp)
-                .size(48.dp)
-                .zIndex(1000f)
-                .background(color = MaterialTheme.colorScheme.primary, shape = CircleShape)
-        ) {
-            Icon(Icons.Default.Info, contentDescription = "Contact Information",
-                tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp))
-        }
-
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
@@ -238,6 +230,18 @@ fun LoginScreen(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Create Account", fontWeight = FontWeight.Medium, fontSize = 14.sp)
                         }
+                        // ← REMOVE the TextButton from here
+                    }
+
+// ← ADD it here, after the Row closes
+                    TextButton(
+                        onClick  = { showOtpLoginDialog = true },
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        colors   = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Pin, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Login with OTP", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
 
                     // ✅ Show error message inline under buttons
@@ -264,36 +268,31 @@ fun LoginScreen(
                 .align(Alignment.BottomStart)
                 .padding(16.dp)
                 .navigationBarsPadding(),
-            containerColor   = MaterialTheme.colorScheme.tertiaryContainer,
-            contentColor     = MaterialTheme.colorScheme.onTertiaryContainer
+            containerColor   = MaterialTheme.colorScheme.primary,
+            contentColor     = MaterialTheme.colorScheme.inversePrimary
         ) {
             Icon(Icons.Default.ContactSupport, contentDescription = "Contact")
-        }
-
-        // ── Bottom-right: Windows Control shortcut ──
-        FloatingActionButton(
-            onClick          = onPcControlClick,
-            modifier         = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-                .navigationBarsPadding(),
-            containerColor   = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor     = MaterialTheme.colorScheme.onSecondaryContainer
-        ) {
-            Icon(Icons.Default.Computer, contentDescription = "Windows Control")
         }
     }
 
     // Inside LoginScreen composable — update the dialog call
 
+    if (showOtpLoginDialog) {
+        OtpLoginDialog(
+            onDismiss      = { showOtpLoginDialog = false },
+            onSendOtp      = onSendLoginOtp,
+            onLoginWithOtp = onLoginWithOtp,
+            authState      = otpLoginAuthState ?: AuthState.Idle
+        )
+    }
+
     if (showForgotPasswordDialog) {
         ModernForgotPasswordDialog(
             onDismiss                   = { showForgotPasswordDialog = false },
             onSendOtp                   = { email -> onForgotPasswordClick(email) },
-            onVerifyOtpAndResetPassword = { email, otp, newPass ->
-                onVerifyOtpAndResetPassword(email, otp, newPass)
-            },
-            resetState = resetAuthState ?: AuthState.Idle
+            onVerifyOtp                 = onVerifyOtp,      // ← ADD
+            onResetPassword             = onResetPassword,  // ← ADD
+            resetState                  = resetAuthState ?: AuthState.Idle
         )
     }
     // ✅ Removed: broken LaunchedEffect(isLoading) with hardcoded 1500ms delay
@@ -407,15 +406,143 @@ fun EnhancedLoginPasswordField(
     )
 }
 
+@Composable
+fun OtpLoginDialog(
+    onDismiss      : () -> Unit,
+    onSendOtp      : (String) -> Unit,
+    onLoginWithOtp : (String, String) -> Unit,
+    authState      : AuthState = AuthState.Idle
+) {
+    var step      by remember { mutableStateOf(1) }
+    var email     by remember { mutableStateOf("") }
+    var otp       by remember { mutableStateOf("") }
+    val isLoading = authState is AuthState.Loading
+
+    // Auto-advance when OTP sent
+    LaunchedEffect(authState) {
+        if (authState is AuthState.OtpLoginSent && step == 1) step = 2
+        if (authState is AuthState.Success)                   onDismiss()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor   = MaterialTheme.colorScheme.surface,
+        shape            = RoundedCornerShape(20.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (step == 1) Icons.Default.Email else Icons.Default.Pin,
+                    null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    if (step == 1) "Login with OTP" else "Enter OTP",
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        },
+        text = {
+            Column {
+                // Step dots
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    repeat(2) { i ->
+                        Box(modifier = Modifier
+                            .size(if (step == i + 1) 12.dp else 8.dp)
+                            .background(
+                                if (step >= i + 1) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline, CircleShape))
+                        if (i < 1) Spacer(modifier = Modifier.width(6.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+
+                when (step) {
+                    1 -> {
+                        Text("Enter your email to receive a login OTP.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = email, onValueChange = { email = it },
+                            label = { Text("Email Address") },
+                            placeholder = { Text("Enter your email") },
+                            leadingIcon = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline)
+                        )
+                    }
+                    2 -> {
+                        Text("A 6-digit OTP was sent to $email.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = otp, onValueChange = { if (it.length <= 6) otp = it },
+                            label = { Text("OTP Code") },
+                            placeholder = { Text("Enter 6-digit OTP") },
+                            leadingIcon = { Icon(Icons.Default.Pin, null, tint = MaterialTheme.colorScheme.primary) },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor   = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = { onSendOtp(email) }, enabled = !isLoading) {
+                            Text("Resend OTP", color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+
+                if (authState is AuthState.Error) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(authState.message, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    when (step) {
+                        1 -> if (email.isNotBlank()) onSendOtp(email)
+                        2 -> if (otp.length == 6)   onLoginWithOtp(email, otp)
+                    }
+                },
+                colors  = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                shape   = RoundedCornerShape(12.dp),
+                enabled = !isLoading && if (step == 1) email.isNotBlank() else otp.length == 6
+            ) {
+                if (isLoading) CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                else Text(if (step == 1) "Send OTP" else "Login",
+                    color = MaterialTheme.colorScheme.onPrimary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+            ) { Text("Cancel") }
+        }
+    )
+}
+
+
 // LoginScreen.kt — replace ModernForgotPasswordDialog entirely
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModernForgotPasswordDialog(
-    onDismiss                   : () -> Unit,
-    onSendOtp                   : (String) -> Unit,
-    onVerifyOtpAndResetPassword : (String, String, String) -> Unit,
-    resetState                  : AuthState = AuthState.Idle
+    onDismiss       : () -> Unit,
+    onSendOtp       : (String) -> Unit,
+    onVerifyOtp     : (String, String) -> Unit,          // ← ADD
+    onResetPassword : (String, String, String) -> Unit,  // ← ADD
+    resetState      : AuthState = AuthState.Idle
 ) {
     // Step 1 = email entry, Step 2 = OTP entry, Step 3 = new password
     var step            by remember { mutableStateOf(1) }
@@ -430,6 +557,7 @@ fun ModernForgotPasswordDialog(
     // Auto-advance when OTP is sent successfully
     LaunchedEffect(resetState) {
         if (resetState is AuthState.OtpSent  && step == 1) step = 2
+        if (resetState is AuthState.OtpVerified && step == 2) step = 3
         if (resetState is AuthState.Success  && step == 3) onDismiss()
     }
 
@@ -609,9 +737,9 @@ fun ModernForgotPasswordDialog(
                 onClick = {
                     when (step) {
                         1 -> if (email.isNotBlank()) onSendOtp(email)
-                        2 -> if (otp.length == 6)   step = 3   // just advance; verify on submit
+                        2 -> if (otp.length == 6) onVerifyOtp(email, otp)
                         3 -> if (newPassword.length >= 8 && newPassword == confirmPassword)
-                            onVerifyOtpAndResetPassword(email, otp, newPassword)
+                            onResetPassword(email, otp, newPassword)
                     }
                 },
                 colors  = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -644,68 +772,6 @@ fun ModernForgotPasswordDialog(
         }
     )
 }
-
-//@Composable
-//fun ModernForgotPasswordDialog(
-//    onDismiss      : () -> Unit,
-//    onSendResetLink: (String) -> Unit,
-//    isSending      : Boolean = false   // ✅ NEW param — driven by ViewModel
-//) {
-//    var email by remember { mutableStateOf("") }
-//
-//    AlertDialog(
-//        onDismissRequest = onDismiss,
-//        containerColor   = MaterialTheme.colorScheme.surface,
-//        shape            = RoundedCornerShape(20.dp),
-//        title = {
-//            Row(verticalAlignment = Alignment.CenterVertically) {
-//                Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-//                Spacer(modifier = Modifier.width(8.dp))
-//                Text("Reset Password", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-//            }
-//        },
-//        text = {
-//            Column {
-//                Text("Enter your email address and we'll send you a link to reset your password.",
-//                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-//                Spacer(modifier = Modifier.height(16.dp))
-//                OutlinedTextField(
-//                    value = email, onValueChange = { email = it },
-//                    label = { Text("Email Address") },
-//                    placeholder = { Text("Enter your email") },
-//                    leadingIcon = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) },
-//                    modifier = Modifier.fillMaxWidth(),
-//                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
-//                    singleLine = true,
-//                    colors = OutlinedTextFieldDefaults.colors(
-//                        focusedBorderColor   = MaterialTheme.colorScheme.primary,
-//                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
-//                    )
-//                )
-//            }
-//        },
-//        confirmButton = {
-//            Button(
-//                onClick  = { if (email.isNotBlank()) onSendResetLink(email) },
-//                colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-//                shape    = RoundedCornerShape(12.dp),
-//                enabled  = !isSending && email.isNotBlank()
-//            ) {
-//                if (isSending) {
-//                    CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary,
-//                        modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-//                } else {
-//                    Text("Send Link", color = MaterialTheme.colorScheme.onPrimary)
-//                }
-//            }
-//        },
-//        dismissButton = {
-//            TextButton(onClick = onDismiss,
-//                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-//            ) { Text("Cancel") }
-//        }
-//    )
-//}
 
 @Preview(showBackground = true)
 @Composable

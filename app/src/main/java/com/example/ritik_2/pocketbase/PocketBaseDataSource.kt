@@ -51,8 +51,11 @@ class PocketBaseDataSource @Inject constructor(
     private var cachedAdminToken    = ""
     private var adminTokenFetchedAt = 0L
     private val adminTokenTtlMs     = 10 * 60 * 1000L
+    private val loginOtpIdStore = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val otpStore = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     private val OTP_VALID_MS = 10 * 60 * 1000L
+    private val verifiedTokenStore = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
+
 
     // Background scope for fire-and-forget work that must not block login
     // (e.g. role back-fill after SA auto-detection).
@@ -145,6 +148,100 @@ class PocketBaseDataSource @Inject constructor(
             session
         }
 
+    override suspend fun sendLoginOtp(email: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = JSONObject().apply { put("email", email) }
+                    .toString().toRequestBody("application/json".toMediaType())
+                val res     = http.newCall(
+                    Request.Builder()
+                        .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/request-otp")
+                        .post(body).build()
+                ).execute()
+                val resBody = res.body?.string() ?: ""
+                val code    = res.code; res.close()
+
+                when (code) {
+                    400  -> return@withContext Result.failure(Exception("No account found for this email."))
+                    404  -> return@withContext Result.failure(Exception("OTP not enabled. Contact admin."))
+                    !in 200..299 -> return@withContext Result.failure(Exception("Server error ($code)."))
+                }
+                val otpId = JSONObject(resBody).optString("otpId")
+                    .ifBlank { return@withContext Result.failure(Exception("Invalid server response.")) }
+
+                loginOtpIdStore[email.lowercase().trim()] = otpId
+                Log.d(tag, "Login OTP sent for $email, otpId=$otpId")
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Log.e(tag, "sendLoginOtp failed: ${e.message}")
+                Result.failure(e)
+            }
+        }
+
+    override suspend fun loginWithOtp(email: String, otp: String): Result<AuthSession> =
+        withContext(Dispatchers.IO) {
+            try {
+                val key   = email.lowercase().trim()
+                val otpId = loginOtpIdStore[key]
+                    ?: return@withContext Result.failure(Exception("OTP session expired. Please request a new one."))
+
+                val authBody = JSONObject().apply {
+                    put("otpId",    otpId)
+                    put("password", otp)
+                }.toString().toRequestBody("application/json".toMediaType())
+
+                val res     = http.newCall(
+                    Request.Builder()
+                        .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-otp")
+                        .post(authBody).build()
+                ).execute()
+                val resBody = res.body?.string() ?: ""
+                val code    = res.code; res.close()
+
+                if (code == 400 || code == 401)
+                    return@withContext Result.failure(Exception("Incorrect OTP. Please try again."))
+                if (code !in 200..299)
+                    return@withContext Result.failure(Exception("Login failed ($code)."))
+
+                val json      = JSONObject(resBody)
+                val token     = json.optString("token")
+                    .ifBlank { return@withContext Result.failure(Exception("No token received.")) }
+                val record    = json.optJSONObject("record")
+                    ?: return@withContext Result.failure(Exception("No user record."))
+                val uid       = record.optString("id")
+                    .ifBlank { return@withContext Result.failure(Exception("No user ID.")) }
+
+                authTokenRef.set(token)
+                loginOtpIdStore.remove(key)
+
+                // Reuse existing access control fetch to get role/permissions
+                val access = fetchAccessControl(uid).getOrNull()
+                val role   = access?.role?.ifBlank { record.optString("role") } ?: record.optString("role")
+                val perms  = if (!access?.permissions.isNullOrBlank())
+                    com.example.ritik_2.core.parseJsonList(access!!.permissions)
+                else emptyList()
+
+                val session = AuthSession(
+                    userId       = uid,
+                    token        = token,
+                    email        = email,
+                    name         = access?.name ?: record.optString("name"),
+                    role         = role,
+                    documentPath = access?.documentPath ?: record.optString("documentPath"),
+                    permissions  = perms
+                )
+                bgScope.launch {
+                    try { cacheUserLocally(uid, record, access) }
+                    catch (e: Exception) { Log.w(tag, "bg cache after OTP login: ${e.message}") }
+                }
+                Log.d(tag, "OTP Login ✅ uid=$uid role=$role")
+                Result.success(session)
+            } catch (e: Exception) {
+                Log.e(tag, "loginWithOtp failed: ${e.message}")
+                Result.failure(e)
+            }
+        }
+
     override suspend fun logout() = withContext(Dispatchers.IO) { authTokenRef.set("") }
 
     // In PocketBaseDataSource.kt
@@ -194,60 +291,31 @@ class PocketBaseDataSource @Inject constructor(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val key   = email.lowercase().trim()
-            val otpId = otpIdStore[key]
-                ?: return@withContext Result.failure(Exception("OTP session expired. Please request a new one."))
 
-            // Step 1: Verify OTP with PocketBase — fully public, no admin token
-            // This returns a user auth token if the OTP matches
-            val authBody = JSONObject().apply {
-                put("otpId",    otpId)
-                put("password", otp)   // PocketBase calls it "password" in this endpoint
-            }.toString().toRequestBody("application/json".toMediaType())
+            // Use the token from Step 2 (verifyOtp already called auth-with-otp)
+            val (userToken, userId) = verifiedTokenStore[key]
+                ?: return@withContext Result.failure(Exception("OTP session expired. Please go back and verify again."))
 
-            val authRes  = http.newCall(
-                Request.Builder()
-                    .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-otp")
-                    .post(authBody).build()
-            ).execute()
-            val authBody2 = authRes.body?.string() ?: ""
-            val authCode  = authRes.code
-            authRes.close()
-
-            if (authCode == 400 || authCode == 401) {
-                return@withContext Result.failure(Exception("Incorrect OTP. Please try again."))
-            }
-            if (authCode !in 200..299) {
-                return@withContext Result.failure(Exception("Verification failed ($authCode)."))
-            }
-
-            // Step 2: Extract the user's own auth token and user ID from the response
-            val authJson  = JSONObject(authBody2)
-            val userToken = authJson.optString("token")
-                .ifBlank { return@withContext Result.failure(Exception("Auth failed — no token returned.")) }
-            val userId    = authJson.optJSONObject("record")?.optString("id")
-                ?: return@withContext Result.failure(Exception("Auth failed — no user record."))
-
-            // Step 3: Use the user's OWN token to update their password
-            // No admin token needed — the user is now authenticated via OTP
             val patchBody = JSONObject().apply {
                 put("password",        newPassword)
                 put("passwordConfirm", newPassword)
             }.toString().toRequestBody("application/json".toMediaType())
 
-            val patchRes = http.newCall(
+            val res  = http.newCall(
                 Request.Builder()
                     .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/records/$userId")
                     .addHeader("Authorization", "Bearer $userToken")
                     .patch(patchBody).build()
             ).execute()
-            val patchCode = patchRes.code
-            patchRes.close()
+            val code = res.code
+            res.close()
 
-            if (patchCode !in 200..299) {
-                return@withContext Result.failure(Exception("Failed to update password ($patchCode)."))
-            }
+            if (code !in 200..299)
+                return@withContext Result.failure(Exception("Failed to update password ($code)."))
 
-            otpIdStore.remove(key)  // clean up
+            // Clean up both stores
+            otpIdStore.remove(key)
+            verifiedTokenStore.remove(key)
             Log.d(tag, "Password reset ✅ for $email")
             Result.success(Unit)
 
@@ -267,6 +335,49 @@ class PocketBaseDataSource @Inject constructor(
                     .post(body).build()).execute().close()
                 Result.success(Unit)
             } catch (e: Exception) { Result.failure(e) }
+        }
+
+    override suspend fun verifyOtp(email: String, otp: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val key   = email.lowercase().trim()
+                val otpId = otpIdStore[key]
+                    ?: return@withContext Result.failure(Exception("OTP session expired. Please request a new one."))
+
+                val authBody = JSONObject().apply {
+                    put("otpId",    otpId)
+                    put("password", otp)
+                }.toString().toRequestBody("application/json".toMediaType())
+
+                val res     = http.newCall(
+                    Request.Builder()
+                        .url("${AppConfig.BASE_URL}/api/collections/$COL_USERS/auth-with-otp")
+                        .post(authBody).build()
+                ).execute()
+                val resBody = res.body?.string() ?: ""
+                val code    = res.code
+                res.close()
+
+                if (code == 400 || code == 401)
+                    return@withContext Result.failure(Exception("Incorrect OTP. Please try again."))
+                if (code !in 200..299)
+                    return@withContext Result.failure(Exception("Verification failed ($code)."))
+
+                // OTP valid — store the token+userId for Step 3
+                val json      = JSONObject(resBody)
+                val userToken = json.optString("token")
+                    .ifBlank { return@withContext Result.failure(Exception("Auth failed — no token.")) }
+                val userId    = json.optJSONObject("record")?.optString("id")
+                    ?: return@withContext Result.failure(Exception("Auth failed — no user record."))
+
+                verifiedTokenStore[key] = Pair(userToken, userId)
+                Log.d(tag, "OTP verified ✅ for $email")
+                Result.success(Unit)
+
+            } catch (e: Exception) {
+                Log.e(tag, "verifyOtp failed: ${e.message}")
+                Result.failure(e)
+            }
         }
 
     override suspend fun createUser(
@@ -358,7 +469,7 @@ class PocketBaseDataSource @Inject constructor(
      * credential setup in Admin Settings.
      *
      * Fails silently for non-SA users — the failed HTTP request is the only
-     * side-effect (one extra network call per login).
+     * side effect (one extra network call per login).
      */
     private suspend fun checkIsPocketBaseSuperuser(email: String, password: String): Boolean =
         coroutineScope {

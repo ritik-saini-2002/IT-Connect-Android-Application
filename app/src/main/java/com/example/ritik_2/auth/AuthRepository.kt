@@ -155,6 +155,20 @@ class AuthRepository @Inject constructor(
             Result.failure(e)
         }
 
+    suspend fun sendLoginOtp(email: String): Result<Unit> =
+        dataSource.sendLoginOtp(email)
+
+    suspend fun loginWithOtp(email: String, otp: String): Result<Unit> =
+        try {
+            val session = dataSource.loginWithOtp(email, otp).getOrThrow()
+            sessionManager.save(session)
+            syncManager.setUserToken(session.token)
+            adminTokenProvider.startKeepAlive()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+
     suspend fun sendPasswordReset(email: String): Result<Unit> =
         dataSource.sendPasswordReset(email)
 
@@ -162,6 +176,9 @@ class AuthRepository @Inject constructor(
 
     suspend fun sendOtp(email: String): Result<Unit> =
         dataSource.sendOtp(email)
+
+    suspend fun verifyOtp(email: String, otp: String): Result<Unit> =
+        dataSource.verifyOtp(email, otp)
 
     suspend fun verifyOtpAndResetPassword(email: String, otp: String, newPassword: String): Result<Unit> =
         dataSource.verifyOtpAndResetPassword(email, otp, newPassword)

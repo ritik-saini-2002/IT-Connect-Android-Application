@@ -8,9 +8,12 @@ interface AppDataSource {
 
     // ── Auth ──────────────────────────────────────────────────
     suspend fun login(email: String, password: String): AuthSession
+    suspend fun sendLoginOtp(email: String): Result<Unit>
+    suspend fun loginWithOtp(email: String, otp: String): Result<AuthSession>
     suspend fun logout()
     suspend fun sendPasswordReset(email: String): Result<Unit>
     suspend fun sendOtp(email: String): Result<Unit>
+    suspend fun verifyOtp(email: String, otp: String): Result<Unit>
     suspend fun verifyOtpAndResetPassword(email: String, otp: String, newPassword: String): Result<Unit>
 
     suspend fun createUser(email: String, password: String, name: String, adminToken: String = ""): String

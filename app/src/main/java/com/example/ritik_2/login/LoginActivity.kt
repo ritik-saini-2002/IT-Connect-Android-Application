@@ -31,6 +31,9 @@ class LoginActivity : ComponentActivity() {
             ITConnectTheme {
                 LoginScreen(
                     onLoginClick                = { email, pw -> viewModel.login(email, pw) },
+                    otpLoginState    = viewModel.otpLoginState,
+                    onSendLoginOtp   = { email -> viewModel.sendLoginOtp(email) },
+                    onLoginWithOtp   = { email, otp -> viewModel.loginWithOtp(email, otp) },
                     onRegisterClick             = { startActivity(Intent(this, RegistrationActivity::class.java)) },
                     onForgotPasswordClick       = { email -> viewModel.sendOtp(email) },
                     onVerifyOtpAndResetPassword = { email, otp, newPass ->
@@ -40,7 +43,9 @@ class LoginActivity : ComponentActivity() {
                     onPcControlClick = { startActivity(Intent(this, PcControlActivity::class.java)) },
                     onContactClick   = { startActivity(Intent(this, ContactActivity::class.java)) },
                     loginState       = viewModel.loginState,
-                    resetState       = viewModel.resetState
+                    resetState       = viewModel.resetState,
+                    onVerifyOtp      = { email, otp -> viewModel.verifyOtp(email, otp) },
+                    onResetPassword  = { email, otp, pass -> viewModel.resetPassword(email, otp, pass) },
                 )
             }
         }
@@ -52,6 +57,18 @@ class LoginActivity : ComponentActivity() {
             viewModel.loginState.collect { state ->
                 when (state) {
                     is AuthState.Success -> navigateToMain()   // ← was missing!
+                    is AuthState.Error   -> toast(state.message)
+                    else -> {}
+                }
+            }
+        }
+
+        // ── OTP Based Login state — only handles login events ──────────────────────
+
+        lifecycleScope.launch {
+            viewModel.otpLoginState.collect { state ->
+                when (state) {
+                    is AuthState.Success -> navigateToMain()
                     is AuthState.Error   -> toast(state.message)
                     else -> {}
                 }
@@ -84,5 +101,7 @@ class LoginActivity : ComponentActivity() {
         super.onDestroy()
         viewModel.resetLoginState()
         viewModel.resetResetState()
+        viewModel.resetOtpLoginState()
+
     }
 }

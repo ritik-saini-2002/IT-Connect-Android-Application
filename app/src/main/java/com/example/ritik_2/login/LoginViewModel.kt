@@ -39,16 +39,43 @@ class LoginViewModel @Inject constructor(
         }
     }
 
-    fun sendPasswordReset(email: String) {
+    private val _otpLoginState = MutableStateFlow<AuthState>(AuthState.Idle)
+    val otpLoginState: StateFlow<AuthState> = _otpLoginState.asStateFlow()
+
+    fun sendLoginOtp(email: String) {
         viewModelScope.launch {
-            _resetState.value = AuthState.Loading
-            _resetState.value = authRepository.sendPasswordReset(email.trim())
+            _otpLoginState.value = AuthState.Loading
+            _otpLoginState.value = authRepository.sendLoginOtp(email.trim())
                 .fold(
-                    onSuccess = { AuthState.Success() },
-                    onFailure = { AuthState.Error(it.message ?: "Failed to send reset link") }
+                    onSuccess = { AuthState.OtpLoginSent },
+                    onFailure = { AuthState.Error(it.message ?: "Failed to send OTP") }
                 )
         }
     }
+
+    fun loginWithOtp(email: String, otp: String) {
+        viewModelScope.launch {
+            _otpLoginState.value = AuthState.Loading
+            _otpLoginState.value = authRepository.loginWithOtp(email.trim(), otp.trim())
+                .fold(
+                    onSuccess = { AuthState.Success() },
+                    onFailure = { AuthState.Error(it.message ?: "OTP login failed") }
+                )
+        }
+    }
+
+    fun resetOtpLoginState() { _otpLoginState.value = AuthState.Idle }
+
+//    fun sendPasswordReset(email: String) {
+//        viewModelScope.launch {
+//            _resetState.value = AuthState.Loading
+//            _resetState.value = authRepository.sendPasswordReset(email.trim())
+//                .fold(
+//                    onSuccess = { AuthState.Success() },
+//                    onFailure = { AuthState.Error(it.message ?: "Failed to send reset link") }
+//                )
+//        }
+//    }
 
     // LoginViewModel.kt — add these below sendPasswordReset()
 
@@ -63,7 +90,29 @@ class LoginViewModel @Inject constructor(
         }
     }
 
+    fun verifyOtp(email: String, otp: String) {
+        viewModelScope.launch {
+            _resetState.value = AuthState.Loading
+            _resetState.value = authRepository.verifyOtp(email, otp)
+                .fold(
+                    onSuccess = { AuthState.OtpVerified },
+                    onFailure = { AuthState.Error(it.message ?: "Invalid OTP") }
+                )
+        }
+    }
+
     fun verifyOtpAndResetPassword(email: String, otp: String, newPassword: String) {
+        viewModelScope.launch {
+            _resetState.value = AuthState.Loading
+            _resetState.value = authRepository.verifyOtpAndResetPassword(email.trim(), otp.trim(), newPassword)
+                .fold(
+                    onSuccess = { AuthState.Success() },
+                    onFailure = { AuthState.Error(it.message ?: "Reset failed") }
+                )
+        }
+    }
+
+    fun resetPassword(email: String, otp: String, newPassword: String) {
         viewModelScope.launch {
             _resetState.value = AuthState.Loading
             _resetState.value = authRepository.verifyOtpAndResetPassword(email.trim(), otp.trim(), newPassword)
