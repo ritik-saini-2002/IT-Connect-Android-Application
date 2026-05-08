@@ -14,4 +14,6 @@
     <!-- External cache safety -->
     <external-cache-path name="external_cache" path="." />
 
+    <cache-path name="updates" path="." />
+
 </paths>

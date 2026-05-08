@@ -23,7 +23,14 @@ import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import com.example.ritik_2.BuildConfig
 import com.example.ritik_2.administrator.AdministratorPanelActivity
+import com.example.ritik_2.appupdate.AppUpdateActivity
+import com.example.ritik_2.appupdate.AppUpdateChecker
+import com.example.ritik_2.appupdate.AppUpdateDialog
+import com.example.ritik_2.appupdate.AppUpdateManager
+import com.example.ritik_2.appupdate.UpdateInfo
+import com.example.ritik_2.appupdate.UpdateNoticeBanner
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.auth.SessionStatus
 import com.example.ritik_2.chat.ChatActivity
@@ -61,6 +68,8 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var connectMonitor    : ConnectivityMonitor
     @Inject lateinit var syncManager       : SyncManager
     @Inject lateinit var adminTokenProvider: AdminTokenProvider
+    @Inject lateinit var appUpdateChecker : AppUpdateChecker
+    @Inject lateinit var appUpdateManager : AppUpdateManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -110,6 +119,24 @@ class MainActivity : FragmentActivity() {
                     )
                 }
 
+                var pendingUpdate    by remember { mutableStateOf<UpdateInfo?>(null) }
+                var showUpdateDialog by remember { mutableStateOf(false) }
+                var downloadProgress by remember { mutableStateOf<Float?>(null) }
+
+
+                LaunchedEffect(gateUnlocked) {
+        if (!gateUnlocked) return@LaunchedEffect
+        val session = authRepository.getSession() ?: return@LaunchedEffect
+        val update  = appUpdateChecker.checkForUpdate(
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            userToken          = session.token
+        )
+        if (update != null) {
+            pendingUpdate    = update
+            showUpdateDialog = true
+        }
+    }
+
                 Box(Modifier.fillMaxSize()) {
                     MainScreen(
                         uiState                   = uiState,
@@ -154,6 +181,53 @@ class MainActivity : FragmentActivity() {
                             onLogout = { handleLogout() },
                         )
                     }
+
+//                    AnimatedVisibility(
+//                        visible  = showUpdateBanner && !bannerDismissed && pendingUpdate != null,
+//                        enter    = slideInVertically { -it } + fadeIn(),
+//                        exit     = slideOutVertically { -it } + fadeOut(),
+//                        modifier = Modifier.align(Alignment.TopCenter)
+//                    ) {
+//                        pendingUpdate?.let { update ->
+//                            UpdateNoticeBanner(
+//                                versionName   = update.versionName,
+//                                onTapToUpdate = {
+//                                    // Navigate to Help & Support (card id 8 = ContactActivity)
+//                                    handleCardClick(8)
+//                                },
+//                                onDismiss = {
+//                                    bannerDismissed = true
+//                                    showUpdateBanner = false
+//                                }
+//                            )
+//                        }
+//                    }
+
+                    if (showUpdateDialog && pendingUpdate != null) {
+        val update = pendingUpdate!!
+        AppUpdateDialog(
+            versionName      = update.versionName,
+            releaseNotes     = update.releaseNotes,
+            downloadProgress = downloadProgress,
+            onDownload       = {
+                val token = authRepository.getSession()?.token ?: return@AppUpdateDialog
+                appUpdateManager.downloadAndInstall(
+                    url       = update.downloadUrl,
+                    userToken = token,
+                    onProgress = { downloadProgress = it },
+                    onError    = { err ->
+                        Toast.makeText(this@MainActivity, err, Toast.LENGTH_LONG).show()
+                        downloadProgress = null
+                    }
+                )
+            },
+            onDismiss = {
+                showUpdateDialog = false
+                pendingUpdate    = null
+            }
+        )
+    }
+
                 }
             }
         }
@@ -198,7 +272,7 @@ class MainActivity : FragmentActivity() {
         when (id) {
             3 -> startActivity(Intent(this, AdministratorPanelActivity::class.java))
             4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
-//            5 -> startActivity(Intent(this, MACNetActivity::class.java))
+//          5 -> startActivity(Intent(this, MACNetActivity::class.java))
             6 -> startActivity(Intent(this, PcControlActivity::class.java))
             7 -> startActivity(Intent(this, ChatActivity::class.java))
             8 -> {
@@ -208,6 +282,7 @@ class MainActivity : FragmentActivity() {
                 })
             }
             9 -> startActivity(Intent(this, NagiosConnectActivity::class.java))
+            10 -> startActivity(Intent(this, AppUpdateActivity::class.java))
         }
     }
 

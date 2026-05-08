@@ -251,6 +251,7 @@ object PermissionGuard {
             7 -> true   // Chats — all users
             8 -> true   // Help & Support — all users
             9 -> Permissions.PERM_ACCESS_NAGIOS in permissions
+            10 -> isDbAdmin || isSystemAdmin(role) || Permissions.PERM_MANAGE_APP_UPDATES in permissions
             else -> false
         }
     }
@@ -283,6 +284,7 @@ object PermissionGuard {
         7 -> "Chats"
         8 -> "Help & Support"
         9 -> "Nagios Monitor"
+        10 -> "App Updates"
         else -> "this feature"
     }
 

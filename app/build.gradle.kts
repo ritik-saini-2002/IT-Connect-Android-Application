@@ -16,7 +16,7 @@ android {
         minSdk                    = 26
         targetSdk                 = 35
         versionCode               = 2
-        versionName               = "3.0.0"
+        versionName               = "3.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Read PocketBase config from local.properties (never commit credentials)
@@ -98,6 +98,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.androidx.compose.foundation.layout)
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
     androidTestImplementation(composeBom)

@@ -160,13 +160,14 @@ fun MainScreen(
                         val userPermissions = uiState.userProfile?.permissions ?: emptyList()
 
                         val features = listOf(
-                            FeatureItem(3, "Admin Panel",         Icons.Outlined.AdminPanelSettings, Color(0xFFFF6F00)),
-                            FeatureItem(4, "Server Connect",      Icons.Outlined.Code,               Color(0xFF6200EA)),
-                            FeatureItem(5, "Knowledge Base",      Icons.Outlined.MenuBook,           Color(0xFF00796B)),
-                            FeatureItem(6, "Windows Control",     Icons.Outlined.Computer,           Color(0xFFC51162)),
-                            FeatureItem(7, "Chats",               Icons.Outlined.Chat,               MaterialTheme.colorScheme.tertiary),
-                            FeatureItem(8, "Help & Support",      Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary),
-                            FeatureItem(9, "Nagios Monitor",      Icons.Outlined.MonitorHeart,       Color(0xFF2E7D32))
+                            FeatureItem(3,  "Admin Panel",         Icons.Outlined.AdminPanelSettings, Color(0xFFFF6F00)),
+                            FeatureItem(4,  "Server Connect",      Icons.Outlined.Code,               Color(0xFF6200EA)),
+                            FeatureItem(5,  "Knowledge Base",      Icons.Outlined.MenuBook,           Color(0xFF00796B)),
+                            FeatureItem(6,  "Windows Control",     Icons.Outlined.Computer,           Color(0xFFC51162)),
+                            FeatureItem(7,  "Chats",               Icons.Outlined.Chat,               MaterialTheme.colorScheme.tertiary),
+                            FeatureItem(8,  "Help & Support",      Icons.Outlined.SupportAgent,       MaterialTheme.colorScheme.primary),
+                            FeatureItem(9,  "Nagios Monitor",      Icons.Outlined.MonitorHeart,       Color(0xFF2E7D32)),
+                            FeatureItem(10, "App Updates",         Icons.Outlined.SystemUpdateAlt,    Color(0xFF6200EA))
                         ).filter { feature ->
                             PermissionGuard.canAccessFeature(feature.id, userRole, userPermissions)
                         }
@@ -426,13 +427,14 @@ fun AppSidebar(
     val sidebarPermissions = profile?.permissions ?: emptyList()
 
     val sidebarItems = listOf(
-        FeatureItem(3, "Admin Panel",        Icons.Outlined.AdminPanelSettings,  Color(0xFFFF6F00)),
-        FeatureItem(4, "Server Connect",     Icons.Outlined.Code,               Color(0xFF6200EA)),
-        FeatureItem(5, "Knowledge Base",     Icons.Outlined.MenuBook,           Color(0xFF00796B)),
-        FeatureItem(6, "Windows Control",    Icons.Outlined.Computer,           Color(0xFFC51162)),
-        FeatureItem(7, "Settings",           Icons.Outlined.Settings,           Color(0xFF546E7A)),
-        FeatureItem(8, "Help & Support",     Icons.Outlined.SupportAgent,       Color(0xFF1976D2)),
-        FeatureItem(9, "Nagios Monitor",     Icons.Outlined.MonitorHeart,       Color(0xFF2E7D32))
+        FeatureItem(3,   "Admin Panel",        Icons.Outlined.AdminPanelSettings,  Color(0xFFFF6F00)),
+        FeatureItem(4,   "Server Connect",     Icons.Outlined.Code,                Color(0xFF6200EA)),
+        FeatureItem(5,   "Knowledge Base",     Icons.Outlined.MenuBook,            Color(0xFF00796B)),
+        FeatureItem(6,   "Windows Control",    Icons.Outlined.Computer,            Color(0xFFC51162)),
+        FeatureItem(7,   "Chats",              Icons.Outlined.Message,             Color(0xFF546E7A)),
+        FeatureItem(8,   "Help & Support",     Icons.Outlined.SupportAgent,        Color(0xFF1976D2)),
+        FeatureItem(9,   "Nagios Monitor",     Icons.Outlined.MonitorHeart,        Color(0xFF2E7D32)),
+        FeatureItem(10,  "App Updates",        Icons.Outlined.SystemUpdateAlt,     Color(0xFF6200EA))
     ).filter { item ->
         PermissionGuard.canAccessFeature(item.id, sidebarRole, sidebarPermissions)
     }

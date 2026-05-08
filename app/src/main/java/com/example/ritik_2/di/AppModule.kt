@@ -1,6 +1,8 @@
 package com.example.ritik_2.di
 
 import android.content.Context
+import com.example.ritik_2.appupdate.AppUpdateChecker
+import com.example.ritik_2.appupdate.AppUpdateManager
 import com.example.ritik_2.auth.AuthRepository
 import com.example.ritik_2.core.AdminTokenProvider
 import com.example.ritik_2.core.ConnectivityMonitor
@@ -74,4 +76,14 @@ object AppModule {
         syncManager        : SyncManager,
         adminTokenProvider : AdminTokenProvider
     ): AuthRepository = AuthRepository(dataSource, pbDataSource, sessionManager, syncManager, adminTokenProvider)
+
+    @Provides @Singleton
+   fun provideAppUpdateChecker(http: OkHttpClient): AppUpdateChecker =
+        AppUpdateChecker(http)
+
+   @Provides @Singleton
+   fun provideAppUpdateManager(
+       @ApplicationContext ctx: Context,
+       http: OkHttpClient
+   ): AppUpdateManager = AppUpdateManager(ctx, http)
 }
