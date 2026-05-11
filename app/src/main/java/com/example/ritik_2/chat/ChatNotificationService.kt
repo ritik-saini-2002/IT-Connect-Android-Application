@@ -1,304 +1,212 @@
+// com/example/ritik_2/chat/ChatNotificationService.kt
 package com.example.ritik_2.chat
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
-import android.content.Context
+import android.app.*
 import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
-import com.example.ritik_2.auth.AuthRepository
+import com.example.ritik_2.R
 import com.example.ritik_2.core.AppConfig
-import com.example.ritik_2.core.SyncManager
+import com.example.ritik_2.notifications.NotificationActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import okhttp3.*
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
-private const val TAG = "ChatNotifService"
-
 @AndroidEntryPoint
 class ChatNotificationService : Service() {
 
-    @Inject lateinit var syncManager: SyncManager
-    @Inject lateinit var authRepo  : AuthRepository
+    @Inject lateinit var authRepository: com.example.ritik_2.auth.AuthRepository
+    @Inject lateinit var syncManager: com.example.ritik_2.core.SyncManager
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var userId   = ""
-    private var userName = ""
-    private var listenJob: Job? = null
-    private var currentCall: Call? = null
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var sseCall: Call? = null
 
-    private val sseClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS)
+    private val client = OkHttpClient.Builder()
+        .readTimeout(0, TimeUnit.MILLISECONDS) // No timeout for SSE stream
         .build()
 
     companion object {
-        const val CHANNEL_ID      = "chat_messages"
-        const val CHANNEL_NAME    = "Chat Messages"
-        const val NOTIF_ID        = 1001
-        const val EXTRA_USER_ID   = "user_id"
-        const val EXTRA_USER_NAME = "user_name"
+        const val CHANNEL_ID   = "chat_notifications"
+        const val CHANNEL_NAME = "Chat Messages"
+        const val FOREGROUND_ID = 1001
 
-        fun start(ctx: Context, userId: String, userName: String) {
-            // FIX: Use try-catch — on Android 12+ startForegroundService can throw
-            // if the app is in background or the dataSync time limit is exhausted.
-            try {
-                ctx.startForegroundService(
-                    Intent(ctx, ChatNotificationService::class.java).apply {
-                        putExtra(EXTRA_USER_ID,   userId)
-                        putExtra(EXTRA_USER_NAME, userName)
-                    }
-                )
-            } catch (e: Exception) {
-                Log.w(TAG, "Cannot start foreground service: ${e.message}")
-                // Fallback: try as regular service — won't crash the app
-                try {
-                    ctx.startService(
-                        Intent(ctx, ChatNotificationService::class.java).apply {
-                            putExtra(EXTRA_USER_ID,   userId)
-                            putExtra(EXTRA_USER_NAME, userName)
-                        }
-                    )
-                } catch (e2: Exception) {
-                    Log.e(TAG, "Cannot start service at all: ${e2.message}")
-                }
+        fun start(context: android.content.Context, userId: String, name: String) {
+            val intent = Intent(context, ChatNotificationService::class.java).apply {
+                putExtra("userId", userId)
+                putExtra("name", name)
             }
+            context.startForegroundService(intent)
         }
 
-        fun stop(ctx: Context) {
-            try {
-                ctx.stopService(Intent(ctx, ChatNotificationService::class.java))
-            } catch (e: Exception) {
-                Log.w(TAG, "Stop service failed: ${e.message}")
-            }
+        fun stop(context: android.content.Context) {
+            context.stopService(Intent(context, ChatNotificationService::class.java))
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        startForeground(FOREGROUND_ID, buildForegroundNotification())
+        startRealtimeListener()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // START_STICKY restarts the service if killed by system
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onCreate() {
-        super.onCreate()
-        createChannel()
-
-        // FIX: Wrap startForeground in try-catch for Android 14+ dataSync limits.
-        // "ForegroundServiceStartNotAllowedException: Time limit already exhausted"
-        // happens when the app has used up its dataSync foreground service quota.
-        // In that case, we gracefully degrade to a background coroutine.
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // Android 14+: must specify foregroundServiceType
-                ServiceCompat.startForeground(
-                    this, NOTIF_ID, buildForegroundNotif(),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                )
-            } else {
-                startForeground(NOTIF_ID, buildForegroundNotif())
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "startForeground failed (quota exhausted?): ${e.message}")
-            // Don't crash — just run as a background service.
-            // The SSE listener will still work; notifications may be delayed.
-            // Stop self to prevent the system from killing the app.
-            stopSelf()
-        }
+    override fun onDestroy() {
+        super.onDestroy()
+        sseCall?.cancel()
+        scope.cancel()
+        // Reschedule via WorkManager as a safety net
+        ChatNotificationWorker.schedule(this)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        userId   = intent?.getStringExtra(EXTRA_USER_ID)   ?: return START_NOT_STICKY
-        userName = intent.getStringExtra(EXTRA_USER_NAME)  ?: ""
-        listenJob?.cancel()
-        listenJob = scope.launch { connectLoop() }
-        return START_STICKY
-    }
+    // ── PocketBase Realtime SSE ───────────────────────────────────────────────
 
-    // ── Reconnect loop ────────────────────────────────────────────────────────
+    private fun startRealtimeListener() {
+        scope.launch {
+            try {
+                val userId = authRepository.getSession()?.userId ?: return@launch
+                val token  = syncManager.getAdminToken()
 
-    private suspend fun connectLoop() {
-        var retryDelay = 5_000L
-        while (scope.isActive) {
-            val connected = try {
-                doConnect()
-                true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "SSE disconnected: ${e.message}")
-                false
-            }
-            delay(if (connected) 3_000L else retryDelay)
-            retryDelay = if (connected) 5_000L else minOf(retryDelay * 2, 60_000L)
-        }
-    }
+                // Step 1: Get SSE client ID
+                val connectUrl = "${AppConfig.BASE_URL}/api/realtime"
+                val connectReq = Request.Builder()
+                    .url(connectUrl)
+                    .addHeader("Authorization", token)
+                    .build()
 
-    // ── Single SSE session ────────────────────────────────────────────────────
+                sseCall = client.newCall(connectReq)
+                sseCall!!.execute().use { response ->
+                    val source = response.body?.source() ?: return@launch
+                    var clientId = ""
 
-    private suspend fun doConnect() = withContext(Dispatchers.IO) {
-        val token = authRepo.getSession()?.token.orEmpty()
-        if (token.isBlank()) {
-            Log.w(TAG, "Cannot get user token — no active session")
-            return@withContext
-        }
-
-        val clientId = try {
-            JSONObject(
-                syncManager.pbGet("${AppConfig.BASE_URL}/api/realtime", token)
-            ).optString("clientId").ifEmpty { null }
-        } catch (e: Exception) {
-            Log.w(TAG, "Realtime init failed: ${e.message}")
-            null
-        }
-
-        if (clientId.isNullOrEmpty()) {
-            Log.w(TAG, "No clientId — skipping")
-            return@withContext
-        }
-
-        try {
-            syncManager.pbPost(
-                "${AppConfig.BASE_URL}/api/realtime", token,
-                JSONObject().apply {
-                    put("clientId", clientId)
-                    put("subscriptions", JSONArray().apply {
-                        put("chat_messages")
-                    }.toString())
-                }.toString()
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Subscription failed: ${e.message}")
-            return@withContext
-        }
-
-        val call = sseClient.newCall(
-            Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/realtime?clientId=$clientId")
-                .addHeader("Authorization", "Bearer $token")
-                .build()
-        )
-        currentCall = call
-
-        val response = try {
-            call.execute()
-        } catch (e: Exception) {
-            currentCall = null
-            throw e
-        }
-
-        if (!response.isSuccessful) {
-            response.close()
-            currentCall = null
-            Log.w(TAG, "SSE HTTP ${response.code}")
-            return@withContext
-        }
-
-        val source = response.body?.source()
-        if (source == null) {
-            response.close()
-            currentCall = null
-            return@withContext
-        }
-
-        Log.d(TAG, "SSE connected ✅ clientId=$clientId")
-
-        try {
-            val buf = StringBuilder()
-            while (isActive) {
-                val line = source.readUtf8Line() ?: break
-                when {
-                    line.startsWith("data:") ->
-                        buf.append(line.removePrefix("data:").trim())
-                    line.isEmpty() && buf.isNotEmpty() -> {
-                        handleEvent(buf.toString())
-                        buf.clear()
+                    // Read the first event to get clientId
+                    while (!source.exhausted()) {
+                        val line = source.readUtf8Line() ?: break
+                        if (line.startsWith("data:")) {
+                            val data = JSONObject(line.removePrefix("data:").trim())
+                            if (data.has("clientId")) {
+                                clientId = data.getString("clientId")
+                                // Step 2: Subscribe to chat_messages collection
+                                subscribeToMessages(clientId, token, userId)
+                            } else {
+                                // Step 3: Handle incoming message events
+                                handleEvent(data, userId)
+                            }
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                // Reconnect after 5 seconds on failure
+                delay(5_000)
+                startRealtimeListener()
             }
-        } finally {
-            currentCall = null
-            call.cancel()
-            response.close()
-            Log.d(TAG, "SSE stream closed, reconnecting…")
         }
     }
 
-    // ── Event handler ─────────────────────────────────────────────────────────
-
-    private fun handleEvent(data: String) {
-        try {
-            val json   = JSONObject(data)
-            if (json.optString("action") != "create") return
-            val record = json.optJSONObject("record") ?: return
-
-            val senderId = record.optString("senderId")
-            if (senderId == userId) return
-
-            // Skip uploading placeholders
-            if (record.optBoolean("uploading", false)) return
-
-            val senderName = record.optString("senderName", "Someone")
-            val text = record.optString("text", "").ifBlank {
-                "\uD83D\uDCCE ${record.optString("fileName", "File")}"
-            }
-            showMessageNotification(senderName, text, record.optString("roomId"))
-        } catch (e: Exception) {
-            Log.w(TAG, "Event parse error: ${e.message}")
-        }
+    private suspend fun subscribeToMessages(
+        clientId: String,
+        token: String,
+        userId: String
+    ) {
+        // Subscribe to all chat_messages events for rooms this user is in
+        syncManager.pbPost(
+            "${AppConfig.BASE_URL}/api/realtime",
+            token,
+            JSONObject().apply {
+                put("clientId", clientId)
+                put("subscriptions", org.json.JSONArray().apply {
+                    put("chat_messages")   // Listen to ALL new messages
+                })
+            }.toString()
+        )
     }
 
-    private fun showMessageNotification(sender: String, text: String, roomId: String) {
+    private fun handleEvent(data: JSONObject, userId: String) {
+        val action = data.optString("action")
+        if (action != "create") return // Only care about new messages
+
+        val record   = data.optJSONObject("record") ?: return
+        val senderId = record.optString("senderId")
+
+        // Don't notify for own messages
+        if (senderId == userId) return
+
+        val senderName = record.optString("senderName", "Someone")
+        val roomName   = record.optString("roomName", "Chat")
+        val text       = record.optString("text", "📎 File")
+        val roomId     = record.optString("roomId")
+
+        showMessageNotification(senderName, roomName, text, roomId)
+    }
+
+    // ── Notification helpers ──────────────────────────────────────────────────
+
+    private fun showMessageNotification(
+        sender: String,
+        room: String,
+        text: String,
+        roomId: String
+    ) {
+        val notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
         val tapIntent = PendingIntent.getActivity(
-            this, roomId.hashCode(),
+            this,
+            roomId.hashCode(),
             ChatActivity.newIntent(this, roomId),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
         val notif = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
-            .setContentTitle(sender)
+            .setSmallIcon(R.drawable.it_connect_logo)
+            .setContentTitle("$sender in $room")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
             .setContentIntent(tapIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL) // sound + vibration
             .build()
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-            .notify(roomId.hashCode(), notif)
+
+        // Use roomId hash so each room gets its own notification slot
+        notifManager.notify(roomId.hashCode(), notif)
     }
 
-    private fun buildForegroundNotif() =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
-            .setContentTitle("Chat")
-            .setContentText("Connected for new messages")
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+    private fun buildForegroundNotification(): Notification {
+        val tapIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, NotificationActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("ITConnect")
+            .setContentText("Listening for new messages…")
+            .setSmallIcon(R.drawable.it_connect_logo)
+            .setContentIntent(tapIntent)
             .setOngoing(true)
+            .setSilent(true)
             .build()
+    }
 
-    private fun createChannel() {
-        val ch = NotificationChannel(
-            CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            CHANNEL_NAME,
+            NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = "New chat message notifications"
+            description      = "Chat message notifications"
             enableVibration(true)
+            enableLights(true)
         }
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
-            .createNotificationChannel(ch)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        // FIX: Cancel any active SSE call to prevent connection leaks
-        currentCall?.cancel()
-        currentCall = null
-        scope.cancel()
-        Log.d(TAG, "Service destroyed, all connections cleaned up")
+            .createNotificationChannel(channel)
     }
 }

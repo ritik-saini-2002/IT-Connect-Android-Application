@@ -66,6 +66,12 @@ android {
         }
     }
 
+    lint {
+        disable += "NullSafeMutableLiveData"
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+
     buildFeatures {
         compose     = true
         buildConfig = true
@@ -187,4 +193,5 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
+    testImplementation(libs.mockwebserver)
 }

@@ -301,7 +301,7 @@ class MainActivity : FragmentActivity() {
 
     private fun handleLogout() {
         lifecycleScope.launch {
-            ChatNotificationService.stop(this@MainActivity)
+            stopService(Intent(this@MainActivity, ChatNotificationService::class.java))
             authRepository.logout()
             // Force re-prompt on next login.
             LaunchGateState.unlocked = false
@@ -324,7 +324,7 @@ class MainActivity : FragmentActivity() {
 
     private fun forceLogout(message: String) {
         lifecycleScope.launch {
-            ChatNotificationService.stop(this@MainActivity)
+            stopService(Intent(this@MainActivity, ChatNotificationService::class.java))
             authRepository.logout()
             LaunchGateState.unlocked = false
             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()

@@ -35,8 +35,8 @@ class SplashActivity : ComponentActivity() {
 
     // Own lightweight client — short timeouts so splash never hangs
     private val probeClient = OkHttpClient.Builder()
-        .connectTimeout(133, TimeUnit.SECONDS)
-        .readTimeout(133, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,7 +55,7 @@ class SplashActivity : ComponentActivity() {
         // 3. Probe server directly — blocking call with 3s hard timeout
         //    probeNow() on ConnectivityMonitor is fire-and-forget so we do
         //    our own synchronous check here instead.
-        val serverUp = withTimeoutOrNull(3_500) {
+        val serverUp = withTimeoutOrNull(50) {
             withContext(Dispatchers.IO) {
                 try {
                     val res = probeClient.newCall(
@@ -104,7 +104,7 @@ class SplashActivity : ComponentActivity() {
         val needsCompletion = try {
             val cached = withContext(Dispatchers.IO) { db.userDao().getById(userId) }
             cached?.needsProfileCompletion
-                ?: withTimeoutOrNull(3_000) {
+                ?: withTimeoutOrNull(100) {
                     dataSource.getUserProfile(userId).getOrNull()?.isProfileIncomplete
                 } ?: false
         } catch (_: Exception) { false }
