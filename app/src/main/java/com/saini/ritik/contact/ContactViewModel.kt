@@ -35,7 +35,7 @@ class ContactViewModel @Inject constructor(
                 return@launch
             }
             val info = updateChecker.checkForUpdate(
-                currentVersionCode = android.os.Build.VERSION.SDK_INT,
+                currentVersionCode = com.saini.ritik.BuildConfig.VERSION_CODE,
                 userToken          = session.token
             )
             _updateState.value = if (info == null) UpdateCheckState.UpToDate

@@ -33,13 +33,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 
-private val Purple700 = Color(0xFF6200EA)
-private val Purple500 = Color(0xFF9C27B0)
-private val Teal500   = Color(0xFF009688)
-private val Amber600  = Color(0xFFFFB300)
-private val Red600    = Color(0xFFE53935)
-private val Green600  = Color(0xFF43A047)
-private val Surface2  = Color(0xFF1E1E2E)
+// ── All colors now come from Ritik_2Theme via MaterialTheme.colorScheme ───────
+// No hardcoded Color() values — the theme handles light/dark automatically.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,6 +44,7 @@ fun AppUpdateScreen(
     onBack     : () -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val cs    = MaterialTheme.colorScheme
     val context = LocalContext.current
     var showUploadSheet by remember { mutableStateOf(false) }
     var deleteTarget    by remember { mutableStateOf<AppUpdateRecord?>(null) }
@@ -65,18 +61,12 @@ fun AppUpdateScreen(
         }
     }
 
-    // Messages
+    // Auto-clear messages
     state.error?.let { msg ->
-        LaunchedEffect(msg) {
-            delay(4000)
-            viewModel.clearMessages()
-        }
+        LaunchedEffect(msg) { delay(4000); viewModel.clearMessages() }
     }
     state.successMessage?.let { msg ->
-        LaunchedEffect(msg) {
-            delay(3000)
-            viewModel.clearMessages()
-        }
+        LaunchedEffect(msg) { delay(3000); viewModel.clearMessages() }
     }
 
     Scaffold(
@@ -84,12 +74,16 @@ fun AppUpdateScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("App Update Manager",
+                        Text(
+                            "App Update Manager",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp)
-                        Text("Push updates to all user devices",
+                            fontSize   = 18.sp
+                        )
+                        Text(
+                            "Push updates to all user devices",
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            color    = cs.onSurfaceVariant
+                        )
                     }
                 },
                 navigationIcon = {
@@ -103,92 +97,131 @@ fun AppUpdateScreen(
                     }
                     if (canActivate) {
                         FloatingActionButton(
-                            onClick = { showUploadSheet = true; viewModel.resetForm() },
-                            modifier = Modifier.padding(end = 8.dp).size(40.dp),
-                            containerColor = Purple700,
-                            contentColor = Color.White,
-                            shape = CircleShape
+                            onClick        = { showUploadSheet = true; viewModel.resetForm() },
+                            modifier       = Modifier.padding(end = 8.dp).size(40.dp),
+                            containerColor = cs.primary,          // theme primary
+                            contentColor   = cs.onPrimary,
+                            shape          = CircleShape
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = "Upload", modifier = Modifier.size(20.dp))
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "Upload",
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor    = cs.surface,
+                    titleContentColor = cs.onSurface
                 )
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = cs.background
     ) { padding ->
 
         Box(Modifier.fillMaxSize().padding(padding)) {
-
-            // ── Status snackbar strip ─────────────────────────────────────
             Column(Modifier.fillMaxSize()) {
 
+                // ── Error banner ──────────────────────────────────────────
                 AnimatedVisibility(visible = state.error != null) {
                     state.error?.let { msg ->
                         Surface(
-                            color = Red600,
+                            color    = cs.errorContainer,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                verticalAlignment     = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Default.ErrorOutline, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                Text(msg, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                Icon(
+                                    Icons.Default.ErrorOutline, null,
+                                    tint     = cs.onErrorContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    msg,
+                                    color    = cs.onErrorContainer,
+                                    style    = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                     }
                 }
 
+                // ── Success banner ────────────────────────────────────────
                 AnimatedVisibility(visible = state.successMessage != null) {
                     state.successMessage?.let { msg ->
                         Surface(
-                            color = Green600,
+                            color    = cs.tertiaryContainer,     // green-ish in Ritik_2Theme
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                                verticalAlignment     = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Default.CheckCircle, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                Text(msg, color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                                Icon(
+                                    Icons.Default.CheckCircle, null,
+                                    tint     = cs.onTertiaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    msg,
+                                    color    = cs.onTertiaryContainer,
+                                    style    = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                     }
                 }
 
-                // ── Stats strip ──────────────────────────────────────────
+                // ── Stats strip ───────────────────────────────────────────
                 if (state.records.isNotEmpty()) {
                     val activeCount = state.records.count { it.isActive }
                     val totalCount  = state.records.size
                     val latestCode  = state.records.maxOfOrNull { it.versionCode } ?: 0
 
                     Row(
-                        modifier = Modifier
+                        modifier              = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        StatChip("$totalCount Records",  Icons.Outlined.Inventory2,    Purple700, Modifier.weight(1f))
-                        StatChip("$activeCount Active",  Icons.Outlined.CheckCircle,   Green600,  Modifier.weight(1f))
-                        StatChip("v$latestCode Latest",  Icons.Outlined.NewReleases,   Amber600,  Modifier.weight(1f))
+                        StatChip(
+                            label    = "$totalCount Records",
+                            icon     = Icons.Outlined.Inventory2,
+                            color    = cs.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatChip(
+                            label    = "$activeCount Active",
+                            icon     = Icons.Outlined.CheckCircle,
+                            color    = cs.tertiary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatChip(
+                            label    = "v$latestCode Latest",
+                            icon     = Icons.Outlined.NewReleases,
+                            color    = cs.secondary,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
-                // ── Loading ───────────────────────────────────────────────
+                // ── Loading bar ───────────────────────────────────────────
                 if (state.isLoading) {
                     LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Purple700
+                        modifier   = Modifier.fillMaxWidth(),
+                        color      = cs.primary,
+                        trackColor = cs.primaryContainer
                     )
                 }
 
-                // ── Records list ──────────────────────────────────────────
+                // ── Empty state ───────────────────────────────────────────
                 if (!state.isLoading && state.records.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(
@@ -198,31 +231,35 @@ fun AppUpdateScreen(
                             Icon(
                                 Icons.Outlined.SystemUpdateAlt,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f),
+                                tint     = cs.onSurfaceVariant.copy(0.4f),
                                 modifier = Modifier.size(64.dp)
                             )
-                            Text("No update records yet",
+                            Text(
+                                "No update records yet",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f))
+                                color = cs.onSurfaceVariant.copy(0.6f)
+                            )
                             if (canActivate)
-                                Text("Tap + to upload the first update",
+                                Text(
+                                    "Tap + to upload the first update",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.4f))
+                                    color = cs.onSurfaceVariant.copy(0.4f)
+                                )
                         }
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier        = Modifier.fillMaxSize(),
+                        contentPadding  = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(state.records, key = { it.id }) { record ->
                             UpdateRecordCard(
-                                record      = record,
-                                canActivate = canActivate,
-                                onActivate  = { viewModel.setActive(record.id, true) },
+                                record       = record,
+                                canActivate  = canActivate,
+                                onActivate   = { viewModel.setActive(record.id, true) },
                                 onDeactivate = { viewModel.setActive(record.id, false) },
-                                onDelete    = { deleteTarget = record }
+                                onDelete     = { deleteTarget = record }
                             )
                         }
                         item { Spacer(Modifier.height(80.dp)) }
@@ -240,17 +277,17 @@ fun AppUpdateScreen(
             containerColor   = MaterialTheme.colorScheme.surface
         ) {
             UploadFormContent(
-                state      = state,
+                state                = state,
                 onVersionCodeChange  = viewModel::onVersionCodeChange,
                 onVersionNameChange  = viewModel::onVersionNameChange,
                 onReleaseNotesChange = viewModel::onReleaseNotesChange,
                 onIsActiveChange     = viewModel::onIsActiveChange,
-                onPickApk   = { apkLauncher.launch("application/vnd.android.package-archive") },
-                onSubmit    = {
+                onPickApk            = { apkLauncher.launch("application/vnd.android.package-archive") },
+                onSubmit             = {
                     viewModel.uploadUpdate()
                     if (state.error == null) showUploadSheet = false
                 },
-                onDismiss   = { showUploadSheet = false }
+                onDismiss            = { showUploadSheet = false }
             )
         }
     }
@@ -259,16 +296,27 @@ fun AppUpdateScreen(
     deleteTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            icon  = { Icon(Icons.Default.DeleteForever, null, tint = Red600) },
+            icon  = {
+                Icon(
+                    Icons.Default.DeleteForever, null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
             title = { Text("Delete Update Record?") },
             text  = {
-                Text("Version ${target.versionName} (code ${target.versionCode}) will be permanently deleted. " +
-                        "Devices that haven't updated yet will no longer receive this version.")
+                Text(
+                    "Version ${target.versionName} (code ${target.versionCode}) will be " +
+                            "permanently deleted. Devices that haven't updated yet will no longer " +
+                            "receive this version."
+                )
             },
             confirmButton = {
                 Button(
                     onClick = { viewModel.deleteRecord(target.id); deleteTarget = null },
-                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                    colors  = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor   = MaterialTheme.colorScheme.onError
+                    )
                 ) { Text("Delete") }
             },
             dismissButton = {
@@ -288,42 +336,44 @@ private fun UpdateRecordCard(
     onDeactivate: () -> Unit,
     onDelete    : () -> Unit
 ) {
-    val cs = MaterialTheme.colorScheme
+    val cs       = MaterialTheme.colorScheme
     val isActive = record.isActive
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 4.dp else 1.dp),
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (isActive) 4.dp else 1.dp
+        ),
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive)
-                cs.surface
-            else
-                cs.surfaceVariant.copy(alpha = 0.7f)
+            containerColor = if (isActive) cs.surface else cs.surfaceVariant.copy(alpha = 0.7f)
         ),
         border = if (isActive) BorderStroke(
             2.dp,
-            Brush.horizontalGradient(listOf(Purple700, Teal500))
+            Brush.horizontalGradient(listOf(cs.primary, cs.secondary))
         ) else null
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
 
-            // Header row
+            // ── Header row ────────────────────────────────────────────────
             Row(
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Version badge
                 Surface(
-                    color = if (isActive) Purple700 else cs.onSurface.copy(0.1f),
+                    color = if (isActive) cs.primaryContainer else cs.onSurface.copy(0.1f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
                         "v${record.versionName}",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        fontSize = 12.sp,
+                        modifier   = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        fontSize   = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isActive) Color.White else cs.onSurface.copy(0.7f)
+                        color      = if (isActive) cs.onPrimaryContainer else cs.onSurface.copy(0.7f)
                     )
                 }
 
@@ -331,33 +381,39 @@ private fun UpdateRecordCard(
                     Text(
                         "Build ${record.versionCode}",
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
+                        fontSize   = 14.sp,
+                        color      = cs.onSurface
                     )
                     Text(
                         "Uploaded ${record.created}",
                         fontSize = 11.sp,
-                        color = cs.onSurfaceVariant
+                        color    = cs.onSurfaceVariant
                     )
                 }
 
                 // Active badge
                 if (isActive) {
                     Surface(
-                        color = Green600.copy(0.15f),
+                        color = cs.tertiaryContainer,
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Row(
                             Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalAlignment     = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Box(
                                 Modifier
                                     .size(6.dp)
                                     .clip(CircleShape)
-                                    .background(Green600)
+                                    .background(cs.tertiary)
                             )
-                            Text("Active", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Green600)
+                            Text(
+                                "Active",
+                                fontSize   = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color      = cs.onTertiaryContainer
+                            )
                         }
                     }
                 }
@@ -366,18 +422,20 @@ private fun UpdateRecordCard(
             // APK file name
             if (record.apkFileName.isNotBlank()) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment     = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(Icons.Outlined.Android, null,
+                    Icon(
+                        Icons.Outlined.Android, null,
                         modifier = Modifier.size(14.dp),
-                        tint = cs.onSurfaceVariant)
+                        tint     = cs.onSurfaceVariant
+                    )
                     Text(
                         record.apkFileName,
-                        fontSize = 11.sp,
-                        color = cs.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        fontSize  = 11.sp,
+                        color     = cs.onSurfaceVariant,
+                        maxLines  = 1,
+                        overflow  = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -390,41 +448,53 @@ private fun UpdateRecordCard(
                 ) {
                     Text(
                         record.releaseNotes,
-                        modifier = Modifier.padding(10.dp),
-                        fontSize = 12.sp,
-                        color = cs.onSurfaceVariant,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
+                        modifier  = Modifier.padding(10.dp),
+                        fontSize  = 12.sp,
+                        color     = cs.onSurfaceVariant,
+                        maxLines  = 3,
+                        overflow  = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            // Actions (only for canActivate users)
+            // Action buttons
             if (canActivate) {
                 HorizontalDivider(color = cs.outlineVariant.copy(0.5f))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier              = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment     = Alignment.CenterVertically
                 ) {
                     if (!isActive) {
                         TextButton(onClick = onActivate) {
-                            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(16.dp), tint = Green600)
+                            Icon(
+                                Icons.Default.PlayArrow, null,
+                                modifier = Modifier.size(16.dp),
+                                tint     = cs.tertiary
+                            )
                             Spacer(Modifier.width(4.dp))
-                            Text("Activate", color = Green600, fontSize = 13.sp)
+                            Text("Activate", color = cs.tertiary, fontSize = 13.sp)
                         }
                     } else {
                         TextButton(onClick = onDeactivate) {
-                            Icon(Icons.Default.PauseCircle, null, modifier = Modifier.size(16.dp), tint = Amber600)
+                            Icon(
+                                Icons.Default.PauseCircle, null,
+                                modifier = Modifier.size(16.dp),
+                                tint     = cs.secondary
+                            )
                             Spacer(Modifier.width(4.dp))
-                            Text("Deactivate", color = Amber600, fontSize = 13.sp)
+                            Text("Deactivate", color = cs.secondary, fontSize = 13.sp)
                         }
                     }
                     Spacer(Modifier.width(4.dp))
                     TextButton(onClick = onDelete) {
-                        Icon(Icons.Default.DeleteOutline, null, modifier = Modifier.size(16.dp), tint = Red600)
+                        Icon(
+                            Icons.Default.DeleteOutline, null,
+                            modifier = Modifier.size(16.dp),
+                            tint     = cs.error
+                        )
                         Spacer(Modifier.width(4.dp))
-                        Text("Delete", color = Red600, fontSize = 13.sp)
+                        Text("Delete", color = cs.error, fontSize = 13.sp)
                     }
                 }
             }
@@ -456,14 +526,22 @@ private fun UploadFormContent(
     ) {
         // Title
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment     = Alignment.CenterVertically
         ) {
             Column {
-                Text("Upload New Version", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                Text("Push update to all connected devices",
-                    fontSize = 12.sp, color = cs.onSurfaceVariant)
+                Text(
+                    "Upload New Version",
+                    fontWeight = FontWeight.Bold,
+                    fontSize   = 18.sp,
+                    color      = cs.onSurface
+                )
+                Text(
+                    "Push update to all connected devices",
+                    fontSize = 12.sp,
+                    color    = cs.onSurfaceVariant
+                )
             }
             IconButton(onClick = onDismiss) {
                 Icon(Icons.Default.Close, null, tint = cs.onSurfaceVariant)
@@ -474,68 +552,75 @@ private fun UploadFormContent(
 
         // Version fields row
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier              = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             OutlinedTextField(
-                value = state.formVersionCode,
-                onValueChange = onVersionCodeChange,
-                label = { Text("Version Code *") },
-                placeholder = { Text("e.g. 12") },
+                value           = state.formVersionCode,
+                onValueChange   = onVersionCodeChange,
+                label           = { Text("Version Code *") },
+                placeholder     = { Text("e.g. 12") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                leadingIcon = { Icon(Icons.Default.Numbers, null, modifier = Modifier.size(18.dp)) }
+                singleLine      = true,
+                modifier        = Modifier.weight(1f),
+                leadingIcon     = {
+                    Icon(Icons.Default.Numbers, null, modifier = Modifier.size(18.dp))
+                }
             )
             OutlinedTextField(
-                value = state.formVersionName,
+                value         = state.formVersionName,
                 onValueChange = onVersionNameChange,
-                label = { Text("Version Name *") },
-                placeholder = { Text("e.g. 1.2.0") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                leadingIcon = { Icon(Icons.Outlined.Label, null, modifier = Modifier.size(18.dp)) }
+                label         = { Text("Version Name *") },
+                placeholder   = { Text("e.g. 1.2.0") },
+                singleLine    = true,
+                modifier      = Modifier.weight(1f),
+                leadingIcon   = {
+                    Icon(Icons.Outlined.Label, null, modifier = Modifier.size(18.dp))
+                }
             )
         }
 
         // APK file picker
         Surface(
-            onClick = onPickApk,
-            color = if (state.formApkUri != null)
-                Purple700.copy(0.1f)
+            onClick  = onPickApk,
+            color    = if (state.formApkUri != null)
+                cs.primaryContainer
             else
                 cs.surfaceVariant,
-            shape = RoundedCornerShape(12.dp),
+            shape    = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .border(
                     1.dp,
-                    if (state.formApkUri != null) Purple700.copy(0.5f) else cs.outline.copy(0.4f),
+                    if (state.formApkUri != null) cs.primary.copy(0.5f)
+                    else cs.outline.copy(0.4f),
                     RoundedCornerShape(12.dp)
                 )
         ) {
             Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier              = Modifier.padding(16.dp),
+                verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Icon(
-                    if (state.formApkUri != null) Icons.Default.CheckCircle else Icons.Outlined.FileUpload,
+                    if (state.formApkUri != null) Icons.Default.CheckCircle
+                    else Icons.Outlined.FileUpload,
                     null,
-                    tint = if (state.formApkUri != null) Purple700 else cs.onSurfaceVariant,
+                    tint     = if (state.formApkUri != null) cs.primary else cs.onSurfaceVariant,
                     modifier = Modifier.size(24.dp)
                 )
                 Column(Modifier.weight(1f)) {
                     Text(
                         if (state.formApkUri != null) state.formApkName else "Select APK File *",
                         fontWeight = FontWeight.Medium,
-                        fontSize = 14.sp,
-                        color = if (state.formApkUri != null) cs.onSurface else cs.onSurfaceVariant
+                        fontSize   = 14.sp,
+                        color      = if (state.formApkUri != null) cs.onPrimaryContainer
+                        else cs.onSurfaceVariant
                     )
                     Text(
                         if (state.formApkUri != null) "Tap to change" else "Signed release APK only",
                         fontSize = 11.sp,
-                        color = cs.onSurfaceVariant.copy(0.7f)
+                        color    = cs.onSurfaceVariant.copy(0.7f)
                     )
                 }
                 Icon(Icons.Default.ChevronRight, null, tint = cs.onSurfaceVariant)
@@ -544,47 +629,53 @@ private fun UploadFormContent(
 
         // Release notes
         OutlinedTextField(
-            value = state.formReleaseNotes,
+            value         = state.formReleaseNotes,
             onValueChange = onReleaseNotesChange,
-            label = { Text("Release Notes") },
-            placeholder = { Text("What's new in this version?") },
-            minLines = 3,
-            maxLines = 6,
-            modifier = Modifier.fillMaxWidth(),
-            leadingIcon = {
-                Icon(Icons.Outlined.Notes, null,
-                    modifier = Modifier.size(18.dp).padding(top = 0.dp))
+            label         = { Text("Release Notes") },
+            placeholder   = { Text("What's new in this version?") },
+            minLines      = 3,
+            maxLines      = 6,
+            modifier      = Modifier.fillMaxWidth(),
+            leadingIcon   = {
+                Icon(Icons.Outlined.Notes, null, modifier = Modifier.size(18.dp))
             }
         )
 
         // Activate toggle
         Surface(
-            color = cs.surfaceVariant,
-            shape = RoundedCornerShape(12.dp),
+            color    = cs.surfaceVariant,
+            shape    = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier          = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     Icons.Outlined.Bolt, null,
-                    tint = if (state.formIsActive) Green600 else cs.onSurfaceVariant,
+                    tint     = if (state.formIsActive) cs.tertiary else cs.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Activate Immediately",
-                        fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                    Text("Devices will be prompted to update on next app start",
-                        fontSize = 11.sp, color = cs.onSurfaceVariant)
+                    Text(
+                        "Activate Immediately",
+                        fontWeight = FontWeight.Medium,
+                        fontSize   = 14.sp,
+                        color      = cs.onSurface
+                    )
+                    Text(
+                        "Devices will be prompted to update on next app start",
+                        fontSize = 11.sp,
+                        color    = cs.onSurfaceVariant
+                    )
                 }
                 Switch(
-                    checked = state.formIsActive,
+                    checked         = state.formIsActive,
                     onCheckedChange = onIsActiveChange,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Green600
+                    colors          = SwitchDefaults.colors(
+                        checkedThumbColor = cs.onTertiary,
+                        checkedTrackColor = cs.tertiary
                     )
                 )
             }
@@ -594,35 +685,43 @@ private fun UploadFormContent(
         AnimatedVisibility(visible = state.isUploading) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier              = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("Uploading…", fontSize = 12.sp, color = cs.onSurfaceVariant)
-                    Text("${(state.uploadProgress * 100).toInt()}%",
-                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Purple700)
+                    Text(
+                        "${(state.uploadProgress * 100).toInt()}%",
+                        fontSize   = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color      = cs.primary
+                    )
                 }
                 LinearProgressIndicator(
-                    progress = { state.uploadProgress },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Purple700,
-                    trackColor = Purple700.copy(0.2f)
+                    progress   = { state.uploadProgress },
+                    modifier   = Modifier.fillMaxWidth(),
+                    color      = cs.primary,
+                    trackColor = cs.primaryContainer
                 )
             }
         }
 
         // Submit button
         Button(
-            onClick = onSubmit,
-            enabled = !state.isUploading && state.formApkUri != null
+            onClick  = onSubmit,
+            enabled  = !state.isUploading && state.formApkUri != null
                     && state.formVersionCode.isNotBlank() && state.formVersionName.isNotBlank(),
             modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Purple700)
+            shape    = RoundedCornerShape(12.dp),
+            colors   = ButtonDefaults.buttonColors(
+                containerColor = cs.primary,
+                contentColor   = cs.onPrimary
+            )
         ) {
             if (state.isUploading) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = Color.White, strokeWidth = 2.dp
+                    modifier    = Modifier.size(20.dp),
+                    color       = cs.onPrimary,
+                    strokeWidth = 2.dp
                 )
                 Spacer(Modifier.width(8.dp))
                 Text("Uploading…", fontWeight = FontWeight.Bold)
@@ -635,19 +734,25 @@ private fun UploadFormContent(
 
         // Warning note
         Surface(
-            color = Amber600.copy(0.1f),
+            color = cs.secondaryContainer,
             shape = RoundedCornerShape(10.dp)
         ) {
             Row(
                 Modifier.padding(12.dp),
-                verticalAlignment = Alignment.Top,
+                verticalAlignment     = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.Warning, null, tint = Amber600, modifier = Modifier.size(16.dp).padding(top = 2.dp))
+                Icon(
+                    Icons.Default.Warning, null,
+                    tint     = cs.onSecondaryContainer,
+                    modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                )
                 Text(
                     "APK must be signed with the same keystore as the installed app. " +
-                    "Version code must be strictly greater than the current installed version.",
-                    fontSize = 11.sp, color = Amber600.copy(0.9f), lineHeight = 16.sp
+                            "Version code must be strictly greater than the current installed version.",
+                    fontSize    = 11.sp,
+                    color       = cs.onSecondaryContainer,
+                    lineHeight  = 16.sp
                 )
             }
         }
@@ -664,13 +769,13 @@ private fun StatChip(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color  = color.copy(0.1f),
-        shape  = RoundedCornerShape(10.dp),
+        color    = color.copy(0.12f),
+        shape    = RoundedCornerShape(10.dp),
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier              = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))

@@ -1,7 +1,9 @@
 package com.saini.ritik.main
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -51,6 +53,7 @@ import com.saini.ritik.winshare.ServerConnectActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 /**
@@ -72,6 +75,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        cleanupOldApk(this)
+
         val showProfileBanner = intent.getBooleanExtra("SHOW_COMPLETE_PROFILE_TOGGLE", false)
 
         // Start chat background notification service
@@ -124,17 +129,18 @@ class MainActivity : FragmentActivity() {
 
 
                 LaunchedEffect(gateUnlocked) {
-        if (!gateUnlocked) return@LaunchedEffect
-        val session = authRepository.getSession() ?: return@LaunchedEffect
-        val update  = appUpdateChecker.checkForUpdate(
-            currentVersionCode = BuildConfig.VERSION_CODE,
-            userToken          = session.token
-        )
-        if (update != null) {
-            pendingUpdate    = update
-            showUpdateDialog = true
-        }
-    }
+                    if (!gateUnlocked) return@LaunchedEffect
+                    val session = authRepository.getSession() ?: return@LaunchedEffect
+                    val update = appUpdateChecker.checkForUpdate(
+                        currentVersionCode = BuildConfig.VERSION_CODE,
+                        userToken          = session.token
+                    )
+                    Log.d("AppUpdate", "Current: ${BuildConfig.VERSION_CODE}, Remote: ${update?.versionCode}, Show: ${update != null}")
+                    if (update != null) {
+                        pendingUpdate    = update
+                        showUpdateDialog = true
+                    }
+                }
 
                 Box(Modifier.fillMaxSize()) {
                     MainScreen(
@@ -181,26 +187,6 @@ class MainActivity : FragmentActivity() {
                         )
                     }
 
-//                    AnimatedVisibility(
-//                        visible  = showUpdateBanner && !bannerDismissed && pendingUpdate != null,
-//                        enter    = slideInVertically { -it } + fadeIn(),
-//                        exit     = slideOutVertically { -it } + fadeOut(),
-//                        modifier = Modifier.align(Alignment.TopCenter)
-//                    ) {
-//                        pendingUpdate?.let { update ->
-//                            UpdateNoticeBanner(
-//                                versionName   = update.versionName,
-//                                onTapToUpdate = {
-//                                    // Navigate to Help & Support (card id 8 = ContactActivity)
-//                                    handleCardClick(8)
-//                                },
-//                                onDismiss = {
-//                                    bannerDismissed = true
-//                                    showUpdateBanner = false
-//                                }
-//                            )
-//                        }
-//                    }
 
                     if (showUpdateDialog && pendingUpdate != null) {
         val update = pendingUpdate!!
@@ -418,6 +404,15 @@ private fun LaunchLockOverlay(
                 }
             }
         }
+    }
+}
+
+// In your Application.kt or MainActivity.kt onCreate()
+fun cleanupOldApk(context: Context) {
+    val apk = File(context.cacheDir, "itconnect_update.apk")
+    if (apk.exists()) {
+        apk.delete()
+        Log.d("AppUpdate", "Cleaned up leftover APK")
     }
 }
 
