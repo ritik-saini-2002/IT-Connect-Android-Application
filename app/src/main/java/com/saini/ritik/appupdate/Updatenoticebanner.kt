@@ -21,9 +21,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val Purple700 = Color(0xFF6200EA)
-private val Purple300 = Color(0xFFB39DDB)
-
 /**
  * Animated update-available banner shown at the top of the main screen.
  *
@@ -36,7 +33,8 @@ fun UpdateNoticeBanner(
     versionName  : String,
     onTapToUpdate: () -> Unit,
     onDismiss    : () -> Unit,
-    modifier     : Modifier = Modifier
+    modifier     : Modifier = Modifier,
+
 ) {
     // Pulse animation on the icon dot
     val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
@@ -46,6 +44,9 @@ fun UpdateNoticeBanner(
         ),
         label = "pulseScale"
     )
+
+    val cs: ColorScheme = MaterialTheme.colorScheme
+
 
     Surface(
         modifier  = modifier
@@ -61,9 +62,10 @@ fun UpdateNoticeBanner(
         Box(
             modifier = Modifier
                 .background(
-                    Brush.horizontalGradient(
-                        listOf(Purple700, Color(0xFF9C27B0))
-                    )
+                    Brush.radialGradient(listOf(
+                        cs.primary.copy(0.3f),
+                        cs.secondary.copy(0.1f)
+                    ))
                 )
         ) {
             Row(
@@ -79,13 +81,18 @@ fun UpdateNoticeBanner(
                         .size(32.dp)
                         .scale(pulse)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.15f)),
+                        .background(
+                            Brush.radialGradient(listOf(
+                                cs.primary.copy(0.3f),
+                                cs.secondary.copy(0.1f)
+                            ))
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Default.SystemUpdateAlt,
                         contentDescription = null,
-                        tint     = Color.White,
+                        tint     = cs.primary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -95,12 +102,12 @@ fun UpdateNoticeBanner(
                         "Update Available — v$versionName",
                         fontWeight = FontWeight.Bold,
                         fontSize   = 13.sp,
-                        color      = Color.White
+                        color      = cs.primary
                     )
                     Text(
                         "Tap to open Help & Support to install",
                         fontSize = 11.sp,
-                        color    = Color.White.copy(alpha = 0.8f)
+                        color    = cs.primary,
                     )
                 }
 
@@ -112,7 +119,7 @@ fun UpdateNoticeBanner(
                     Icon(
                         Icons.Default.Close,
                         contentDescription = "Dismiss",
-                        tint     = Color.White.copy(alpha = 0.7f),
+                        tint = cs.primary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
