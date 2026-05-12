@@ -26,15 +26,15 @@
 # ── Serialization ─────────────────────────────────────────────
 -keep class kotlinx.serialization.** { *; }
 -keepclassmembers class kotlinx.serialization.** { *; }
--keep @kotlinx.serialization.Serializable class com.example.ritik_2.** { *; }
--keep class com.example.ritik_2.data.model.** { *; }
--keep class com.example.ritik_2.data.source.dto.** { *; }
--keepclassmembers class com.example.ritik_2.data.model.** { *; }
--keepclassmembers class com.example.ritik_2.data.source.dto.** { *; }
--keepclassmembers class com.example.ritik_2.** {
+-keep @kotlinx.serialization.Serializable class com.saini.ritik.** { *; }
+-keep class com.saini.ritik.data.model.** { *; }
+-keep class com.saini.ritik.data.source.dto.** { *; }
+-keepclassmembers class com.saini.ritik.data.model.** { *; }
+-keepclassmembers class com.saini.ritik.data.source.dto.** { *; }
+-keepclassmembers class com.saini.ritik.** {
     *** Companion;
 }
--keepclasseswithmembers class com.example.ritik_2.** {
+-keepclasseswithmembers class com.saini.ritik.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
@@ -59,10 +59,10 @@
 -keepclassmembers class io.github.agrevster.pocketbasekotlin.** { *; }
 
 # ── DTO classes ───────────────────────────────────────────────
--keep class com.example.ritik_2.data.source.dto.UserRecord { *; }
--keep class com.example.ritik_2.data.source.dto.AccessControlRecord { *; }
--keep class com.example.ritik_2.data.source.dto.CompanyRecord { *; }
--keep class com.example.ritik_2.data.source.dto.SearchIndexRecord { *; }
+-keep class com.saini.ritik.data.source.dto.UserRecord { *; }
+-keep class com.saini.ritik.data.source.dto.AccessControlRecord { *; }
+-keep class com.saini.ritik.data.source.dto.CompanyRecord { *; }
+-keep class com.saini.ritik.data.source.dto.SearchIndexRecord { *; }
 
 # ── SMB / Logging ─────────────────────────────────────────────
 -keep class eu.agno3.jcifs.** { *; }

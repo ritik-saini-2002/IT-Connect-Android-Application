@@ -8,15 +8,15 @@ plugins {
 }
 
 android {
-    namespace  = "com.example.ritik_2"
+    namespace  = "com.saini.ritik"
     compileSdk = 35
 
     defaultConfig {
-        applicationId             = "com.example.itconnect"
+        applicationId             = "com.saini.ritik"
         minSdk                    = 26
         targetSdk                 = 35
         versionCode               = 2
-        versionName               = "3.5.0"
+        versionName               = "3.5.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Read PocketBase config from local.properties (never commit credentials)

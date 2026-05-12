@@ -5,13 +5,13 @@
 **Last updated:** 2026-04-17
 **Working branch pattern:** `claude/<worktree-name>` → merge to `main` per sub-phase
 **Authoritative files:**
-- Entities/DAOs: [PcControlDatabase.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/data/PcControlDatabase.kt)
-- Models: [PcControlModels.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/data/PcControlModels.kt)
-- ViewModel: [PcControlViewModel.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/viewmodel/PcControlViewModel.kt)
-- Devices UI: [PcDevicesUI.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/ui/screens/PcDevicesUI.kt)
-- API client: [PcControlApiClient.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/network/PcControlApiClient.kt)
-- App bootstrap: [MyApplication.kt](../app/src/main/java/com/example/ritik_2/MyApplication.kt)
-- Single-ton module: [PcControlMain.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/PcControlMain.kt)
+- Entities/DAOs: [PcControlDatabase.kt](../app/src/main/java/com/saini/ritik/windowscontrol/data/PcControlDatabase.kt)
+- Models: [PcControlModels.kt](../app/src/main/java/com/saini/ritik/windowscontrol/data/PcControlModels.kt)
+- ViewModel: [PcControlViewModel.kt](../app/src/main/java/com/saini/ritik/windowscontrol/viewmodel/PcControlViewModel.kt)
+- Devices UI: [PcDevicesUI.kt](../app/src/main/java/com/saini/ritik/windowscontrol/ui/screens/PcDevicesUI.kt)
+- API client: [PcControlApiClient.kt](../app/src/main/java/com/saini/ritik/windowscontrol/network/PcControlApiClient.kt)
+- App bootstrap: [MyApplication.kt](../app/src/main/java/com/saini/ritik/MyApplication.kt)
+- Single-ton module: [PcControlMain.kt](../app/src/main/java/com/saini/ritik/windowscontrol/PcControlMain.kt)
 
 ## Environment baseline at roadmap start
 
@@ -244,8 +244,8 @@ Client computes SHA-256 of `code` locally and sends both — server verifies bef
 **Kotlin.** Store the SHA-256 cert fingerprint per saved device in a new `certFingerprint TEXT` column (migration vN→vN+1). `PcBaseClient` builds OkHttpClient with `CertificatePinner.Builder().add(host, "sha256/<b64>").build()` when fingerprint is set. When unset: current cleartext behavior preserved (but log a warning).
 
 **Files to touch.**
-- [PcControlDatabase.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/data/PcControlDatabase.kt): add column + migration
-- [PcControlApiClient.kt](../app/src/main/java/com/example/ritik_2/windowscontrol/network/PcControlApiClient.kt): conditional pinner in `buildHttp()`
+- [PcControlDatabase.kt](../app/src/main/java/com/saini/ritik/windowscontrol/data/PcControlDatabase.kt): add column + migration
+- [PcControlApiClient.kt](../app/src/main/java/com/saini/ritik/windowscontrol/network/PcControlApiClient.kt): conditional pinner in `buildHttp()`
 - `EditDeviceDialog`: add fingerprint field + "Scan QR" action
 - New file: `network/PcCertFingerprintScanner.kt` for the QR flow (CameraX + ML Kit already in project? check)
 

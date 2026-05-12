@@ -1,0 +1,21 @@
+package com.saini.ritik.pocketbase
+
+import com.saini.ritik.core.AppConfig
+import io.github.agrevster.pocketbaseKotlin.PocketbaseClient
+import io.ktor.http.URLProtocol
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class PocketBaseClientProvider @Inject constructor() {
+    val client: PocketbaseClient by lazy {
+        PocketbaseClient({
+            protocol     = URLProtocol.HTTP
+            host         = AppConfig.PB_HOST
+            port         = AppConfig.PB_PORT
+            pathSegments = AppConfig.PB_PATH
+                .split("/")
+                .filter { it.isNotBlank() }
+        })
+    }
+}

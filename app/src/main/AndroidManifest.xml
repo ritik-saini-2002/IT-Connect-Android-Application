@@ -53,7 +53,7 @@
     </queries>
 
     <application
-        android:name=".MyApplication"
+        android:name="com.saini.ritik.MyApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -68,7 +68,7 @@
 
         <!-- ── Entry point ────────────────────────────────── -->
         <activity
-            android:name=".splash.SplashActivity"
+            android:name="com.saini.ritik.splash.SplashActivity"
             android:exported="true"
             android:theme="@style/Theme.Ritik_2">
             <intent-filter>
@@ -78,116 +78,116 @@
         </activity>
 
         <!-- ── Auth ───────────────────────────────────────── -->
-        <activity android:name=".login.LoginActivity"
+        <activity android:name="com.saini.ritik.login.LoginActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".registration.RegistrationActivity"
+        <activity android:name="com.saini.ritik.registration.RegistrationActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Main ───────────────────────────────────────── -->
-        <activity android:name=".main.MainActivity"
+        <activity android:name="com.saini.ritik.main.MainActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Profile ────────────────────────────────────── -->
-        <activity android:name=".profile.ProfileActivity"
+        <activity android:name="com.saini.ritik.profile.ProfileActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".profile.profilecompletion.ProfileCompletionActivity"
+        <activity android:name="com.saini.ritik.profile.profilecompletion.ProfileCompletionActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Features ───────────────────────────────────── -->
-        <activity android:name=".contact.ContactActivity"
+        <activity android:name="com.saini.ritik.contact.ContactActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
         <!-- FIX: Added configChanges so PC Control activities handle
              orientation changes without destroying/recreating.
              Compose observes LocalConfiguration automatically. -->
-        <activity android:name=".windowscontrol.PcControlActivity"
+        <activity android:name="com.saini.ritik.windowscontrol.PcControlActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".windowscontrol.pcfilebrowser.PcControlFileBrowserActivity"
+        <activity android:name="com.saini.ritik.windowscontrol.pcfilebrowser.PcControlFileBrowserActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".windowscontrol.pccontrolappdirectory.PcControlAppDirectoryActivity"
+        <activity android:name="com.saini.ritik.windowscontrol.pccontrolappdirectory.PcControlAppDirectoryActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".windowscontrol.pctouchpad.PcControlTouchpadActivity"
+        <activity android:name="com.saini.ritik.windowscontrol.pctouchpad.PcControlTouchpadActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".windowscontrol.ui.screens.PcAddStepActivity"
+        <activity android:name="com.saini.ritik.windowscontrol.ui.screens.PcAddStepActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".windowscontrol.ui.screens.PcControlAdminSettingsActivity"
+        <activity android:name="com.saini.ritik.windowscontrol.ui.screens.PcControlAdminSettingsActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".winshare.ServerConnectActivity"
+        <activity android:name="com.saini.ritik.winshare.ServerConnectActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".macnet.MACNetActivity"
+        <activity android:name="com.saini.ritik.macnet.MACNetActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Admin ──────────────────────────────────────── -->
-        <activity android:name=".administrator.AdministratorPanelActivity"
+        <activity android:name="com.saini.ritik.administrator.AdministratorPanelActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".administrator.databasemanager.DatabaseManagerActivity"
+        <activity android:name="com.saini.ritik.administrator.databasemanager.DatabaseManagerActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".administrator.manageuser.ManageUserActivity"
+        <activity android:name="com.saini.ritik.administrator.manageuser.ManageUserActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".administrator.rolemanagement.RoleManagementActivity"
+        <activity android:name="com.saini.ritik.administrator.rolemanagement.RoleManagementActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".administrator.newusercreation.CreateUserActivity"
+        <activity android:name="com.saini.ritik.administrator.newusercreation.CreateUserActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".administrator.departmentmanager.DepartmentActivity"
+        <activity android:name="com.saini.ritik.administrator.departmentmanager.DepartmentActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".administrator.companysettings.CompanySettingsActivity"
+        <activity android:name="com.saini.ritik.administrator.companysettings.CompanySettingsActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".administrator.reports.ReportsActivity"
+        <activity android:name="com.saini.ritik.administrator.reports.ReportsActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
         <!-- ── Chat ───────────────────────────────────────── -->
         <activity
-            android:name=".chat.ChatActivity"
+            android:name="com.saini.ritik.chat.ChatActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Ritik_2" />
         <activity
-            android:name=".chat.MemberPickerActivity"
+            android:name="com.saini.ritik.chat.MemberPickerActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
         <!-- Background chat notification service -->
 
-        <activity android:name=".notifications.NotificationActivity"
+        <activity android:name="com.saini.ritik.notifications.NotificationActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2"/>
 
         <receiver
-            android:name=".chat.BootReceiver"
+            android:name="com.saini.ritik.chat.BootReceiver"
             android:exported="true"
             android:enabled="true">
             <intent-filter>
@@ -198,19 +198,19 @@
 
         <!-- KEEP your existing service, already correct -->
         <service
-            android:name=".chat.ChatNotificationService"
+            android:name="com.saini.ritik.chat.ChatNotificationService"
             android:foregroundServiceType="remoteMessaging"
             android:exported="false" />
 
         <!-- ── Nagios Monitoring ──────────────────────────── -->
-        <activity android:name=".nagios.ConnectActivity"
+        <activity android:name="com.saini.ritik.nagios.ConnectActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
-        <activity android:name=".nagios.MainActivity"
+        <activity android:name="com.saini.ritik.nagios.MainActivity"
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
-        <activity android:name=".appupdate.AppUpdateActivity"
+        <activity android:name="com.saini.ritik.appupdate.AppUpdateActivity"
             android:exported="false"
             android:theme="@style/Base.Theme.Ritik_2"/>
 
