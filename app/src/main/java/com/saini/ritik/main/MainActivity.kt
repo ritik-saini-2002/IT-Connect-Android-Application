@@ -129,18 +129,17 @@ class MainActivity : FragmentActivity() {
 
 
                 LaunchedEffect(gateUnlocked) {
-                    if (!gateUnlocked) return@LaunchedEffect
-                    val session = authRepository.getSession() ?: return@LaunchedEffect
-                    val update = appUpdateChecker.checkForUpdate(
-                        currentVersionCode = BuildConfig.VERSION_CODE,
-                        userToken          = session.token
-                    )
-                    Log.d("AppUpdate", "Current: ${BuildConfig.VERSION_CODE}, Remote: ${update?.versionCode}, Show: ${update != null}")
-                    if (update != null) {
-                        pendingUpdate    = update
-                        showUpdateDialog = true
-                    }
-                }
+        if (!gateUnlocked) return@LaunchedEffect
+        val session = authRepository.getSession() ?: return@LaunchedEffect
+        val update  = appUpdateChecker.checkForUpdate(
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            userToken          = session.token
+        )
+        if (update != null) {
+            pendingUpdate    = update
+            showUpdateDialog = true
+        }
+    }
 
                 Box(Modifier.fillMaxSize()) {
                     MainScreen(
