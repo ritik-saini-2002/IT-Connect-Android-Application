@@ -27,6 +27,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.saini.ritik.BuildConfig
 import com.saini.ritik.administrator.AdministratorPanelActivity
+import com.saini.ritik.applicationcore.AppLifecycleService
 import com.saini.ritik.appupdate.AppUpdateActivity
 import com.saini.ritik.appupdate.AppUpdateChecker
 import com.saini.ritik.appupdate.AppUpdateDialog
@@ -75,6 +76,15 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Start admin token keep-alive loop here — not in Application or login.
+        // This ensures the token is only active while the user is in the app.
+        adminTokenProvider.startKeepAlive()
+
+        // Start the lifecycle service here so onTaskRemoved works correctly.
+        // START_NOT_STICKY means it won't restart itself — only MainActivity restarts it.
+        startService(Intent(this, AppLifecycleService::class.java))
+
         cleanupOldApk(this)
 
         val showProfileBanner = intent.getBooleanExtra("SHOW_COMPLETE_PROFILE_TOGGLE", false)
@@ -232,17 +242,22 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             connectMonitor.probeNow()
             checkActiveStatus()
-            // Refresh admin token on every MainActivity resume — the user got a
-            // one-time login, so the keep-alive loop can lapse while the app
-            // was backgrounded. No-op for users without admin credentials.
+            // Refresh admin token on every MainActivity resume — the keep-alive loop
+            // can lapse while the app is backgrounded (Android Doze freezes coroutines).
+            // No-op for non-SA users without admin credentials.
             adminTokenProvider.refreshOnResume()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Keep the service alive even when the activity is destroyed so
-        // background notifications keep working. Only stop on explicit logout.
+        // Only stop the keep-alive if the activity is truly finishing (back pressed /
+        // explicit finish). If the system is just recreating it (rotation etc.),
+        // leave the loop running — onCreate will call startKeepAlive() again anyway
+        // which safely cancels and restarts the job.
+        if (isFinishing) {
+            adminTokenProvider.stopKeepAlive()
+        }
     }
 
     // ── Card routing ──────────────────────────────────────────────────────────
@@ -294,6 +309,7 @@ class MainActivity : FragmentActivity() {
     private fun handleLogout() {
         lifecycleScope.launch {
             stopService(Intent(this@MainActivity, ChatNotificationService::class.java))
+            adminTokenProvider.stopKeepAlive()
             authRepository.logout()
             // Reset process-scoped gate state so next login gets a fresh
             // biometric prompt and a fresh update check.
@@ -319,6 +335,7 @@ class MainActivity : FragmentActivity() {
     private fun forceLogout(message: String) {
         lifecycleScope.launch {
             stopService(Intent(this@MainActivity, ChatNotificationService::class.java))
+            adminTokenProvider.stopKeepAlive()
             authRepository.logout()
             LaunchGateState.unlocked        = false
             LaunchGateState.updateCheckDone = false

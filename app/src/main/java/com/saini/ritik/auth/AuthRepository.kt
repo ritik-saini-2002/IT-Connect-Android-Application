@@ -71,6 +71,12 @@ class AuthRepository @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "Session restore failed (possibly offline): ${e.message}")
         }
+        // For SA users who are not PB superusers, the admin token IS their user JWT.
+// Re-seed it on session restore so it survives process death.
+        val s = sessionManager.get()
+        if (s != null && PermissionGuard.isSystemAdmin(s.role)) {
+            adminTokenProvider.setTokenDirectly(s.token)
+        }
     }
 
     suspend fun validateSession(): SessionStatus {

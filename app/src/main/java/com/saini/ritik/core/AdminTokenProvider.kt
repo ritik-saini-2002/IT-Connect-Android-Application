@@ -126,6 +126,19 @@ class AdminTokenProvider @Inject constructor(
      *  1. Fetches a fresh token right away (if we don't already have one).
      *  2. Repeats every [REFRESH_INTERVAL_MS] until [stopKeepAlive] is called.
      */
+
+    fun seedSaUserToken(userToken: String, email: String, password: String) {
+        if (userToken.isBlank()) return
+        cachedToken = userToken
+        // Store credentials so keep-alive can attempt background refresh.
+        // For non-PB-superusers this will fail (401) and the loop will stop —
+        // that's acceptable since their JWT TTL is typically long enough for a session.
+        prefs.edit()
+            .putString(KEY_EMAIL, email)
+            .putString(KEY_PASSWORD, password)
+            .apply()
+        Log.d(TAG, "Admin token + credentials seeded from SA user login: $email")
+    }
     fun startKeepAlive() {
         isLoggedIn = true
         keepAliveJob?.cancel()

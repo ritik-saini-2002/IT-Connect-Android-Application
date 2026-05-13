@@ -91,7 +91,7 @@ fun PcControlAdminSettingsUI(
     }
 
     val scope = rememberCoroutineScope()
-    var masterKey        by remember { mutableStateOf("ITConnect_Master_2024") }
+    var masterKey        by remember { mutableStateOf("") }
     var masterKeyVisible by remember { mutableStateOf(false) }
     var isAuthed         by remember { mutableStateOf(false) }
     var authError        by remember { mutableStateOf("") }
@@ -173,7 +173,7 @@ fun PcControlAdminSettingsUI(
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Master Key Authentication", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                    Text("Default: ITConnect_Master_2024", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text("Enter agent master key", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                     OutlinedTextField(
                         value = masterKey,
                         onValueChange = { masterKey = it; isAuthed = false; authError = "" },

@@ -48,9 +48,6 @@ class PocketBaseDataSource @Inject constructor(
     private val tag = "PBDataSource"
 
     private val authTokenRef        = AtomicReference("")
-    private var cachedAdminToken    = ""
-    private var adminTokenFetchedAt = 0L
-    private val adminTokenTtlMs     = 10 * 60 * 1000L
     private val loginOtpIdStore = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val otpStore = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     private val OTP_VALID_MS = 10 * 60 * 1000L
@@ -118,9 +115,14 @@ class PocketBaseDataSource @Inject constructor(
                 }
                 // adminTokenProvider was seeded inside checkIsPocketBaseSuperuser()
             } else if (role == Permissions.ROLE_SYSTEM_ADMIN) {
-                // DB says SA but PB superuser check failed (network issue or role set manually).
-                // Keep the DB role but note that admin operations may not work until re-login.
-                Log.w(tag, "SA role from DB but PB superuser auth failed for $email — keeping DB role")
+                // Not a PB superuser but has SA role — seed their regular JWT as the
+                // admin token so RoleManagement / SyncManager admin operations work.
+                adminTokenProvider.seedSaUserToken(
+                    userToken = authTokenRef.get(),
+                    email     = email,
+                    password  = password
+                )
+                Log.d(tag, "SA role user (non-superuser) — JWT seeded as admin token: $email")
             }
 
             val sessionPermissions: List<String> = when {
