@@ -70,8 +70,8 @@ class MainActivity : FragmentActivity() {
     @Inject lateinit var connectMonitor    : ConnectivityMonitor
     @Inject lateinit var syncManager       : SyncManager
     @Inject lateinit var adminTokenProvider: AdminTokenProvider
-    @Inject lateinit var appUpdateChecker : AppUpdateChecker
-    @Inject lateinit var appUpdateManager : AppUpdateManager
+    @Inject lateinit var appUpdateChecker  : AppUpdateChecker
+    @Inject lateinit var appUpdateManager  : AppUpdateManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,12 +95,9 @@ class MainActivity : FragmentActivity() {
                 var bannerReady by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { delay(5_000); bannerReady = true }
 
-                // ── App-launch biometric gate (Phase 2) ────────────────
-                // Honours the "unlock every time the app is opened" contract:
-                // the flag lives in the process-scoped LaunchGateState, so a
-                // fresh cold start demands a new unlock, but returning from
-                // child activities (Chat, PcControl, ...) reuses the unlock
-                // because the process stayed alive.
+                // ── App-launch biometric gate ──────────────────────────────────
+                // LaunchGateState is process-scoped so returning from a child
+                // activity reuses the existing unlock without re-prompting.
                 var gateUnlocked by remember { mutableStateOf(LaunchGateState.unlocked) }
                 var gateError    by remember { mutableStateOf<String?>(null) }
                 LaunchedEffect(Unit) {
@@ -112,10 +109,8 @@ class MainActivity : FragmentActivity() {
                             gateUnlocked = true
                             gateError    = null
                         },
-                        onDeny   = { msg -> gateError = msg ?: "Authentication cancelled" },
+                        onDeny        = { msg -> gateError = msg ?: "Authentication cancelled" },
                         onUnavailable = {
-                            // No screen lock configured — let them in; session
-                            // auth on the server still protects sensitive calls.
                             LaunchGateState.unlocked = true
                             gateUnlocked = true
                             gateError    = "Device has no screen lock — launch gate skipped."
@@ -123,25 +118,36 @@ class MainActivity : FragmentActivity() {
                     )
                 }
 
+                // ── Update check state ─────────────────────────────────────────
                 var pendingUpdate    by remember { mutableStateOf<UpdateInfo?>(null) }
                 var showUpdateDialog by remember { mutableStateOf(false) }
                 var downloadProgress by remember { mutableStateOf<Float?>(null) }
 
-
+                // updateCheckDone lives in LaunchGateState (process-scoped) so
+                // returning from AppUpdateActivity or any child activity does NOT
+                // re-trigger the check and re-show the dialog.
                 LaunchedEffect(gateUnlocked) {
-        if (!gateUnlocked) return@LaunchedEffect
-        val session = authRepository.getSession() ?: return@LaunchedEffect
-        val update  = appUpdateChecker.checkForUpdate(
-            currentVersionCode = BuildConfig.VERSION_CODE,
-            userToken          = session.token
-        )
-        if (update != null) {
-            pendingUpdate    = update
-            showUpdateDialog = true
-        }
-    }
+                    if (!gateUnlocked) return@LaunchedEffect
+                    if (LaunchGateState.updateCheckDone) return@LaunchedEffect
+                    LaunchGateState.updateCheckDone = true
+
+                    val s = authRepository.getSession() ?: return@LaunchedEffect
+                    val update = appUpdateChecker.checkForUpdate(
+                        currentVersionCode = BuildConfig.VERSION_CODE,
+                        userToken          = s.token
+                    )
+
+                    Log.d("AppUpdateChecker",
+                        "Remote: ${update?.versionCode}  Current: ${BuildConfig.VERSION_CODE}")
+
+                    if (update != null) {
+                        pendingUpdate    = update
+                        showUpdateDialog = true
+                    }
+                }
 
                 Box(Modifier.fillMaxSize()) {
+
                     MainScreen(
                         uiState                   = uiState,
                         onLogout                  = { handleLogout() },
@@ -152,6 +158,7 @@ class MainActivity : FragmentActivity() {
                         showCompleteProfileBanner = showProfileBanner
                     )
 
+                    // ── Offline banner ─────────────────────────────────────────
                     AnimatedVisibility(
                         visible  = bannerReady && !serverReachable,
                         enter    = slideInVertically { -it } + fadeIn(),
@@ -161,7 +168,7 @@ class MainActivity : FragmentActivity() {
                         OfflineBanner(pendingCount = pendingCount)
                     }
 
-                    // Lock overlay — covers everything until the user authenticates.
+                    // ── Biometric lock overlay ─────────────────────────────────
                     if (!gateUnlocked) {
                         LaunchLockOverlay(
                             errorText = gateError,
@@ -174,7 +181,7 @@ class MainActivity : FragmentActivity() {
                                         gateUnlocked = true
                                         gateError    = null
                                     },
-                                    onDeny   = { msg -> gateError = msg ?: "Authentication cancelled" },
+                                    onDeny        = { msg -> gateError = msg ?: "Authentication cancelled" },
                                     onUnavailable = {
                                         LaunchGateState.unlocked = true
                                         gateUnlocked = true
@@ -186,32 +193,34 @@ class MainActivity : FragmentActivity() {
                         )
                     }
 
-
+                    // ── App update dialog ──────────────────────────────────────
                     if (showUpdateDialog && pendingUpdate != null) {
-        val update = pendingUpdate!!
-        AppUpdateDialog(
-            versionName      = update.versionName,
-            releaseNotes     = update.releaseNotes,
-            downloadProgress = downloadProgress,
-            onDownload       = {
-                val token = authRepository.getSession()?.token ?: return@AppUpdateDialog
-                appUpdateManager.downloadAndInstall(
-                    url       = update.downloadUrl,
-                    userToken = token,
-                    onProgress = { downloadProgress = it },
-                    onError    = { err ->
-                        Toast.makeText(this@MainActivity, err, Toast.LENGTH_LONG).show()
-                        downloadProgress = null
+                        val update = pendingUpdate!!
+                        AppUpdateDialog(
+                            versionName      = update.versionName,
+                            releaseNotes     = update.releaseNotes,
+                            downloadProgress = downloadProgress,
+                            onDownload       = {
+                                val token = authRepository.getSession()?.token
+                                    ?: return@AppUpdateDialog
+                                appUpdateManager.downloadAndInstall(
+                                    url        = update.downloadUrl,
+                                    userToken  = token,
+                                    onProgress = { downloadProgress = it },
+                                    onError    = { err ->
+                                        Toast.makeText(
+                                            this@MainActivity, err, Toast.LENGTH_LONG
+                                        ).show()
+                                        downloadProgress = null
+                                    }
+                                )
+                            },
+                            onDismiss = {
+                                showUpdateDialog = false
+                                pendingUpdate    = null
+                            }
+                        )
                     }
-                )
-            },
-            onDismiss = {
-                showUpdateDialog = false
-                pendingUpdate    = null
-            }
-        )
-    }
-
                 }
             }
         }
@@ -239,7 +248,6 @@ class MainActivity : FragmentActivity() {
     // ── Card routing ──────────────────────────────────────────────────────────
 
     private fun handleCardClick(id: Int) {
-        // ── Hard permission guard (secondary defence after tile is hidden) ────
         val session     = authRepository.getSession()
         val role        = session?.role        ?: ""
         val permissions = session?.permissions ?: emptyList()
@@ -254,18 +262,18 @@ class MainActivity : FragmentActivity() {
         }
 
         when (id) {
-            3 -> startActivity(Intent(this, AdministratorPanelActivity::class.java))
-            4 -> startActivity(Intent(this, ServerConnectActivity::class.java))
-//          5 -> startActivity(Intent(this, MACNetActivity::class.java))
-            6 -> startActivity(Intent(this, PcControlActivity::class.java))
-            7 -> startActivity(Intent(this, ChatActivity::class.java))
-            8 -> {
+            3  -> startActivity(Intent(this, AdministratorPanelActivity::class.java))
+            4  -> startActivity(Intent(this, ServerConnectActivity::class.java))
+//          5  -> startActivity(Intent(this, MACNetActivity::class.java))
+            6  -> startActivity(Intent(this, PcControlActivity::class.java))
+            7  -> startActivity(Intent(this, ChatActivity::class.java))
+            8  -> {
                 val userId = session?.userId ?: return
                 startActivity(Intent(this, ContactActivity::class.java).apply {
                     putExtra("userId", userId)
                 })
             }
-            9 -> startActivity(Intent(this, NagiosConnectActivity::class.java))
+            9  -> startActivity(Intent(this, NagiosConnectActivity::class.java))
             10 -> startActivity(Intent(this, AppUpdateActivity::class.java))
         }
     }
@@ -287,8 +295,10 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             stopService(Intent(this@MainActivity, ChatNotificationService::class.java))
             authRepository.logout()
-            // Force re-prompt on next login.
-            LaunchGateState.unlocked = false
+            // Reset process-scoped gate state so next login gets a fresh
+            // biometric prompt and a fresh update check.
+            LaunchGateState.unlocked        = false
+            LaunchGateState.updateCheckDone = false
             startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             })
@@ -310,7 +320,8 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             stopService(Intent(this@MainActivity, ChatNotificationService::class.java))
             authRepository.logout()
-            LaunchGateState.unlocked = false
+            LaunchGateState.unlocked        = false
+            LaunchGateState.updateCheckDone = false
             Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
             startActivity(Intent(this@MainActivity, LoginActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -321,20 +332,15 @@ class MainActivity : FragmentActivity() {
 }
 
 /**
- * Process-scoped state for the app-launch biometric gate. Cleared when the
- * process dies (Android kills the app) so the next cold launch forces a
- * fresh unlock, but preserved while the user dips into child activities so
- * they aren't re-prompted on every return.
+ * Process-scoped state for the app-launch biometric gate and update check.
+ * Both flags survive returning from child activities (process alive) but are
+ * cleared on logout so the next login gets a fresh start.
  */
 private object LaunchGateState {
-    @Volatile var unlocked: Boolean = false
+    @Volatile var unlocked       : Boolean = false
+    @Volatile var updateCheckDone: Boolean = false
 }
 
-/**
- * Full-bleed lock overlay shown until [AppLaunchGate] unlocks. Offers a
- * retry button and a logout exit; nothing of the underlying UI is
- * disclosed while locked.
- */
 @Composable
 private fun LaunchLockOverlay(
     errorText: String?,
@@ -347,17 +353,17 @@ private fun LaunchLockOverlay(
         color    = cs.background,
     ) {
         Column(
-            modifier = Modifier
+            modifier            = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp, vertical = 32.dp),
-            verticalArrangement  = Arrangement.Center,
-            horizontalAlignment  = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Surface(
-                color = cs.surfaceVariant,
-                shape = RoundedCornerShape(16.dp),
+                color          = cs.surfaceVariant,
+                shape          = RoundedCornerShape(16.dp),
                 tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier       = Modifier.fillMaxWidth()
             ) {
                 Column(
                     Modifier.padding(24.dp),
@@ -367,13 +373,13 @@ private fun LaunchLockOverlay(
                     Icon(
                         Icons.Default.Fingerprint,
                         contentDescription = null,
-                        tint = cs.primary,
+                        tint     = cs.primary,
                         modifier = Modifier.size(44.dp),
                     )
                     Text(
                         "IT Connect is locked",
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
+                        style      = MaterialTheme.typography.titleMedium,
                     )
                     Text(
                         "Authenticate with your fingerprint, face or device PIN to continue.",
@@ -406,7 +412,6 @@ private fun LaunchLockOverlay(
     }
 }
 
-// In your Application.kt or MainActivity.kt onCreate()
 fun cleanupOldApk(context: Context) {
     val apk = File(context.cacheDir, "itconnect_update.apk")
     if (apk.exists()) {
@@ -430,12 +435,17 @@ private fun OfflineBanner(pendingCount: Int) {
         ) {
             Icon(Icons.Default.CloudOff, null, tint = Color.White, modifier = Modifier.size(18.dp))
             Column(Modifier.weight(1f)) {
-                Text("Server unreachable — working offline",
-                    style = MaterialTheme.typography.labelMedium, color = Color.White)
+                Text(
+                    "Server unreachable — working offline",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White
+                )
                 if (pendingCount > 0)
-                    Text("$pendingCount change${if (pendingCount > 1) "s" else ""} will sync when reconnected",
+                    Text(
+                        "$pendingCount change${if (pendingCount > 1) "s" else ""} will sync when reconnected",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(0.8f))
+                        color = Color.White.copy(0.8f)
+                    )
             }
             if (pendingCount > 0)
                 Icon(Icons.Default.Sync, null, tint = Color.White, modifier = Modifier.size(16.dp))

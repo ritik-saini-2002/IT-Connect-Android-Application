@@ -22,9 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-private val Purple700 = Color(0xFF6200EA)
-private val Teal500   = Color(0xFF009688)
-private val Green600  = Color(0xFF43A047)
+
 
 /**
  * Shown to users when a newer app version is available on the server.
@@ -84,14 +82,14 @@ fun AppUpdateDialog(
                         .scale(iconScale)
                         .clip(CircleShape)
                         .background(
-                            Brush.radialGradient(listOf(Purple700.copy(0.3f), Teal500.copy(0.1f)))
+                            Brush.radialGradient(listOf(cs.primary.copy(0.3f), cs.tertiary.copy(0.1f)))
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Default.SystemUpdateAlt,
                         contentDescription = null,
-                        tint = Purple700,
+                        tint = cs.primary,
                         modifier = Modifier.size(36.dp)
                     )
                 }
@@ -108,7 +106,7 @@ fun AppUpdateDialog(
                         textAlign = TextAlign.Center
                     )
                     Surface(
-                        color = Purple700.copy(0.1f),
+                        color = cs.primary.copy(0.1f),
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Text(
@@ -116,7 +114,7 @@ fun AppUpdateDialog(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Purple700
+                            color = cs.primary
                         )
                     }
                 }
@@ -157,13 +155,13 @@ fun AppUpdateDialog(
                         ) {
                             Text("Downloading…", fontSize = 12.sp, color = cs.onSurfaceVariant)
                             Text("${(downloadProgress * 100).toInt()}%",
-                                fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Purple700)
+                                fontSize = 12.sp, fontWeight = FontWeight.Bold, color = cs.primary)
                         }
                         LinearProgressIndicator(
                             progress = { downloadProgress },
                             modifier = Modifier.fillMaxWidth(),
-                            color = Purple700,
-                            trackColor = Purple700.copy(0.15f)
+                            color = cs.primary,
+                            trackColor = cs.primary.copy(0.15f)
                         )
                     }
                 }
@@ -174,7 +172,7 @@ fun AppUpdateDialog(
                         onClick  = onDownload,
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape    = RoundedCornerShape(12.dp),
-                        colors   = ButtonDefaults.buttonColors(containerColor = Purple700)
+                        colors   = ButtonDefaults.buttonColors(containerColor = cs.primary)
                     ) {
                         Text("Update Now", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }

@@ -15,8 +15,8 @@ android {
         applicationId             = "com.saini.ritik"
         minSdk                    = 26
         targetSdk                 = 35
-        versionCode               = 2
-        versionName               = "3.5.0"
+        versionCode               = 3
+        versionName               = "3.5.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Read PocketBase config from local.properties (never commit credentials)

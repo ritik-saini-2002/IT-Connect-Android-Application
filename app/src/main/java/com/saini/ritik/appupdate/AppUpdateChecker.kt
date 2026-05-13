@@ -51,6 +51,8 @@ class AppUpdateChecker @Inject constructor(
             val record     = items.getJSONObject(0)
             val remoteCode = record.optInt("version_code", 0)
 
+            if (remoteCode <= 0) return@withContext null
+
             // No update needed
             if (remoteCode <= currentVersionCode) return@withContext null
 
