@@ -50,6 +50,8 @@ import com.saini.ritik.nagios.ConnectActivity as NagiosConnectActivity
 import com.saini.ritik.notifications.NotificationActivity
 import com.saini.ritik.profile.ProfileActivity
 import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.complaint.registercomplaint.RegisterComplaintActivity
+import com.saini.ritik.complaint.managecomplaint.ManageComplaintActivity
 import com.saini.ritik.windowscontrol.PcControlActivity
 import com.saini.ritik.winshare.ServerConnectActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -290,6 +292,8 @@ class MainActivity : FragmentActivity() {
         }
 
         when (id) {
+            1  -> startActivity(Intent(this, RegisterComplaintActivity::class.java))
+            2  -> startActivity(Intent(this, ManageComplaintActivity::class.java))
             3  -> startActivity(Intent(this, AdministratorPanelActivity::class.java))
             4  -> startActivity(Intent(this, ServerConnectActivity::class.java))
 //          5  -> startActivity(Intent(this, MACNetActivity::class.java))

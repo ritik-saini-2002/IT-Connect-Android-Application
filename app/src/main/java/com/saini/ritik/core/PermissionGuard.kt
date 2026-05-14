@@ -242,7 +242,9 @@ object PermissionGuard {
             2 -> permissions.any { it in listOf(
                     Permissions.PERM_VIEW_ALL_COMPLAINTS,
                     Permissions.PERM_VIEW_DEPARTMENT_COMPLAINTS,
-                    Permissions.PERM_VIEW_TEAM_COMPLAINTS
+                    Permissions.PERM_VIEW_TEAM_COMPLAINTS,
+                    Permissions.PERM_VIEW_OWN_COMPLAINTS,
+                    Permissions.PERM_MANAGE_COMPLAINTS
                 )}
             3 -> canAccessAdminPanel(role, isDbAdmin) || Permissions.PERM_ACCESS_ADMIN_PANEL in permissions
             4 -> Permissions.PERM_ACCESS_SERVER_CONNECT  in permissions
@@ -275,8 +277,8 @@ object PermissionGuard {
      * Human-readable name for each feature tile — used in "Access Denied" messages.
      */
     fun featureName(featureId: Int): String = when (featureId) {
-        1 -> "Register Complaint"
-        2 -> "Manage Complaints"
+        1 -> "Raise Ticket"
+        2 -> "Manage Tickets"
         3 -> "Admin Panel"
         4 -> "Server Connect"
         5 -> "Knowledge Base"

@@ -103,6 +103,14 @@
             android:exported="false"
             android:theme="@style/Theme.Ritik_2" />
 
+        <!-- ── Complaints / Tickets ──────────────────────── -->
+        <activity android:name="com.saini.ritik.complaint.registercomplaint.RegisterComplaintActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
+        <activity android:name="com.saini.ritik.complaint.managecomplaint.ManageComplaintActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Ritik_2" />
+
         <!-- ── Features ───────────────────────────────────── -->
         <activity android:name="com.saini.ritik.contact.ContactActivity"
             android:exported="false"

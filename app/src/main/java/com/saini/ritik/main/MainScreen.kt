@@ -159,6 +159,8 @@ fun MainScreen(
                         val userPermissions = uiState.userProfile?.permissions ?: emptyList()
 
                         val features = listOf(
+                            FeatureItem(1,  "Raise Ticket",        Icons.Outlined.NoteAdd,             Color(0xFF00897B)),
+                            FeatureItem(2,  "Manage Tickets",      Icons.Outlined.Assignment,         Color(0xFF5C6BC0)),
                             FeatureItem(3,  "Admin Panel",         Icons.Outlined.AdminPanelSettings, Color(0xFFFF6F00)),
                             FeatureItem(7,  "Chats",               Icons.Outlined.Chat,               MaterialTheme.colorScheme.tertiary),
                             FeatureItem(4,  "Server Connect",      Icons.Outlined.Code,               Color(0xFF6200EA)),
@@ -427,6 +429,8 @@ fun AppSidebar(
     val sidebarPermissions = profile?.permissions ?: emptyList()
 
     val sidebarItems = listOf(
+        FeatureItem(1,   "Raise Ticket",       Icons.Outlined.NoteAdd,             Color(0xFF00897B)),
+        FeatureItem(2,   "Manage Tickets",     Icons.Outlined.Assignment,          Color(0xFF5C6BC0)),
         FeatureItem(3,   "Admin Panel",        Icons.Outlined.AdminPanelSettings,  Color(0xFFFF6F00)),
         FeatureItem(7,   "Chats",              Icons.Outlined.Message,             Color(0xFF546E7A)),
         FeatureItem(4,   "Server Connect",     Icons.Outlined.Code,                Color(0xFF6200EA)),
