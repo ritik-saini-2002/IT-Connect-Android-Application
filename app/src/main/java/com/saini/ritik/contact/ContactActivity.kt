@@ -41,9 +41,8 @@ class ContactActivity : ComponentActivity() {
                         onPhoneClick       = { phone   -> dialPhone(phone) },
                         onLocationClick    = { address -> openMaps(address) },
                         currentVersionName = BuildConfig.VERSION_NAME,
-                        currentVersionCode = BuildConfig.VERSION_CODE,
                         updateCheckState   = updateState,
-                        onCheckForUpdate   = { vm.checkForUpdate(BuildConfig.VERSION_CODE) },
+                        onCheckForUpdate   = { vm.checkForUpdate() },
                         onInstallUpdate    = { info -> handleInstall(info) }
                     )
                 }

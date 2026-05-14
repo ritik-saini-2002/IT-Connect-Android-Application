@@ -13,7 +13,7 @@ import com.saini.ritik.core.StringUtils
 import com.saini.ritik.data.model.Permissions
 import com.saini.ritik.data.source.AppDataSource
 import com.saini.ritik.localdatabase.AppDatabase
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,7 +46,7 @@ class CreateUserActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 CreateUserScreen(
                     isCreating     = isCreating.value,
                     companyName    = adminCompany.value,

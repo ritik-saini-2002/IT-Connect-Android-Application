@@ -56,7 +56,6 @@ fun ContactScreen(
     onLocationClick   : (String) -> Unit,
     // ── Update-related parameters (all optional — safe for existing callers) ──
     currentVersionName: String           = "–",
-    currentVersionCode: Int              = 0,
     updateCheckState  : UpdateCheckState = UpdateCheckState.Idle,
     onCheckForUpdate  : () -> Unit       = {},
     onInstallUpdate   : (UpdateInfo) -> Unit = {}
@@ -135,7 +134,6 @@ fun ContactScreen(
             ) {
                 AppVersionSection(
                     currentVersionName = currentVersionName,
-                    currentVersionCode = currentVersionCode,
                     updateCheckState   = updateCheckState,
                     onCheckForUpdate   = onCheckForUpdate,
                     onInstallUpdate    = onInstallUpdate
@@ -171,7 +169,6 @@ fun ContactScreen(
 @Composable
 private fun AppVersionSection(
     currentVersionName: String,
-    currentVersionCode: Int,
     updateCheckState  : UpdateCheckState,
     onCheckForUpdate  : () -> Unit,
     onInstallUpdate   : (UpdateInfo) -> Unit
@@ -232,7 +229,7 @@ private fun AppVersionSection(
                     UpdateStateRow(
                         icon    = Icons.Outlined.Info,
                         iconTint = cs.onSurfaceVariant,
-                        text    = "Build $currentVersionCode  •  Tap to check for updates",
+                        text    = "Tap below to check for updates",
                         textColor = cs.onSurfaceVariant
                     )
                     Button(
@@ -265,7 +262,7 @@ private fun AppVersionSection(
                     UpdateStateRow(
                         icon    = Icons.Default.CheckCircle,
                         iconTint = cs.tertiary,
-                        text    = "You're on the latest version  (build $currentVersionCode)",
+                        text    = "You're on the latest version  (v$currentVersionName)",
                         textColor = cs.tertiary
                     )
                     OutlinedButton(

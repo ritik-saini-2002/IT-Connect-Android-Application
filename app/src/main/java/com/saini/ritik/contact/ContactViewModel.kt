@@ -34,26 +34,9 @@ class ContactViewModel @Inject constructor(
                 _updateState.value = UpdateCheckState.Error("Not signed in")
                 return@launch
             }
-            val info = updateChecker.checkForUpdate(
-                currentVersionCode = com.saini.ritik.BuildConfig.VERSION_CODE,
-                userToken          = session.token
-            )
-            _updateState.value = if (info == null) UpdateCheckState.UpToDate
-            else UpdateCheckState.UpdateAvailable(info)
-        }
-    }
-
-    fun checkForUpdate(currentVersionCode: Int) {
-        viewModelScope.launch {
-            _updateState.value = UpdateCheckState.Checking
-            val session = authRepository.getSession()
-            if (session == null) {
-                _updateState.value = UpdateCheckState.Error("Not signed in. Please log in and try again.")
-                return@launch
-            }
             try {
                 val info = updateChecker.checkForUpdate(
-                    currentVersionCode = currentVersionCode,
+                    currentVersionName = com.saini.ritik.BuildConfig.VERSION_NAME,
                     userToken          = session.token
                 )
                 _updateState.value = if (info == null) UpdateCheckState.UpToDate
@@ -66,7 +49,6 @@ class ContactViewModel @Inject constructor(
         }
     }
 
-    // ✅ FIX: parameter is now com.saini.ritik.appupdate.UpdateInfo, not androidx.security.state.UpdateInfo
     fun downloadAndInstall(
         info   : UpdateInfo,
         onError: (String) -> Unit

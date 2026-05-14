@@ -105,7 +105,7 @@ fun UpdateNoticeBanner(
                         color      = cs.primary
                     )
                     Text(
-                        "Tap to open Help & Support to install",
+                        "Tap to update now",
                         fontSize = 11.sp,
                         color    = cs.primary,
                     )

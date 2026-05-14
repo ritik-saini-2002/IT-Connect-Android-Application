@@ -21,7 +21,7 @@ import com.saini.ritik.core.PermissionGuard
 import com.saini.ritik.data.model.Permissions
 import com.saini.ritik.data.source.AppDataSource
 import com.saini.ritik.localdatabase.AppDatabase
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -78,7 +78,7 @@ class AdministratorPanelActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 AdministratorPanelScreen(
                     adminData         = adminData.value,
                     departmentData    = departmentData.value,

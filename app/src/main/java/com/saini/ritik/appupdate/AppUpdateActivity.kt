@@ -8,7 +8,7 @@ import com.saini.ritik.auth.AuthRepository
 import com.saini.ritik.core.PermissionGuard
 import com.saini.ritik.core.requirePermission
 import com.saini.ritik.data.model.Permissions
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -40,7 +40,7 @@ class AppUpdateActivity : FragmentActivity() {
                 PermissionGuard.isSystemAdmin(session?.role ?: "")
 
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 AppUpdateScreen(
                     viewModel = vm,
                     canActivate = canActivate,

@@ -33,6 +33,7 @@ import com.saini.ritik.appupdate.AppUpdateChecker
 import com.saini.ritik.appupdate.AppUpdateDialog
 import com.saini.ritik.appupdate.AppUpdateManager
 import com.saini.ritik.appupdate.UpdateInfo
+import com.saini.ritik.appupdate.UpdateNoticeBanner
 import com.saini.ritik.auth.AuthRepository
 import com.saini.ritik.auth.SessionStatus
 import com.saini.ritik.chat.ChatActivity
@@ -132,7 +133,7 @@ class MainActivity : FragmentActivity() {
                 var pendingUpdate    by remember { mutableStateOf<UpdateInfo?>(null) }
                 var showUpdateDialog by remember { mutableStateOf(false) }
                 var downloadProgress by remember { mutableStateOf<Float?>(null) }
-
+                var showUpdateBanner by remember { mutableStateOf(false) }
                 // updateCheckDone lives in LaunchGateState (process-scoped) so
                 // returning from AppUpdateActivity or any child activity does NOT
                 // re-trigger the check and re-show the dialog.
@@ -143,15 +144,15 @@ class MainActivity : FragmentActivity() {
 
                     val s = authRepository.getSession() ?: return@LaunchedEffect
                     val update = appUpdateChecker.checkForUpdate(
-                        currentVersionCode = BuildConfig.VERSION_CODE,
+                        currentVersionName = BuildConfig.VERSION_NAME,
                         userToken          = s.token
                     )
 
                     Log.d("AppUpdateChecker",
-                        "Remote: ${update?.versionCode}  Current: ${BuildConfig.VERSION_CODE}")
-
+                        "Remote: ${update?.versionName}  Current: ${BuildConfig.VERSION_NAME}")
                     if (update != null) {
                         pendingUpdate    = update
+                        showUpdateDialog = true
                         showUpdateDialog = true
                     }
                 }
@@ -169,13 +170,25 @@ class MainActivity : FragmentActivity() {
                     )
 
                     // ── Offline banner ─────────────────────────────────────────
+                    // ── Update notice banner (one-time per session, only when no dialog) ──
                     AnimatedVisibility(
-                        visible  = bannerReady && !serverReachable,
+                        visible  = showUpdateBanner && !showUpdateDialog && gateUnlocked,
                         enter    = slideInVertically { -it } + fadeIn(),
                         exit     = slideOutVertically { -it } + fadeOut(),
                         modifier = Modifier.align(Alignment.TopCenter)
                     ) {
-                        OfflineBanner(pendingCount = pendingCount)
+                        pendingUpdate?.let { update ->
+                            UpdateNoticeBanner(
+                                versionName   = update.versionName,
+                                onTapToUpdate = {
+                                    showUpdateBanner = false
+                                    showUpdateDialog = true
+                                },
+                                onDismiss = {
+                                    showUpdateBanner = false   // gone for this session
+                                }
+                            )
+                        }
                     }
 
                     // ── Biometric lock overlay ─────────────────────────────────

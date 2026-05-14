@@ -16,7 +16,7 @@ import com.saini.ritik.data.model.Permissions
 import com.saini.ritik.data.model.UserProfile
 import com.saini.ritik.data.source.AppDataSource
 import com.saini.ritik.drawer.AppDrawerWrapper
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +56,7 @@ class ManageUserActivity : ComponentActivity() {
             return
 
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 val session = remember { authRepository.getSession() }
                 var profile by remember { mutableStateOf<UserProfile?>(null) }
                 LaunchedEffect(session?.userId) {

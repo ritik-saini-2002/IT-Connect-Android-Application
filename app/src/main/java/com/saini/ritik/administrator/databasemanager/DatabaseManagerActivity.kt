@@ -8,7 +8,7 @@ import androidx.activity.viewModels
 import com.saini.ritik.auth.AuthRepository
 import com.saini.ritik.core.PermissionGuard
 import com.saini.ritik.core.requirePermission
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -33,7 +33,7 @@ class DatabaseManagerActivity : ComponentActivity() {
             return
 
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 DatabaseManagerScreen(
                     vm          = vm,
                     onShowToast = { msg ->

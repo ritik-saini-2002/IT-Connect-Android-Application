@@ -21,7 +21,7 @@ import com.saini.ritik.auth.AuthRepository
 import com.saini.ritik.core.PermissionGuard
 import com.saini.ritik.core.requirePermission
 import com.saini.ritik.data.model.Permissions
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import javax.inject.Inject
@@ -55,7 +55,7 @@ class ReportsActivity : ComponentActivity() {
             return
 
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 ReportsScreen(
                     viewModel   = vm,
                     onBack      = { finish() },

@@ -14,7 +14,7 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.*
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 
@@ -84,7 +84,7 @@ class ChatActivity : ComponentActivity() {
         val directRoomId = intent.getStringExtra(EXTRA_ROOM_ID)
 
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 val currentRoom by _currentRoom
 
                 LaunchedEffect(directRoomId) {

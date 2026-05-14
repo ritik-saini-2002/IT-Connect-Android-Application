@@ -9,7 +9,7 @@ import com.saini.ritik.auth.AuthRepository
 import com.saini.ritik.core.PermissionGuard
 import com.saini.ritik.core.requirePermission
 import com.saini.ritik.data.model.Permissions
-import com.saini.ritik.theme.ITConnectTheme
+import com.saini.ritik.theme.Ritik_2Theme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -44,7 +44,7 @@ class RoleManagementActivity : ComponentActivity() {
                 Permissions.PERM_GRANT_REVOKE_ANY_PERMISSION in (session?.permissions ?: emptyList())
 
         setContent {
-            ITConnectTheme {
+            Ritik_2Theme() {
                 RoleManagementScreen(
                     viewModel             = vm,
                     canManagePermissions  = canManagePermissions,
