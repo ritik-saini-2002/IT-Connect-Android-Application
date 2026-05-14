@@ -92,6 +92,7 @@ class DepartmentViewModel @Inject constructor(
     }
 
     private suspend fun loadFromLocal() {
+        if (sanitizedCompany.isBlank()) return
         val depts = db.deptDao().getByCompany(sanitizedCompany)
         allUsers  = db.userDao().getByCompany(sanitizedCompany)
 
@@ -339,8 +340,14 @@ class DepartmentViewModel @Inject constructor(
         )
         val item = JSONObject(compRes).optJSONArray("items")?.optJSONObject(0) ?: return
         val cId  = item.optString("id")
-        val arr  = try { JSONArray(item.optString("departments", "[]")) }
-        catch (_: Exception) { JSONArray() }
+
+        // ── FIX: read departments as JSONArray directly, not via optString ────────
+        val arr = when (val raw = item.opt("departments")) {
+            is JSONArray -> raw
+            is String    -> try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+            else         -> JSONArray()
+        }
+
         val current = (0 until arr.length()).map { arr.optString(it) }.toMutableList()
         when (action) {
             "add"    -> if (!current.contains(deptName)) current.add(deptName)
@@ -350,8 +357,10 @@ class DepartmentViewModel @Inject constructor(
             "${AppConfig.BASE_URL}/api/collections/companies_metadata/records/$cId",
             token,
             JSONObject().apply {
-                put("departments", Json.encodeToString(current))
+                put("departments", JSONArray(current))  // ← send JSONArray, not encoded string
             }.toString()
         )
     }
+
+
 }

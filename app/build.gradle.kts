@@ -16,7 +16,7 @@ android {
         minSdk                    = 26
         targetSdk                 = 35
         versionCode               = 3
-        versionName               = "3.6.2"
+        versionName               = "4.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Read PocketBase config from local.properties (never commit credentials)

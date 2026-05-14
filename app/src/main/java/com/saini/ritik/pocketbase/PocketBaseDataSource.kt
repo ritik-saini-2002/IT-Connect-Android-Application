@@ -599,8 +599,6 @@ class PocketBaseDataSource @Inject constructor(
         userToken : String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // Use the user's own token if provided (self-edit).
-            // Fall back to admin token only when editing another user (admin action).
             val token = if (userToken.isNotBlank()) userToken else getAdminToken()
 
             val body = JSONObject(fields as Map<*, *>).toString()
@@ -614,15 +612,48 @@ class PocketBaseDataSource @Inject constructor(
             val code = res.code; res.close()
 
             if (code in 200..299) {
-                val cached = try { db.userDao().getById(userId) } catch (_: Exception) { null }
+                // Fetch cached FIRST before any upsert
+                val cached      = try { db.userDao().getById(userId) } catch (_: Exception) { null }
+                val sc          = cached?.sanitizedCompanyName ?: ""
+                val companyName = cached?.companyName ?: ""
+
+                // Resolve admin token once — fallback to effective token if admin unavailable
+                val adminTok = try { getAdminToken() } catch (_: Exception) { getEffectiveToken() }
+
+                // 1. Update local Room user cache
                 if (cached != null) {
                     val updated = applyFieldsToEntity(cached, fields)
                     db.userDao().upsert(updated)
                 }
-                if ("role" in fields || "permissions" in fields) {
-                    // Role/permission sync always needs admin token
-                    syncAccessControlRecord(userId, fields, getAdminToken())
+
+                // 2. Sync role/permissions/department to user_access_control
+                if ("role" in fields || "permissions" in fields || "department" in fields) {
+                    syncAccessControlRecord(userId, fields, adminTok)
                 }
+
+                // 3. Sync department to companies_metadata (remote + local)
+                if ("department" in fields) {
+                    val newDept = fields["department"]?.toString() ?: ""
+                    if (newDept.isNotBlank() && sc.isNotBlank()) {
+                        // Remote: update companies_metadata.departments[]
+                        upsertDepartmentInCompany(sc, companyName, newDept, adminTok)
+
+                        // Local: update Room CompanyEntity.departments[]
+                        try {
+                            val localCompany = db.companyDao().getByName(sc)
+                            if (localCompany != null && newDept !in localCompany.departments) {
+                                db.companyDao().upsert(
+                                    localCompany.copy(
+                                        departments = localCompany.departments + newDept
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            Log.w(tag, "local CompanyEntity dept sync failed: ${e.message}")
+                        }
+                    }
+                }
+
                 Result.success(Unit)
             } else {
                 Result.failure(Exception("updateUserProfile HTTP $code"))
@@ -632,6 +663,51 @@ class PocketBaseDataSource @Inject constructor(
             Result.failure(e)
         }
     }
+
+    /**
+     * Adds [department] to the departments[] array in the companies_metadata record
+     * for [sc]. No-ops if the department is already present.
+     */
+    private fun upsertDepartmentInCompany(
+        sc: String,
+        companyName: String,
+        department: String,
+        adminToken: String
+
+    ) {
+        try {
+            val token  = adminToken.ifBlank { getAdminToken() }
+            val getRes = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records" +
+                        "?filter=(sanitizedName='$sc')&perPage=1")
+                .addHeader("Authorization", "Bearer $token").get().build()).execute()
+            val getBody = getRes.body?.string() ?: "{}"; getRes.close()
+            val item    = JSONObject(getBody).optJSONArray("items")?.optJSONObject(0)
+            val cId     = item?.optString("id") ?: ""
+
+            if (cId.isBlank()) {
+                Log.w(tag, "upsertDepartmentInCompany: no company_metadata record found for sc=$sc")
+                return
+            }
+
+            val existingArr  = item?.optJSONArray("departments") ?: JSONArray()
+            val existingList = (0 until existingArr.length()).map { existingArr.optString(it) }
+            if (department in existingList) {
+                Log.d(tag, "upsertDepartmentInCompany: '$department' already exists, skipping")
+                return
+            }
+
+            val updatedArr = JSONArray(existingList + department)
+            val payload    = JSONObject().apply { put("departments", updatedArr) }.toString()
+            httpPatch("${AppConfig.BASE_URL}/api/collections/$COL_COMPANIES/records/$cId",
+                token, payload)
+
+            Log.d(tag, "upsertDepartmentInCompany ✅ sc=$sc added dept='$department'")
+        } catch (e: Exception) {
+            Log.w(tag, "upsertDepartmentInCompany failed: ${e.message}")
+        }
+    }
+
 
     override suspend fun uploadProfileImage(
         userId: String, bytes: ByteArray, filename: String, token: String
@@ -1059,7 +1135,10 @@ class PocketBaseDataSource @Inject constructor(
             when (k) {
                 "role"        -> e = e.copy(role        = v.toString())
                 "designation" -> e = e.copy(designation = v.toString())
-                "department"  -> e = e.copy(department  = v.toString())
+                "department"  -> e = e.copy(
+                    department          = v.toString(),
+                    sanitizedDepartment = com.saini.ritik.core.StringUtils.sanitize(v.toString())
+                )
                 "companyName" -> e = e.copy(companyName = v.toString())
                 "isActive"    -> e = e.copy(isActive    = v.toString().toBooleanStrictOrNull() ?: e.isActive)
                 "needsProfileCompletion" -> e = e.copy(needsProfileCompletion =
