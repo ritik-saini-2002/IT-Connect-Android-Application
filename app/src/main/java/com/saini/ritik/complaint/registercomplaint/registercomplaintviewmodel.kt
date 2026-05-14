@@ -106,29 +106,53 @@ class RegisterComplaintViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val session = authRepository.getSession() ?: return@launch
-                val token   = try { adminTokenProvider.getAdminTokenSync() } catch (_: Exception) { session.token }
-                val sc      = session.documentPath.split("/").getOrNull(1) ?: return@launch
 
-                val res = http.newCall(
-                    Request.Builder()
-                        .url("${AppConfig.BASE_URL}/api/collections/companies_metadata/records?filter=(sanitizedName='$sc')&perPage=1")
+                // ── Derive sanitized company name ────────────────────────────────
+                // documentPath is typically "companies/<sanitizedName>/users/<userId>"
+                // We want index 1. Log it so we can verify.
+                val parts = session.documentPath.split("/")
+                val sc = parts.getOrNull(1).orEmpty()
+                Log.d(TAG, "loadDepartments: documentPath=${session.documentPath}, sc='$sc'")
+
+                if (sc.isBlank()) {
+                    Log.w(TAG, "loadDepartments: could not derive company name — aborting")
+                    return@launch
+                }
+
+                val token = try { adminTokenProvider.getAdminTokenSync() }
+                catch (_: Exception) { session.token }
+
+                val url = "${AppConfig.BASE_URL}/api/collections/companies_metadata/records" +
+                        "?filter=(sanitizedName='$sc')&perPage=1"
+                Log.d(TAG, "loadDepartments: GET $url")
+
+                val res  = http.newCall(
+                    Request.Builder().url(url)
                         .addHeader("Authorization", "Bearer $token")
                         .get().build()
                 ).execute()
                 val body = res.body?.string() ?: ""; res.close()
-                val items = JSONObject(body).optJSONArray("items")
+                Log.d(TAG, "loadDepartments: response = $body")
+
+                val items   = JSONObject(body).optJSONArray("items")
                 val company = items?.optJSONObject(0)
-                val depts = company?.optJSONArray("departments")
-                if (depts != null) {
-                    val list = (0 until depts.length()).map { depts.optString(it) }
+                val depts   = company?.optJSONArray("departments")
+
+                if (depts != null && depts.length() > 0) {
+                    val list = (0 until depts.length())
+                        .map { depts.optString(it) }
                         .filter { it.isNotBlank() }
+                    Log.d(TAG, "loadDepartments: loaded ${list.size} departments: $list")
                     _uiState.value = _uiState.value.copy(
                         departments = list,
-                        department  = if (_uiState.value.department.isBlank() && list.isNotEmpty()) list.first() else _uiState.value.department
+                        department  = if (_uiState.value.department.isBlank()) list.first()
+                        else _uiState.value.department
                     )
+                } else {
+                    Log.w(TAG, "loadDepartments: 'departments' field missing or empty in PocketBase record")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "loadDepartments: ${e.message}")
+                Log.e(TAG, "loadDepartments failed: ${e.message}", e)
             }
         }
     }
@@ -191,12 +215,19 @@ class RegisterComplaintViewModel @Inject constructor(
                     withContext(Dispatchers.IO) {
                         val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
                         state.attachments.forEach { att ->
-                            val data = att.bytes ?: return@forEach
+                            val data = att.bytes ?: run {
+                                Log.w(TAG, "Skipping ${att.name}: bytes are null")
+                                return@forEach
+                            }
+                            // ⚠️ "attachments" must match the exact field name in your PocketBase schema
                             builder.addFormDataPart(
-                                "attachments", att.name,
+                                "attachments",   // <-- verify this matches your PocketBase field name
+                                att.name,
                                 data.toRequestBody(att.mimeType.toMediaType())
                             )
+                            Log.d(TAG, "Queued attachment: ${att.name} (${data.size} bytes, ${att.mimeType})")
                         }
+
                         val uploadRes = http.newCall(
                             Request.Builder()
                                 .url("${AppConfig.BASE_URL}/api/collections/$COL_COMPLAINTS/records/$recordId")
@@ -204,8 +235,14 @@ class RegisterComplaintViewModel @Inject constructor(
                                 .patch(builder.build())
                                 .build()
                         ).execute()
+
+                        val uploadBody = uploadRes.body?.string() ?: ""
                         val uploadCode = uploadRes.code; uploadRes.close()
-                        if (uploadCode !in 200..299) Log.w(TAG, "Attachment upload failed: HTTP $uploadCode")
+                        Log.d(TAG, "Attachment upload HTTP $uploadCode: $uploadBody")   // ← check Logcat
+
+                        if (uploadCode !in 200..299) {
+                            Log.e(TAG, "Attachment upload failed: HTTP $uploadCode — $uploadBody")
+                        }
                     }
                 }
 
