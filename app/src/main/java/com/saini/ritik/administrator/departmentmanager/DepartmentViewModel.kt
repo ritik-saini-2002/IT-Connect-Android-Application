@@ -146,22 +146,44 @@ class DepartmentViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                val sd    = StringUtils.sanitize(deptName)
-                val deptId= "${sanitizedCompany}_$sd"
+                val sd     = StringUtils.sanitize(deptName)
+                val deptId = "${sanitizedCompany}_$sd"
 
+                // 1. Write to local Room immediately (optimistic, pendingCreate = true)
                 db.deptDao().upsert(
                     DepartmentEntity(
-                        id = deptId,
-                        name = deptName,
-                        sanitizedName = sd,
-                        companyName = companyName,
+                        id                   = deptId,
+                        name                 = deptName,
+                        sanitizedName        = sd,
+                        companyName          = companyName,
                         sanitizedCompanyName = sanitizedCompany,
-                        pendingCreate = true
+                        pendingCreate        = true
                     )
                 )
 
                 if (monitor.serverReachable.value) {
-                    applyDeptToServer(deptName, sd, action = "add")
+                    val serverSuccess = applyDeptToServer(deptName, sd, action = "add")
+                    if (serverSuccess) {
+                        // Clear the pending flag — server has it now
+                        db.deptDao().upsert(
+                            DepartmentEntity(
+                                id                   = deptId,
+                                name                 = deptName,
+                                sanitizedName        = sd,
+                                companyName          = companyName,
+                                sanitizedCompanyName = sanitizedCompany,
+                                pendingCreate        = false
+                            )
+                        )
+                    } else {
+                        // Server had no company_metadata record — enqueue for later
+                        syncManager.enqueue("UPDATE", "companies_metadata", sanitizedCompany,
+                            JSONObject().apply {
+                                put("action",   "add_dept")
+                                put("deptName", deptName)
+                            }.toString()
+                        )
+                    }
                 } else {
                     syncManager.enqueue("UPDATE", "companies_metadata", sanitizedCompany,
                         JSONObject().apply {
@@ -189,10 +211,22 @@ class DepartmentViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
             try {
-                db.deptDao().delete(dept.id)
                 if (monitor.serverReachable.value) {
-                    applyDeptToServer(dept.name, dept.sanitizedName, action = "remove")
+                    val serverSuccess = applyDeptToServer(dept.name, dept.sanitizedName, action = "remove")
+                    if (serverSuccess) {
+                        db.deptDao().delete(dept.id)   // only delete locally after server confirms
+                    } else {
+                        // Still delete locally — server record not found means it's already gone
+                        db.deptDao().delete(dept.id)
+                        syncManager.enqueue("UPDATE", "companies_metadata", sanitizedCompany,
+                            JSONObject().apply {
+                                put("action",   "remove_dept")
+                                put("deptName", dept.name)
+                            }.toString()
+                        )
+                    }
                 } else {
+                    db.deptDao().delete(dept.id)
                     syncManager.enqueue("UPDATE", "companies_metadata", sanitizedCompany,
                         JSONObject().apply {
                             put("action",   "remove_dept")
@@ -229,6 +263,7 @@ class DepartmentViewModel @Inject constructor(
                             put("documentPath",        newPath)
                         }.toString()
                     )
+
                     // Update access_control
                     val acRes = syncManager.pbGet(
                         "${AppConfig.BASE_URL}/api/collections/user_access_control/records" +
@@ -246,6 +281,24 @@ class DepartmentViewModel @Inject constructor(
                             }.toString()
                         )
                     }
+
+                    val siRes = syncManager.pbGet(
+                        "${AppConfig.BASE_URL}/api/collections/user_search_index/records" +
+                                "?filter=(userId='${user.id}')&perPage=1", token
+                    )
+                    val siId = JSONObject(siRes).optJSONArray("items")?.optJSONObject(0)?.optString("id")
+                    if (!siId.isNullOrEmpty()) {
+                        syncManager.pbPatch(
+                            "${AppConfig.BASE_URL}/api/collections/user_search_index/records/$siId",
+                            token,
+                            JSONObject().apply {
+                                put("department",          targetDept.name)
+                                put("sanitizedDepartment", targetDept.sanitizedName)
+                                put("documentPath",        newPath)
+                            }.toString()
+                        )
+                    }
+
                 } else {
                     syncManager.enqueue(
                         type       = "MOVE_USER",
@@ -332,34 +385,44 @@ class DepartmentViewModel @Inject constructor(
 
     // ── Server helpers ────────────────────────────────────────────────────────
 
-    private suspend fun applyDeptToServer(deptName: String, sd: String, action: String) {
-        val token   = syncManager.getAdminToken()
-        val compRes = syncManager.pbGet(
-            "${AppConfig.BASE_URL}/api/collections/companies_metadata/records" +
-                    "?filter=(sanitizedName='$sanitizedCompany')&perPage=1", token
-        )
-        val item = JSONObject(compRes).optJSONArray("items")?.optJSONObject(0) ?: return
-        val cId  = item.optString("id")
+    private suspend fun applyDeptToServer(deptName: String, sd: String, action: String): Boolean {
+        return try {
+            val token   = syncManager.getAdminToken()
+            val compRes = syncManager.pbGet(
+                "${AppConfig.BASE_URL}/api/collections/companies_metadata/records" +
+                        "?filter=(sanitizedName='$sanitizedCompany')&perPage=1", token
+            )
+            val item = JSONObject(compRes).optJSONArray("items")?.optJSONObject(0)
+            if (item == null) {
+                android.util.Log.w("DeptVM",
+                    "applyDeptToServer: no companies_metadata record for $sanitizedCompany")
+                return false   // ← was silently returning before; now callers know
+            }
+            val cId = item.optString("id")
 
-        // ── FIX: read departments as JSONArray directly, not via optString ────────
-        val arr = when (val raw = item.opt("departments")) {
-            is JSONArray -> raw
-            is String    -> try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
-            else         -> JSONArray()
-        }
+            val arr = when (val raw = item.opt("departments")) {
+                is JSONArray -> raw
+                is String    -> try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+                else         -> JSONArray()
+            }
 
-        val current = (0 until arr.length()).map { arr.optString(it) }.toMutableList()
-        when (action) {
-            "add"    -> if (!current.contains(deptName)) current.add(deptName)
-            "remove" -> current.remove(deptName)
+            val current = (0 until arr.length()).map { arr.optString(it) }.toMutableList()
+            when (action) {
+                "add"    -> if (!current.contains(deptName)) current.add(deptName)
+                "remove" -> current.remove(deptName)
+            }
+            syncManager.pbPatch(
+                "${AppConfig.BASE_URL}/api/collections/companies_metadata/records/$cId",
+                token,
+                JSONObject().apply {
+                    put("departments", JSONArray(current))
+                }.toString()
+            )
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("DeptVM", "applyDeptToServer failed: ${e.message}")
+            false
         }
-        syncManager.pbPatch(
-            "${AppConfig.BASE_URL}/api/collections/companies_metadata/records/$cId",
-            token,
-            JSONObject().apply {
-                put("departments", JSONArray(current))  // ← send JSONArray, not encoded string
-            }.toString()
-        )
     }
 
 

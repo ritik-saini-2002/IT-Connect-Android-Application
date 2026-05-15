@@ -626,9 +626,13 @@ class PocketBaseDataSource @Inject constructor(
                     db.userDao().upsert(updated)
                 }
 
-                // 2. Sync role/permissions/department to user_access_control
-                if ("role" in fields || "permissions" in fields || "department" in fields) {
+                // 2. Sync fields to user_access_control + user_search_index
+                val profileChanged = "profile" in fields || "role" in fields ||
+                        "permissions" in fields || "department" in fields ||
+                        "designation" in fields || "name" in fields
+                if (profileChanged) {
                     syncAccessControlRecord(userId, fields, adminTok)
+                    syncSearchIndexRecord(userId, fields, adminTok)
                 }
 
                 // 3. Sync department to companies_metadata (remote + local)
@@ -972,7 +976,21 @@ class PocketBaseDataSource @Inject constructor(
             if ("permissions" in fields) patch.put("permissions", fields["permissions"])
             if ("department"  in fields) patch.put("department",  fields["department"])
             if ("designation" in fields) patch.put("designation", fields["designation"])
+            if ("name"        in fields) patch.put("name",        fields["name"])
 
+            // Extract phoneNumber and imageUrl from nested profile JSON if present
+            val profileJson = fields["profile"]?.toString()
+            if (profileJson != null) {
+                try {
+                    val pj = JSONObject(profileJson)
+                    if (pj.has("phoneNumber") && pj.optString("phoneNumber").isNotBlank())
+                        patch.put("phoneNumber", pj.optString("phoneNumber"))
+                    if (pj.has("imageUrl") && pj.optString("imageUrl").isNotBlank())
+                        patch.put("imageUrl", pj.optString("imageUrl"))
+                } catch (_: Exception) {}
+            }
+
+            if (patch.length() == 0) return
             http.newCall(Request.Builder()
                 .url("${AppConfig.BASE_URL}/api/collections/$COL_ACCESS_CONTROL/records/$acId")
                 .addHeader("Authorization", "Bearer $token")
@@ -980,6 +998,42 @@ class PocketBaseDataSource @Inject constructor(
                 .build()).execute().close()
         } catch (e: Exception) {
             Log.w(tag, "syncAccessControlRecord: ${e.message}")
+        }
+    }
+
+    private fun syncSearchIndexRecord(userId: String, fields: Map<String, Any>, token: String) {
+        try {
+            val getRes = http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_SEARCH_INDEX/records" +
+                        "?filter=(userId='$userId')&perPage=1")
+                .addHeader("Authorization", "Bearer $token").get().build()).execute()
+            val getBody = getRes.body?.string() ?: "{}"; getRes.close()
+            val siId    = JSONObject(getBody).optJSONArray("items")?.optJSONObject(0)
+                ?.optString("id") ?: return
+
+            val patch = JSONObject()
+            if ("name"        in fields) patch.put("name",        fields["name"].toString().lowercase())
+            if ("role"        in fields) patch.put("role",        fields["role"])
+            if ("department"  in fields) patch.put("department",  fields["department"])
+            if ("designation" in fields) patch.put("designation", fields["designation"])
+
+            // Rebuild searchTerms from whatever changed
+            val termParts = mutableListOf<String>()
+            listOf("name", "role", "department", "designation").forEach { k ->
+                fields[k]?.toString()?.lowercase()?.let { if (it.isNotBlank()) termParts.add(it) }
+            }
+            if (termParts.isNotEmpty()) {
+                patch.put("searchTerms", Json.encodeToString(termParts))
+            }
+
+            if (patch.length() == 0) return
+            http.newCall(Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/collections/$COL_SEARCH_INDEX/records/$siId")
+                .addHeader("Authorization", "Bearer $token")
+                .patch(patch.toString().toRequestBody("application/json".toMediaType()))
+                .build()).execute().close()
+        } catch (e: Exception) {
+            Log.w(tag, "syncSearchIndexRecord: ${e.message}")
         }
     }
 
